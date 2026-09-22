@@ -1,9 +1,11 @@
 import { z } from 'zod';
-import { publicProcedure, router, requireRole } from '../trpc/trpc.js';
+import { authedProcedure, publicProcedure, router, requireRole } from '../trpc/trpc.js';
 import type { AuthService } from './auth.service.js';
 
 export function createAuthRouter(auth: AuthService) {
   return router({
+    me: authedProcedure.query(({ ctx }) => ctx.user),
+
     signup: publicProcedure
       .input(
         z.object({

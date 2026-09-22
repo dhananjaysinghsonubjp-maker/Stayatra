@@ -389,6 +389,8 @@ Modeled in two places on purpose (§5.2): `bookings.paid_amount` (nullable runni
 
 **Guest Cleaning vs. Checkout Cleaning:** Checkout Cleaning closes the stay and frees the room. Guest Cleaning (offered only when the stay is active and length-of-stay meets a minimum, start at 2 nights — **re-checked server-side**, not just hidden in the UI) records a mid-stay clean without closing anything. Every query pairing a stay with "its" cleaning must exclude `kind = 'guest_stay'` records, or an in-house guest reads as checked out.
 
+**Checkout is housekeeping-only — this is a deliberate product USP, not a gap to fill in later.** There is no separate front-desk "check the guest out" action anywhere in this product. Submitting a Checkout Cleaning *is* what closes the stay (`bookings.status → checked_out`) and frees the room (`rooms.status → available`) — one action, done by the housekeeping staff physically at the room, not the front desk. This is a deliberate authority model, distinct from how most competitor PMS products work: it ties checkout to physical verification of the room by the person actually there, rather than a front-desk button that can be pressed without anyone having checked the room at all. Do not add a front-desk checkout action without an explicit product decision to change this.
+
 ### 8.7 Delay, discrepancies, and theft protection
 
 - **No-guest discrepancy** — a cleaning submitted against a room with no active stay. Flagged on `cleaning_records`, resolved by an owner with a note.
