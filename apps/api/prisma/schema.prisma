@@ -1,0 +1,421 @@
+// Foundation schema for the hotel platform (MASTER_SPEC.md §5, §8).
+// Scope matches the agreed hotel #1 launch bar: Channel Manager core + shared
+// bookings/payments + PMS rooms/check-in/housekeeping/audit. Billing (§5.4),
+// affiliate/commission tables (§5.5), guest messaging (§5.2's guest_messages,
+// Phase 2), and theft-protection-specific reconciliation logic (§8.7) are
+// deliberately deferred — see memory/hotel_platform_build_plan.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── §5.5 Organizations, modules, users ──────────────────────────────────────
+
+enum ModuleType {
+  channel_manager
+  pms
+  theft_protection
+}
+
+model Organization {
+  id       String   @id @default(cuid())
+  name     String
+  planTier String?  @map("plan_tier")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  modules OrganizationModule[]
+  users   User[]
+  hotels  Hotel[]
+
+  @@map("organizations")
+}
+
+// enforces §5.5's rule: theft_protection can only be enabled if pms is also
+// enabled for the same organization — enforced at the application layer
+// (see modules service), not just here.
+model OrganizationModule {
+  organizationId String     @map("organization_id")
+  module         ModuleType
+  enabled        Boolean    @default(false)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, module])
+  @@map("organization_modules")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  email          String   @unique
+  passwordHash   String   @map("password_hash")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  moduleRoles  UserModuleRole[]
+  sessions     Session[]
+
+  @@map("users")
+}
+
+model UserModuleRole {
+  userId String     @map("user_id")
+  module ModuleType
+  role   String // 'owner' | 'manager' | 'front_desk' | 'housekeeping' — scoped to modules the org has enabled
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, module])
+  @@map("user_module_roles")
+}
+
+// ── §5.1 Core grid (Channel Manager) ────────────────────────────────────────
+
+model Hotel {
+  id                  String   @id @default(cuid())
+  organizationId      String   @map("organization_id")
+  name                String
+  city                String?
+  shortCode           String   @unique @map("short_code") // Hotel ID for PMS PIN login (§8.1)
+  gstRegistration     String?  @map("gst_registration")
+  dpdpConsentAt       DateTime? @map("dpdp_consent_at")
+  expectedRoomCount   Int?     @map("expected_room_count")
+  expectedStaffCount  Int?     @map("expected_staff_count")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roomCategories  RoomCategory[]
+  otaConnections  OtaConnection[]
+  rooms           Room[]
+  bookings        Booking[]
+  cleaningRecords CleaningRecord[]
+  auditLogs       AuditLog[]
+  loginAttempts   LoginAttempt[]
+
+  @@map("hotels")
+}
+
+model RoomCategory {
+  id      String @id @default(cuid())
+  hotelId String @map("hotel_id")
+  name    String
+
+  hotel     Hotel      @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  ratePlans RatePlan[]
+  rooms     Room[]
+  otaRoomMappings OtaRoomMapping[]
+
+  @@map("room_categories")
+}
+
+model RatePlan {
+  id               String  @id @default(cuid())
+  roomCategoryId   String  @map("room_category_id")
+  name             String
+  mealPlan         String? @map("meal_plan")
+  isDerived        Boolean @default(false) @map("is_derived")
+  baseRatePlanId   String? @map("base_rate_plan_id")
+  formula          String? // computed at read time (§5.5) — e.g. "base + 500"
+
+  roomCategory   RoomCategory     @relation(fields: [roomCategoryId], references: [id], onDelete: Cascade)
+  baseRatePlan   RatePlan?        @relation("DerivedRatePlan", fields: [baseRatePlanId], references: [id])
+  derivedPlans   RatePlan[]       @relation("DerivedRatePlan")
+  inventoryRates InventoryRate[]
+  restrictions   Restriction[]
+  bookings       Booking[]
+
+  @@map("rate_plans")
+}
+
+enum OtaCode {
+  mmt_goibibo
+  booking_com
+  agoda
+  cleartrip
+  expedia
+  airbnb
+}
+
+model OtaConnection {
+  id            String   @id @default(cuid())
+  hotelId       String   @map("hotel_id")
+  otaCode       OtaCode  @map("ota_code")
+  status        String   @default("pending") // 'pending' | 'connected' | 'error'
+  credentialRef String?  @map("credential_ref") // points at the vault, never inline (§5.1)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  hotel           Hotel            @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomMappings    OtaRoomMapping[]
+  inventoryRates  InventoryRate[]
+  restrictions    Restriction[]
+  bookings        Booking[]
+
+  @@unique([hotelId, otaCode])
+  @@map("ota_connections")
+}
+
+model OtaRoomMapping {
+  id              String @id @default(cuid())
+  otaConnectionId String @map("ota_connection_id")
+  roomCategoryId  String @map("room_category_id")
+  otaRoomName     String @map("ota_room_name")
+
+  otaConnection OtaConnection @relation(fields: [otaConnectionId], references: [id], onDelete: Cascade)
+  roomCategory  RoomCategory  @relation(fields: [roomCategoryId], references: [id], onDelete: Cascade)
+
+  @@unique([otaConnectionId, roomCategoryId])
+  @@map("ota_room_mappings")
+}
+
+enum RateSource {
+  bulk_update
+  value_override
+  ota_push
+}
+
+// the core grid: every screen reads/writes this
+model InventoryRate {
+  id               String     @id @default(cuid())
+  ratePlanId       String     @map("rate_plan_id")
+  otaConnectionId  String     @map("ota_connection_id")
+  date             DateTime   @db.Date
+  occupancyTier    Int        @map("occupancy_tier") // 1..4
+  price            Decimal    @db.Decimal(10, 2)
+  extraAdultPrice  Decimal?   @map("extra_adult_price") @db.Decimal(10, 2)
+  child1Price      Decimal?   @map("child_1_price") @db.Decimal(10, 2)
+  child2Price      Decimal?   @map("child_2_price") @db.Decimal(10, 2)
+  availability     Int
+  isDerivedValue   Boolean    @default(false) @map("is_derived_value")
+  source           RateSource
+  changedBy        String     @map("changed_by")
+  changedAt        DateTime   @default(now()) @map("changed_at")
+
+  ratePlan      RatePlan      @relation(fields: [ratePlanId], references: [id], onDelete: Cascade)
+  otaConnection OtaConnection @relation(fields: [otaConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([ratePlanId, otaConnectionId, date, occupancyTier])
+  @@index([ratePlanId, date])
+  @@map("inventory_rates")
+}
+
+// restrictions are booleans/values, never a price of zero (§5.1)
+model Restriction {
+  id                String   @id @default(cuid())
+  ratePlanId        String   @map("rate_plan_id")
+  otaConnectionId   String   @map("ota_connection_id")
+  date              DateTime @db.Date
+  channelBlocked    Boolean  @default(false) @map("channel_blocked")
+  ratePlanClosed    Boolean  @default(false) @map("rate_plan_closed")
+  closedToArrival   Boolean  @default(false) @map("closed_to_arrival")
+  closedToDeparture Boolean  @default(false) @map("closed_to_departure")
+  minLos            Int?     @map("min_los")
+  maxLos            Int?     @map("max_los")
+  bookableNights    Int?     @map("bookable_nights")
+  policyOverrideId  String?  @map("policy_override_id")
+  minLosArrival     Int?     @map("min_los_arrival")
+  maxLosArrival     Int?     @map("max_los_arrival")
+  exactLosArrival   Int?     @map("exact_los_arrival")
+  minAdvanceDays    Int?     @map("min_advance_days")
+  maxAdvanceDays    Int?     @map("max_advance_days")
+  cap               Int?     // Phase 3 — column exists from day one
+  cutoffHours       Int?     @map("cutoff_hours") // Phase 3
+  allocationCount   Int?     @map("allocation_count") // Phase 3
+
+  ratePlan      RatePlan      @relation(fields: [ratePlanId], references: [id], onDelete: Cascade)
+  otaConnection OtaConnection @relation(fields: [otaConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([ratePlanId, otaConnectionId, date])
+  @@index([ratePlanId, date])
+  @@map("restrictions")
+}
+
+// ── §5.2 Bookings & payments (shared by CM and PMS) ─────────────────────────
+
+enum BookingStatus {
+  confirmed // direct booking, not yet checked in (§8.4)
+  checked_in
+  checked_out
+  cancelled
+}
+
+enum BookingSource {
+  mmt_goibibo
+  booking_com
+  agoda
+  cleartrip
+  expedia
+  airbnb
+  direct // manual/future-dated entry, §8.4
+  walk_in // checked in on the spot, §8.3
+}
+
+model Booking {
+  id               String        @id @default(cuid())
+  hotelId          String        @map("hotel_id")
+  otaConnectionId  String?       @map("ota_connection_id")
+  otaBookingRef    String?       @map("ota_booking_ref")
+  guestName        String        @map("guest_name")
+  guestPhone       String?       @map("guest_phone")
+  roomCategoryId   String        @map("room_category_id")
+  ratePlanId       String?       @map("rate_plan_id")
+  checkIn          DateTime      @map("check_in") @db.Date
+  checkOut         DateTime      @map("check_out") @db.Date
+  nights           Int
+  status           BookingStatus @default(confirmed)
+  source           BookingSource
+  paidAmount       Decimal?      @map("paid_amount") @db.Decimal(10, 2) // null = predates payment tracking, not "unpaid"
+  paymentMethod    String?       @map("payment_method") // first method recorded, headline only
+  delayResolvedAt  DateTime?     @map("delay_resolved_at")
+  delayResolvedBy  String?       @map("delay_resolved_by")
+  delayResolvedNote String?      @map("delay_resolved_note")
+  totalAmount      Decimal       @map("total_amount") @db.Decimal(10, 2)
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  otaConnection OtaConnection? @relation(fields: [otaConnectionId], references: [id])
+  ratePlan      RatePlan?      @relation(fields: [ratePlanId], references: [id])
+  payments      Payment[]
+  room          Room?          @relation("CurrentStay")
+
+  @@index([hotelId, checkIn])
+  @@index([hotelId, status])
+  @@map("bookings")
+}
+
+enum PaymentMethod {
+  cash
+  online
+  card
+}
+
+// one row per actual payment collection — the ledger behind bookings.paid_amount's running total
+model Payment {
+  id          String        @id @default(cuid())
+  bookingId   String        @map("booking_id")
+  amount      Decimal       @db.Decimal(10, 2)
+  method      PaymentMethod
+  collectedBy String        @map("collected_by")
+  collectedAt DateTime      @default(now()) @map("collected_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// ── §5.3 PMS: physical rooms, housekeeping ──────────────────────────────────
+
+enum RoomStatus {
+  available
+  occupied
+  housekeeping
+}
+
+model Room {
+  id              String     @id @default(cuid())
+  hotelId         String     @map("hotel_id")
+  roomCategoryId  String     @map("room_category_id")
+  roomNumber      String     @map("room_number")
+  status          RoomStatus @default(available)
+  currentStayId   String?    @unique @map("current_stay_id") // null unless occupied by an active stay
+  statusChangedAt DateTime   @default(now()) @map("status_changed_at")
+  active          Boolean    @default(true) // soft-delete
+
+  hotel          Hotel            @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomCategory   RoomCategory     @relation(fields: [roomCategoryId], references: [id])
+  currentStay    Booking?         @relation("CurrentStay", fields: [currentStayId], references: [id])
+  cleaningRecords CleaningRecord[]
+
+  @@unique([hotelId, roomNumber])
+  @@map("rooms")
+}
+
+enum CleaningKind {
+  checkout
+  guest_stay
+}
+
+// storage: insert-only, no update/delete — evidence is write-once (§8.6)
+model CleaningRecord {
+  id                    String       @id @default(cuid())
+  hotelId               String       @map("hotel_id")
+  roomId                String       @map("room_id")
+  stayId                String?      @map("stay_id")
+  kind                  CleaningKind
+  primaryHousekeeperId  String       @map("primary_housekeeper_id")
+  secondHousekeeperId   String?      @map("second_housekeeper_id")
+  photos                Json         @default("[]") // jsonb array of storage paths
+  flagged               Boolean      @default(false) // true if submitted with no active stay — a discrepancy
+  resolvedAt            DateTime?    @map("resolved_at")
+  resolvedBy            String?      @map("resolved_by")
+  resolvedNote          String?      @map("resolved_note")
+  createdAt             DateTime     @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  room  Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("cleaning_records")
+}
+
+// ── §5.3 Cross-module audit log ─────────────────────────────────────────────
+
+enum AuditEventType {
+  CHECK_IN
+  PAYMENT_RECEIVED
+  CLEANING_SUBMITTED
+  CLEANING_FLAGGED
+  DISCREPANCY_RESOLVED
+  STAY_EDITED
+  ROOM_CHANGED
+  GUEST_CLEANING
+  MANUAL_BLOCK
+  UNRECORDED_OCCUPANCY_FLAGGED
+}
+
+model AuditLog {
+  id        String         @id @default(cuid())
+  hotelId   String         @map("hotel_id")
+  eventType AuditEventType @map("event_type")
+  actorId   String         @map("actor_id")
+  subjectId String?        @map("subject_id")
+  detail    Json?
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, createdAt])
+  @@map("audit_log")
+}
+
+// ── §5.3 Sessions & PIN login lockouts ───────────────────────────────────────
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id") // null for PMS PIN sessions not tied to a `users` row
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// keyed on (device_id, hotel_short_code) for PMS PIN lockouts (§5.3)
+model LoginAttempt {
+  id         String   @id @default(cuid())
+  hotelId    String   @map("hotel_id")
+  deviceId   String   @map("device_id")
+  succeeded  Boolean
+  attemptedAt DateTime @default(now()) @map("attempted_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, deviceId, attemptedAt])
+  @@map("login_attempts")
+}
