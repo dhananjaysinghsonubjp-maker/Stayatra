@@ -1,13 +1,22 @@
 import type { CreateExpressContextOptions } from '@trpc/server/adapters/express';
 import type { PrismaService } from '../prisma/prisma.service.js';
+import type { AuthService } from '../auth/auth.service.js';
 
-export function createContextFactory(prisma: PrismaService) {
-  return function createContext({ req }: CreateExpressContextOptions) {
-    // auth resolution (JWT / PIN session -> user_id -> organization_id -> entitled
-    // modules -> role per module, per §4) lands here once auth is built. Never trust
-    // a client-supplied role.
-    return { prisma, req };
+export interface ActingUser {
+  userId: string;
+  organizationId: string;
+  hotelId: string | null;
+  roles: Record<string, string>; // module -> role, e.g. { pms: 'front_desk' }
+}
+
+export function createContextFactory(prisma: PrismaService, auth: AuthService) {
+  return async function createContext({ req }: CreateExpressContextOptions) {
+    const header = req.headers.authorization;
+    const token = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : undefined;
+    const user: ActingUser | null = token ? await auth.resolveSession(token) : null;
+
+    return { prisma, user };
   };
 }
 
-export type Context = ReturnType<ReturnType<typeof createContextFactory>>;
+export type Context = Awaited<ReturnType<ReturnType<typeof createContextFactory>>>;

@@ -53,11 +53,16 @@ model User {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")
   name           String
-  email          String   @unique
-  passwordHash   String   @map("password_hash")
+  // owner/manager: email+password login (§3). Front Desk/Housekeeping: PIN login,
+  // scoped to one hotel, no email (§8.1) — exactly one auth path is populated.
+  email          String?  @unique
+  passwordHash   String?  @map("password_hash")
+  hotelId        String?  @map("hotel_id") // set only for PIN-login staff
+  pinHash        String?  @map("pin_hash") // bcrypt; unique only within a hotel, checked at write time (§8.1)
   createdAt      DateTime @default(now()) @map("created_at")
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  hotel        Hotel?            @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   moduleRoles  UserModuleRole[]
   sessions     Session[]
 
@@ -97,6 +102,7 @@ model Hotel {
   cleaningRecords CleaningRecord[]
   auditLogs       AuditLog[]
   loginAttempts   LoginAttempt[]
+  pinStaff        User[]
 
   @@map("hotels")
 }
@@ -319,7 +325,7 @@ enum RoomStatus {
 model Room {
   id              String     @id @default(cuid())
   hotelId         String     @map("hotel_id")
-  roomCategoryId  String     @map("room_category_id")
+  roomCategoryId  String?    @map("room_category_id") // null until the owner sorts it during onboarding (§8.2 step 2)
   roomNumber      String     @map("room_number")
   status          RoomStatus @default(available)
   currentStayId   String?    @unique @map("current_stay_id") // null unless occupied by an active stay
@@ -327,7 +333,7 @@ model Room {
   active          Boolean    @default(true) // soft-delete
 
   hotel          Hotel            @relation(fields: [hotelId], references: [id], onDelete: Cascade)
-  roomCategory   RoomCategory     @relation(fields: [roomCategoryId], references: [id])
+  roomCategory   RoomCategory?    @relation(fields: [roomCategoryId], references: [id])
   currentStay    Booking?         @relation("CurrentStay", fields: [currentStayId], references: [id])
   cleaningRecords CleaningRecord[]
 
