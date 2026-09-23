@@ -381,6 +381,7 @@ enum AuditEventType {
   GUEST_CLEANING
   MANUAL_BLOCK
   UNRECORDED_OCCUPANCY_FLAGGED
+  SYNC_FAILED // added beyond the MD spec's list — OTA push exhausted retries (§7 Phase 1 #10, §2)
 }
 
 model AuditLog {

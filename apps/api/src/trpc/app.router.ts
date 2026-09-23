@@ -11,6 +11,7 @@ import type { RatesService } from '../rates/rates.service.js';
 import type { BookingsService } from '../bookings/bookings.service.js';
 import type { CleaningService } from '../cleaning/cleaning.service.js';
 import type { OtaService } from '../ota/ota.service.js';
+import type { OtaSyncService } from '../sync/ota-sync.service.js';
 
 export function createAppRouter(services: {
   auth: AuthService;
@@ -19,6 +20,7 @@ export function createAppRouter(services: {
   bookings: BookingsService;
   cleaning: CleaningService;
   ota: OtaService;
+  sync: OtaSyncService;
 }) {
   return router({
     health: router({
@@ -29,10 +31,10 @@ export function createAppRouter(services: {
     }),
     auth: createAuthRouter(services.auth),
     hotels: createHotelsRouter(services.hotels),
-    rates: createRatesRouter(services.rates),
+    rates: createRatesRouter(services.rates, services.sync),
     bookings: createBookingsRouter(services.bookings),
     cleaning: createCleaningRouter(services.cleaning),
-    ota: createOtaRouter(services.ota),
+    ota: createOtaRouter(services.ota, services.sync),
   });
 }
 

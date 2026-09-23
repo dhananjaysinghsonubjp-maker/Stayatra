@@ -119,6 +119,7 @@ export function RateGrid({ hotelId }: { hotelId: string }) {
             </option>
           ))}
         </select>
+        {otaConnectionId && <FullSyncButton otaConnectionId={otaConnectionId} onRefreshConnections={async () => setConnections(await query<OtaConnection[]>('ota.listConnections', { hotelId }, token ?? undefined))} />}
 
         <label>
           From
@@ -310,5 +311,30 @@ function ValueOverrideForm({
       {done && <p className="hint">Override applied.</p>}
       <button type="submit">Set value override</button>
     </form>
+  );
+}
+
+function FullSyncButton({ otaConnectionId, onRefreshConnections }: { otaConnectionId: string; onRefreshConnections: () => void }) {
+  const { token } = useAuth();
+  const [busy, setBusy] = useState(false);
+
+  async function run() {
+    setBusy(true);
+    try {
+      await mutate('ota.fullSync', { otaConnectionId }, token ?? undefined);
+      // the job runs async — poll a few times so the status badge catches up
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        onRefreshConnections();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button type="button" onClick={run} disabled={busy}>
+      {busy ? 'Syncing…' : 'Full Sync'}
+    </button>
   );
 }

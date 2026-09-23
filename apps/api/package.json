@@ -31,6 +31,7 @@
     "bcryptjs": "^3.0.3",
     "jsonwebtoken": "^9.0.3",
     "nanoid": "^3.3.19",
+    "pg-boss": "^12.33.6",
     "prisma": "^6.19.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

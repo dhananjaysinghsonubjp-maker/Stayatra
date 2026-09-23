@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { authedProcedure, router, requireRole } from '../trpc/trpc.js';
 import type { RatesService } from './rates.service.js';
+import type { OtaSyncService } from '../sync/ota-sync.service.js';
 
 const ownerOrManager = requireRole('channel_manager', ['owner', 'manager']);
 
@@ -13,7 +14,7 @@ const tierSetSchema = z.object({
   availability: z.number().int().nonnegative(),
 });
 
-export function createRatesRouter(rates: RatesService) {
+export function createRatesRouter(rates: RatesService, sync: OtaSyncService) {
   return router({
     createRatePlan: ownerOrManager
       .input(
@@ -52,7 +53,16 @@ export function createRatesRouter(rates: RatesService) {
           tiers: z.array(tierSetSchema).min(1),
         }),
       )
-      .mutation(({ ctx, input }) => rates.setValueOverride({ ...input, changedBy: ctx.user.userId })),
+      .mutation(async ({ ctx, input }) => {
+        const result = await rates.setValueOverride({ ...input, changedBy: ctx.user.userId });
+        await sync.enqueueRatePush({
+          otaConnectionId: input.otaConnectionId,
+          ratePlanId: input.ratePlanId,
+          startDate: input.date,
+          endDate: input.date,
+        });
+        return result;
+      }),
 
     bulkUpdate: ownerOrManager
       .input(
@@ -73,7 +83,16 @@ export function createRatesRouter(rates: RatesService) {
           overrideValueOverrides: z.boolean().optional(),
         }),
       )
-      .mutation(({ ctx, input }) => rates.bulkUpdate({ ...input, changedBy: ctx.user.userId })),
+      .mutation(async ({ ctx, input }) => {
+        const result = await rates.bulkUpdate({ ...input, changedBy: ctx.user.userId });
+        await sync.enqueueRatePush({
+          otaConnectionId: input.otaConnectionId,
+          ratePlanId: input.ratePlanId,
+          startDate: input.startDate,
+          endDate: input.endDate,
+        });
+        return result;
+      }),
 
     upsertRestriction: ownerOrManager
       .input(

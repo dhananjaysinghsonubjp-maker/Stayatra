@@ -10,6 +10,7 @@ import { RatesModule } from './rates/rates.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
 import { CleaningModule } from './cleaning/cleaning.module.js';
 import { OtaModule } from './ota/ota.module.js';
+import { SyncModule } from './sync/sync.module.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { OtaModule } from './ota/ota.module.js';
     BookingsModule,
     CleaningModule,
     OtaModule,
+    SyncModule,
   ],
   controllers: [AppController],
   providers: [AppService],

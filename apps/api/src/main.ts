@@ -8,6 +8,7 @@ import { RatesService } from './rates/rates.service.js';
 import { BookingsService } from './bookings/bookings.service.js';
 import { CleaningService } from './cleaning/cleaning.service.js';
 import { OtaService } from './ota/ota.service.js';
+import { OtaSyncService } from './sync/ota-sync.service.js';
 import { createAppRouter } from './trpc/app.router.js';
 import { createContextFactory } from './trpc/context.js';
 
@@ -23,6 +24,7 @@ async function bootstrap() {
     bookings: app.get(BookingsService),
     cleaning: app.get(CleaningService),
     ota: app.get(OtaService),
+    sync: app.get(OtaSyncService),
   });
 
   app.use(
