@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
 import type { Booking, RoomCategory } from '../types';
 
 function todayPlus(days: number) {
@@ -13,6 +14,7 @@ export function Bookings({ hotelId }: { hotelId: string }) {
   const [categories, setCategories] = useState<RoomCategory[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [payingBooking, setPayingBooking] = useState<Booking | null>(null);
+  const [showForm, setShowForm] = useState(false);
 
   async function refresh() {
     try {
@@ -32,45 +34,88 @@ export function Bookings({ hotelId }: { hotelId: string }) {
   }, [hotelId]);
 
   return (
-    <div className="card">
-      <h3>Reservations</h3>
-      <ManualBookingForm hotelId={hotelId} categories={categories} onDone={refresh} />
-      {error && <p className="error">{error}</p>}
-      <table>
-        <thead>
-          <tr>
-            <th>Guest</th>
-            <th>Dates</th>
-            <th>Status</th>
-            <th>Source</th>
-            <th>Paid / Total</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {bookings.map((b) => {
-            const outstanding = Number(b.totalAmount) - Number(b.paidAmount ?? 0);
-            return (
-              <tr key={b.id}>
-                <td>{b.guestName}</td>
-                <td>
-                  {b.checkIn.slice(0, 10)} → {b.checkOut.slice(0, 10)}
-                </td>
-                <td>
-                  <span className={`tag tag-${b.status}`}>{b.status}</span>
-                </td>
-                <td>{b.source}</td>
-                <td>
-                  ₹{b.paidAmount ?? 0} / ₹{b.totalAmount} {outstanding > 0 ? `(₹${outstanding} due)` : '(Paid in full)'}
-                </td>
-                <td>
-                  {outstanding > 0 && <button onClick={() => setPayingBooking(b)}>Add payment</button>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div>
+      <PageHeader
+        title="Reservations"
+        subtitle={`${bookings.length} total`}
+        action={
+          <Button onClick={() => setShowForm((v) => !v)} variant={showForm ? 'secondary' : 'primary'}>
+            {showForm ? 'Cancel' : '+ New reservation'}
+          </Button>
+        }
+      />
+
+      {showForm && (
+        <div className="mb-6">
+          <ManualBookingForm
+            hotelId={hotelId}
+            categories={categories}
+            onDone={() => {
+              void refresh();
+              setShowForm(false);
+            }}
+          />
+        </div>
+      )}
+
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+
+      <Card>
+        {bookings.length === 0 ? (
+          <CardBody>
+            <EmptyState title="No reservations yet" />
+          </CardBody>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
+                  <th className="px-5 py-3">Guest</th>
+                  <th className="px-5 py-3">Dates</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Source</th>
+                  <th className="px-5 py-3">Paid / Total</th>
+                  <th className="px-5 py-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {bookings.map((b) => {
+                  const outstanding = Number(b.totalAmount) - Number(b.paidAmount ?? 0);
+                  return (
+                    <tr key={b.id} className="hover:bg-slate-50">
+                      <td className="px-5 py-3 font-medium text-slate-900">{b.guestName}</td>
+                      <td className="px-5 py-3 text-slate-500">
+                        {b.checkIn.slice(0, 10)} → {b.checkOut.slice(0, 10)}
+                      </td>
+                      <td className="px-5 py-3">
+                        <Badge tone={b.status}>{b.status}</Badge>
+                      </td>
+                      <td className="px-5 py-3 text-slate-500">{b.source}</td>
+                      <td className="px-5 py-3">
+                        <span className="text-slate-900">₹{b.paidAmount ?? 0}</span>
+                        <span className="text-slate-400"> / ₹{b.totalAmount}</span>
+                        {outstanding > 0 ? (
+                          <span className="ml-1.5 text-xs text-amber-600">₹{outstanding} due</span>
+                        ) : (
+                          <span className="ml-1.5 text-xs text-emerald-600">paid in full</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        {outstanding > 0 && (
+                          <button onClick={() => setPayingBooking(b)} className="text-xs font-medium text-brand-600 hover:underline">
+                            Add payment
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
       {payingBooking && (
         <AddPaymentModal booking={payingBooking} onClose={() => setPayingBooking(null)} onDone={refresh} />
       )}
@@ -113,44 +158,42 @@ function ManualBookingForm({
   }
 
   return (
-    <form onSubmit={submit} className="card nested">
-      <h4>Manual booking (future-dated, §8.4)</h4>
-      <div className="grid-controls">
-        <label>
-          Guest name
-          <input value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
-        </label>
-        <label>
-          Room category
-          <select value={roomCategoryId} onChange={(e) => setRoomCategoryId(e.target.value)} required>
-            <option value="">— select —</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Check-in
-          <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
-        </label>
-        <label>
-          Check-out
-          <input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
-        </label>
-        <label>
-          Nights
-          <input type="number" value={nights} onChange={(e) => setNights(Number(e.target.value))} min={1} />
-        </label>
-        <label>
-          Total amount (₹)
-          <input type="number" value={totalAmount} onChange={(e) => setTotalAmount(Number(e.target.value))} min={0} />
-        </label>
-      </div>
-      {error && <p className="error">{error}</p>}
-      <button type="submit">Create reservation</button>
-    </form>
+    <Card>
+      <CardHeader title="New reservation" subtitle="Future-dated — the guest checks in normally on arrival (§8.4)" />
+      <CardBody>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <Field label="Guest name">
+              <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
+            </Field>
+            <Field label="Room category">
+              <select className={inputClass} value={roomCategoryId} onChange={(e) => setRoomCategoryId(e.target.value)} required>
+                <option value="">— select —</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Nights">
+              <input className={inputClass} type="number" value={nights} onChange={(e) => setNights(Number(e.target.value))} min={1} />
+            </Field>
+            <Field label="Check-in">
+              <input className={inputClass} type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
+            </Field>
+            <Field label="Check-out">
+              <input className={inputClass} type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
+            </Field>
+            <Field label="Total amount (₹)">
+              <input className={inputClass} type="number" value={totalAmount} onChange={(e) => setTotalAmount(Number(e.target.value))} min={0} />
+            </Field>
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <Button type="submit">Create reservation</Button>
+        </form>
+      </CardBody>
+    </Card>
   );
 }
 
@@ -174,32 +217,30 @@ function AddPaymentModal({ booking, onClose, onDone }: { booking: Booking; onClo
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h4>Add payment — {booking.guestName}</h4>
-        <p className="hint">Outstanding: ₹{outstanding}</p>
-        <form onSubmit={submit}>
-          <label>
-            Amount (₹)
-            <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} min={1} />
-          </label>
-          <label>
-            Method
-            <select value={method} onChange={(e) => setMethod(e.target.value as 'cash' | 'online' | 'card')}>
+    <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
+      <Card className="w-full max-w-sm p-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+        <h4 className="mb-1 text-sm font-semibold text-slate-900">Add payment — {booking.guestName}</h4>
+        <p className="mb-4 text-xs text-slate-500">Outstanding: ₹{outstanding}</p>
+        <form onSubmit={submit} className="space-y-3.5">
+          <Field label="Amount (₹)">
+            <input className={inputClass} type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} min={1} />
+          </Field>
+          <Field label="Method">
+            <select className={inputClass} value={method} onChange={(e) => setMethod(e.target.value as 'cash' | 'online' | 'card')}>
               <option value="cash">Cash</option>
               <option value="online">Online</option>
               <option value="card">Card</option>
             </select>
-          </label>
-          {error && <p className="error">{error}</p>}
-          <div className="modal-actions">
-            <button type="button" onClick={onClose}>
+          </Field>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
-            </button>
-            <button type="submit">Record payment</button>
+            </Button>
+            <Button type="submit">Record payment</Button>
           </div>
         </form>
-      </div>
+      </Card>
     </div>
   );
 }

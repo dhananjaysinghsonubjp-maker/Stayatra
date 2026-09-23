@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
 import type { CleaningRecord, Room } from '../types';
 
 export function Housekeeping({ hotelId }: { hotelId: string }) {
@@ -59,66 +60,81 @@ export function Housekeeping({ hotelId }: { hotelId: string }) {
   }
 
   return (
-    <div className="card">
-      <h3>Housekeeping</h3>
-      <p className="hint">
-        Checkout Cleaning is the only way a stay gets closed and a room freed in this product — there is no separate
-        front-desk checkout action, by design.
-      </p>
+    <div>
+      <PageHeader title="Housekeeping" subtitle="Checkout Cleaning closes the stay and frees the room — there's no separate front-desk checkout, by design." />
 
-      <form onSubmit={submit} className="card nested">
-        <div className="grid-controls">
-          <label>
-            Room
-            <select value={roomId} onChange={(e) => setRoomId(e.target.value)} required>
-              <option value="">— select —</option>
-              {rooms.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.roomNumber} ({r.status}
-                  {r.currentStay ? `, ${r.currentStay.guestName}` : ''})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Kind
-            <select value={kind} onChange={(e) => setKind(e.target.value as 'checkout' | 'guest_stay')}>
-              <option value="checkout">Checkout Cleaning</option>
-              <option value="guest_stay">Guest Cleaning (mid-stay)</option>
-            </select>
-          </label>
-          <label>
-            Photos (simulated, min 3)
-            <input type="number" value={photoCount} onChange={(e) => setPhotoCount(Number(e.target.value))} min={0} />
-          </label>
-        </div>
-        {error && <p className="error">{error}</p>}
-        {result && <p className="hint">{result}</p>}
-        <button type="submit">Submit cleaning</button>
-      </form>
+      <Card className="mb-6">
+        <CardHeader title="Submit a cleaning" />
+        <CardBody>
+          <form onSubmit={submit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Field label="Room">
+                <select className={inputClass} value={roomId} onChange={(e) => setRoomId(e.target.value)} required>
+                  <option value="">— select —</option>
+                  {rooms.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.roomNumber} ({r.status}
+                      {r.currentStay ? `, ${r.currentStay.guestName}` : ''})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Kind">
+                <select className={inputClass} value={kind} onChange={(e) => setKind(e.target.value as 'checkout' | 'guest_stay')}>
+                  <option value="checkout">Checkout Cleaning</option>
+                  <option value="guest_stay">Guest Cleaning (mid-stay)</option>
+                </select>
+              </Field>
+              <Field label="Photos (simulated, min 3)">
+                <input className={inputClass} type="number" value={photoCount} onChange={(e) => setPhotoCount(Number(e.target.value))} min={0} />
+              </Field>
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            {result && <p className="text-sm text-emerald-600">{result}</p>}
+            <Button type="submit">Submit cleaning</Button>
+          </form>
+        </CardBody>
+      </Card>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Room</th>
-            <th>Kind</th>
-            <th>Flagged</th>
-            <th>Resolved</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {records.map((r) => (
-            <tr key={r.id} className={r.flagged && !r.resolvedAt ? 'flagged-row' : ''}>
-              <td>{rooms.find((rm) => rm.id === r.roomId)?.roomNumber ?? r.roomId}</td>
-              <td>{r.kind}</td>
-              <td>{r.flagged ? 'Yes — no-guest discrepancy' : 'No'}</td>
-              <td>{r.resolvedAt ? `Yes: ${r.resolvedNote ?? ''}` : '—'}</td>
-              <td>{r.flagged && !r.resolvedAt && canResolve && <button onClick={() => resolve(r.id)}>Resolve</button>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Card>
+        <CardHeader title="Cleaning history" />
+        {records.length === 0 ? (
+          <CardBody>
+            <EmptyState title="No cleanings submitted yet" />
+          </CardBody>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
+                  <th className="px-5 py-3">Room</th>
+                  <th className="px-5 py-3">Kind</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Resolved</th>
+                  <th className="px-5 py-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {records.map((r) => (
+                  <tr key={r.id} className={r.flagged && !r.resolvedAt ? 'bg-red-50/60' : 'hover:bg-slate-50'}>
+                    <td className="px-5 py-3 font-medium text-slate-900">{rooms.find((rm) => rm.id === r.roomId)?.roomNumber ?? r.roomId}</td>
+                    <td className="px-5 py-3 text-slate-500">{r.kind}</td>
+                    <td className="px-5 py-3">{r.flagged ? <Badge tone="flagged">no-guest discrepancy</Badge> : <Badge tone="available">ok</Badge>}</td>
+                    <td className="px-5 py-3 text-slate-500">{r.resolvedAt ? r.resolvedNote ?? 'resolved' : '—'}</td>
+                    <td className="px-5 py-3 text-right">
+                      {r.flagged && !r.resolvedAt && canResolve && (
+                        <button onClick={() => resolve(r.id)} className="text-xs font-medium text-brand-600 hover:underline">
+                          Resolve
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

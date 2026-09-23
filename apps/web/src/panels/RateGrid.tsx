@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
+import { Badge, Button, Card, CardBody, CardHeader, Field, PageHeader, inputClass } from '../components/ui';
 import type { InventoryRate, OtaConnection, RatePlan, RoomCategory } from '../types';
 
 const OTA_CODES = ['mmt_goibibo', 'booking_com', 'agoda', 'cleartrip', 'expedia', 'airbnb'];
@@ -23,9 +24,13 @@ export function RateGrid({ hotelId }: { hotelId: string }) {
   const [endDate, setEndDate] = useState(todayPlus(6));
   const [error, setError] = useState<string | null>(null);
 
+  async function refreshConnections() {
+    setConnections(await query<OtaConnection[]>('ota.listConnections', { hotelId }, token ?? undefined));
+  }
+
   useEffect(() => {
     query<RoomCategory[]>('hotels.listRoomCategories', { hotelId }, token ?? undefined).then(setCategories);
-    query<OtaConnection[]>('ota.listConnections', { hotelId }, token ?? undefined).then(setConnections);
+    void refreshConnections();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId]);
 
@@ -58,118 +63,130 @@ export function RateGrid({ hotelId }: { hotelId: string }) {
 
   async function addConnection(otaCode: string) {
     await mutate('ota.createConnection', { hotelId, otaCode }, token ?? undefined);
-    setConnections(await query<OtaConnection[]>('ota.listConnections', { hotelId }, token ?? undefined));
+    await refreshConnections();
   }
 
   async function addRatePlan(name: string) {
-    if (!categoryId) return;
+    if (!categoryId || !name) return;
     await mutate('rates.createRatePlan', { roomCategoryId: categoryId, name }, token ?? undefined);
     setRatePlans(await query<RatePlan[]>('rates.listRatePlans', { roomCategoryId: categoryId }, token ?? undefined));
   }
 
   return (
-    <div className="card">
-      <h3>Channel Manager — Rate Grid</h3>
-      <p className="hint">Simulator shows occupancy tier 1 only; the API supports tiers 1–4 + extra adult/children.</p>
+    <div>
+      <PageHeader title="Rate Grid" subtitle="Channel Manager core — occupancy tier 1 shown; the API supports tiers 1–4 + extra adult/children." />
 
-      <div className="grid-controls">
-        <label>
-          Room category
-          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">— select —</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      <Card className="mb-6">
+        <CardBody>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Room category">
+              <select className={inputClass} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                <option value="">— select —</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
 
-        <label>
-          Rate plan
-          <select value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)} disabled={!categoryId}>
-            <option value="">— select —</option>
-            {ratePlans.map((rp) => (
-              <option key={rp.id} value={rp.id}>
-                {rp.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button disabled={!categoryId} onClick={() => addRatePlan(prompt('Rate plan name?', 'BAR') || '')}>
-          + New rate plan
-        </button>
+            <Field label="Rate plan">
+              <div className="flex gap-2">
+                <select className={`${inputClass} flex-1`} value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)} disabled={!categoryId}>
+                  <option value="">— select —</option>
+                  {ratePlans.map((rp) => (
+                    <option key={rp.id} value={rp.id}>
+                      {rp.name}
+                    </option>
+                  ))}
+                </select>
+                <Button type="button" variant="secondary" disabled={!categoryId} onClick={() => addRatePlan(prompt('Rate plan name?', 'BAR') || '')}>
+                  +
+                </Button>
+              </div>
+            </Field>
 
-        <label>
-          OTA connection
-          <select value={otaConnectionId} onChange={(e) => setOtaConnectionId(e.target.value)}>
-            <option value="">— select —</option>
-            {connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.otaCode} ({c.status})
-              </option>
-            ))}
-          </select>
-        </label>
-        <select onChange={(e) => e.target.value && addConnection(e.target.value)} value="">
-          <option value="">+ Connect a channel…</option>
-          {OTA_CODES.filter((c) => !connections.some((x) => x.otaCode === c)).map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        {otaConnectionId && <FullSyncButton otaConnectionId={otaConnectionId} onRefreshConnections={async () => setConnections(await query<OtaConnection[]>('ota.listConnections', { hotelId }, token ?? undefined))} />}
+            <Field label="OTA connection">
+              <select className={inputClass} value={otaConnectionId} onChange={(e) => setOtaConnectionId(e.target.value)}>
+                <option value="">— select —</option>
+                {connections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.otaCode} ({c.status})
+                  </option>
+                ))}
+              </select>
+            </Field>
 
-        <label>
-          From
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </label>
-        <label>
-          To
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        </label>
-      </div>
+            <Field label="Connect a channel">
+              <select className={inputClass} onChange={(e) => e.target.value && addConnection(e.target.value)} value="">
+                <option value="">+ Connect…</option>
+                {OTA_CODES.filter((c) => !connections.some((x) => x.otaCode === c)).map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </Field>
 
-      {error && <p className="error">{error}</p>}
+            <Field label="From">
+              <input className={inputClass} type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </Field>
+            <Field label="To">
+              <input className={inputClass} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </Field>
+
+            {otaConnectionId && (
+              <div className="flex items-end">
+                <FullSyncButton otaConnectionId={otaConnectionId} onRefreshConnections={refreshConnections} />
+              </div>
+            )}
+          </div>
+        </CardBody>
+      </Card>
+
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 
       {ratePlanId && otaConnectionId && (
-        <>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Price</th>
-                <th>Availability</th>
-                <th>Source</th>
-                <th>GST</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rates.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.date.slice(0, 10)}</td>
-                  <td>₹{r.price}</td>
-                  <td>{r.availability}</td>
-                  <td>
-                    <span className={`tag tag-${r.source}`}>{r.source}</span>
-                  </td>
-                  <td>{r.gst.label}</td>
-                </tr>
-              ))}
-              {rates.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="hint">
-                    No rates set for this range yet — use Bulk Update below.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="space-y-6">
+          <Card>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
+                    <th className="px-5 py-3">Date</th>
+                    <th className="px-5 py-3">Price</th>
+                    <th className="px-5 py-3">Availability</th>
+                    <th className="px-5 py-3">Source</th>
+                    <th className="px-5 py-3">GST</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rates.map((r) => (
+                    <tr key={r.id}>
+                      <td className="px-5 py-3 text-slate-700">{r.date.slice(0, 10)}</td>
+                      <td className="px-5 py-3 font-medium text-slate-900">₹{r.price}</td>
+                      <td className="px-5 py-3 text-slate-500">{r.availability}</td>
+                      <td className="px-5 py-3">
+                        <Badge tone={r.source}>{r.source}</Badge>
+                      </td>
+                      <td className="px-5 py-3 text-slate-500">{r.gst.label}</td>
+                    </tr>
+                  ))}
+                  {rates.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-6 text-center text-sm text-slate-400">
+                        No rates set for this range yet — use Bulk Update below.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
 
           <BulkUpdateForm ratePlanId={ratePlanId} otaConnectionId={otaConnectionId} onDone={refreshGrid} />
           <ValueOverrideForm ratePlanId={ratePlanId} otaConnectionId={otaConnectionId} onDone={refreshGrid} />
-        </>
+        </div>
       )}
     </div>
   );
@@ -221,38 +238,40 @@ function BulkUpdateForm({
   }
 
   return (
-    <form onSubmit={submit} className="card nested">
-      <h4>Bulk Update</h4>
-      <div className="grid-controls">
-        <label>
-          From
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </label>
-        <label>
-          To
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        </label>
-        <label>
-          Price (tier 1)
-          <input type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} min={0} />
-        </label>
-        <label>
-          Availability
-          <input type="number" value={availability} onChange={(e) => setAvailability(Number(e.target.value))} min={0} />
-        </label>
-      </div>
-      <div className="dow-row">
-        {DOW.map((label, i) => (
-          <label key={i} className="dow-check">
-            <input type="checkbox" checked={days.includes(i)} onChange={() => toggleDay(i)} />
-            {label}
-          </label>
-        ))}
-      </div>
-      {error && <p className="error">{error}</p>}
-      {result && <p className="hint">{result}</p>}
-      <button type="submit">Apply bulk update</button>
-    </form>
+    <Card>
+      <CardHeader title="Bulk Update" />
+      <CardBody>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <Field label="From">
+              <input className={inputClass} type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </Field>
+            <Field label="To">
+              <input className={inputClass} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </Field>
+            <Field label="Price (tier 1)">
+              <input className={inputClass} type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} min={0} />
+            </Field>
+            <Field label="Availability">
+              <input className={inputClass} type="number" value={availability} onChange={(e) => setAvailability(Number(e.target.value))} min={0} />
+            </Field>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {DOW.map((label, i) => (
+              <label key={i} className="flex items-center gap-1.5 text-sm text-slate-600">
+                <input type="checkbox" checked={days.includes(i)} onChange={() => toggleDay(i)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                {label}
+              </label>
+            ))}
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {result && <p className="text-sm text-emerald-600">{result}</p>}
+          <Button type="submit" variant="secondary">
+            Apply bulk update
+          </Button>
+        </form>
+      </CardBody>
+    </Card>
   );
 }
 
@@ -290,27 +309,29 @@ function ValueOverrideForm({
   }
 
   return (
-    <form onSubmit={submit} className="card nested">
-      <h4>Value Override</h4>
-      <p className="hint">A one-time rate float — bulk updates skip this cell until explicitly told to override it.</p>
-      <div className="grid-controls">
-        <label>
-          Date
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </label>
-        <label>
-          Price (tier 1)
-          <input type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} min={0} />
-        </label>
-        <label>
-          Availability
-          <input type="number" value={availability} onChange={(e) => setAvailability(Number(e.target.value))} min={0} />
-        </label>
-      </div>
-      {error && <p className="error">{error}</p>}
-      {done && <p className="hint">Override applied.</p>}
-      <button type="submit">Set value override</button>
-    </form>
+    <Card>
+      <CardHeader title="Value Override" subtitle="A one-time rate float — bulk updates skip this cell until explicitly told to override it." />
+      <CardBody>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid grid-cols-3 gap-4">
+            <Field label="Date">
+              <input className={inputClass} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </Field>
+            <Field label="Price (tier 1)">
+              <input className={inputClass} type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} min={0} />
+            </Field>
+            <Field label="Availability">
+              <input className={inputClass} type="number" value={availability} onChange={(e) => setAvailability(Number(e.target.value))} min={0} />
+            </Field>
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {done && <p className="text-sm text-emerald-600">Override applied.</p>}
+          <Button type="submit" variant="secondary">
+            Set value override
+          </Button>
+        </form>
+      </CardBody>
+    </Card>
   );
 }
 
@@ -322,7 +343,6 @@ function FullSyncButton({ otaConnectionId, onRefreshConnections }: { otaConnecti
     setBusy(true);
     try {
       await mutate('ota.fullSync', { otaConnectionId }, token ?? undefined);
-      // the job runs async — poll a few times so the status badge catches up
       for (let i = 0; i < 6; i++) {
         await new Promise((r) => setTimeout(r, 500));
         onRefreshConnections();
@@ -333,8 +353,8 @@ function FullSyncButton({ otaConnectionId, onRefreshConnections }: { otaConnecti
   }
 
   return (
-    <button type="button" onClick={run} disabled={busy}>
+    <Button type="button" variant="secondary" onClick={run} disabled={busy} className="w-full">
       {busy ? 'Syncing…' : 'Full Sync'}
-    </button>
+    </Button>
   );
 }
