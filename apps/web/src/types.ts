@@ -31,11 +31,15 @@ export interface Room {
   currentStay: Booking | null;
 }
 
+export type IdType = 'aadhaar' | 'passport' | 'driving_license' | 'voter_id' | 'other';
+
 export interface Booking {
   id: string;
   hotelId: string;
   guestName: string;
   guestPhone: string | null;
+  idType: IdType | null;
+  idNumber: string | null;
   roomCategoryId: string;
   checkIn: string;
   checkOut: string;

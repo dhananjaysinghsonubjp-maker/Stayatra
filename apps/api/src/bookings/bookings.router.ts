@@ -7,6 +7,9 @@ const frontDeskUp = requireRole('pms', ['owner', 'manager', 'front_desk']);
 const anyPmsRole = requireRole('pms', ['owner', 'manager', 'front_desk', 'housekeeping']);
 const ownerOrManager = requireRole('pms', ['owner', 'manager']);
 
+const idTypeSchema = z.enum(['aadhaar', 'passport', 'driving_license', 'voter_id', 'other']);
+const paymentAtCheckInSchema = z.object({ amount: z.number().positive(), method: z.enum(['cash', 'online', 'card']) }).optional();
+
 export function createBookingsRouter(bookings: BookingsService) {
   return router({
     createManualBooking: frontDeskUp
@@ -19,7 +22,7 @@ export function createBookingsRouter(bookings: BookingsService) {
           ratePlanId: z.string().optional(),
           checkIn: z.coerce.date(),
           checkOut: z.coerce.date(),
-          nights: z.number().int().positive(),
+          nights: z.number().int().positive().max(365),
           totalAmount: z.number().nonnegative(),
         }),
       )
@@ -32,18 +35,37 @@ export function createBookingsRouter(bookings: BookingsService) {
           roomId: z.string(),
           guestName: z.string().min(1),
           guestPhone: z.string().regex(/^\d{10}$/).optional(),
+          idType: idTypeSchema,
+          idNumber: z.string().min(1),
           ratePlanId: z.string().optional(),
           checkIn: z.coerce.date(),
           checkOut: z.coerce.date(),
-          nights: z.number().int().positive(),
+          nights: z.number().int().positive().max(365),
           totalAmount: z.number().nonnegative(),
+          payment: paymentAtCheckInSchema,
         }),
       )
-      .mutation(({ ctx, input }) => bookings.checkInWalkIn({ ...input, actorId: ctx.user.userId })),
+      .mutation(async ({ ctx, input }) => {
+        const { payment, ...rest } = input;
+        const booking = await bookings.checkInWalkIn({ ...rest, actorId: ctx.user.userId });
+        if (!payment) return { booking, payment: null };
+        const result = await bookings.addPayment({ bookingId: booking.id, ...payment, collectedBy: ctx.user.userId });
+        return { booking: result.booking, payment: result.payment };
+      }),
 
     checkInReservation: frontDeskUp
-      .input(z.object({ bookingId: z.string(), roomId: z.string() }))
-      .mutation(({ ctx, input }) => bookings.checkInReservation({ ...input, actorId: ctx.user.userId })),
+      .input(z.object({ bookingId: z.string(), roomId: z.string(), idType: idTypeSchema, idNumber: z.string().min(1), payment: paymentAtCheckInSchema }))
+      .mutation(async ({ ctx, input }) => {
+        const { payment, ...rest } = input;
+        const booking = await bookings.checkInReservation({ ...rest, actorId: ctx.user.userId });
+        if (!payment) return { booking, payment: null };
+        const result = await bookings.addPayment({ bookingId: booking.id, ...payment, collectedBy: ctx.user.userId });
+        return { booking: result.booking, payment: result.payment };
+      }),
+
+    listUpcomingReservations: frontDeskUp
+      .input(z.object({ hotelId: z.string(), roomCategoryId: z.string().optional() }))
+      .query(({ input }) => bookings.listUpcomingReservations(input)),
 
     addPayment: frontDeskUp
       .input(z.object({ bookingId: z.string(), amount: z.number().positive(), method: z.enum(['cash', 'online', 'card']) }))

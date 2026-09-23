@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { mutate, query, ApiError } from '../api';
+import { query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
-import { Badge, Button, Card, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
+import { Badge, Button, EmptyState, PageHeader } from '../components/ui';
+import { CheckInModal } from './checkin/CheckInModal';
 import type { Room } from '../types';
 
 const STATUS_STYLE: Record<Room['status'], string> = {
@@ -70,89 +71,6 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
       {checkInRoom && (
         <CheckInModal room={checkInRoom} hotelId={hotelId} onClose={() => setCheckInRoom(null)} onDone={refresh} />
       )}
-    </div>
-  );
-}
-
-function CheckInModal({
-  room,
-  hotelId,
-  onClose,
-  onDone,
-}: {
-  room: Room;
-  hotelId: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const { token } = useAuth();
-  const [guestName, setGuestName] = useState('');
-  const [guestPhone, setGuestPhone] = useState('');
-  const [nights, setNights] = useState(1);
-  const [totalAmount, setTotalAmount] = useState(2000);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      const checkIn = new Date();
-      const checkOut = new Date(Date.now() + nights * 86400000);
-      await mutate(
-        'bookings.checkInWalkIn',
-        {
-          hotelId,
-          roomId: room.id,
-          guestName,
-          guestPhone: guestPhone || undefined,
-          checkIn: checkIn.toISOString(),
-          checkOut: checkOut.toISOString(),
-          nights,
-          totalAmount,
-        },
-        token ?? undefined,
-      );
-      onDone();
-      onClose();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Check-in failed');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
-      <Card className="w-full max-w-sm p-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-        <h4 className="mb-4 text-sm font-semibold text-slate-900">Check in — {room.roomNumber}</h4>
-        <form onSubmit={submit} className="space-y-3.5">
-          <Field label="Guest name">
-            <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required autoFocus />
-          </Field>
-          <Field label="Phone (10 digits, optional)">
-            <input className={inputClass} value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} pattern="\d{10}" />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Nights">
-              <input className={inputClass} type="number" value={nights} onChange={(e) => setNights(Number(e.target.value))} min={1} />
-            </Field>
-            <Field label="Total amount (₹)">
-              <input className={inputClass} type="number" value={totalAmount} onChange={(e) => setTotalAmount(Number(e.target.value))} min={0} />
-            </Field>
-          </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy}>
-              {busy ? 'Checking in…' : 'Check in'}
-            </Button>
-          </div>
-        </form>
-      </Card>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
+import { CheckInModal } from './checkin/CheckInModal';
 import type { Booking, RoomCategory } from '../types';
 
 function todayPlus(days: number) {
@@ -14,6 +15,7 @@ export function Bookings({ hotelId }: { hotelId: string }) {
   const [categories, setCategories] = useState<RoomCategory[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [payingBooking, setPayingBooking] = useState<Booking | null>(null);
+  const [checkingInBooking, setCheckingInBooking] = useState<Booking | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   async function refresh() {
@@ -101,11 +103,18 @@ export function Bookings({ hotelId }: { hotelId: string }) {
                         )}
                       </td>
                       <td className="px-5 py-3 text-right">
-                        {outstanding > 0 && (
-                          <button onClick={() => setPayingBooking(b)} className="text-xs font-medium text-brand-600 hover:underline">
-                            Add payment
-                          </button>
-                        )}
+                        <div className="flex justify-end gap-3">
+                          {b.status === 'confirmed' && (
+                            <button onClick={() => setCheckingInBooking(b)} className="text-xs font-medium text-brand-600 hover:underline">
+                              Check in
+                            </button>
+                          )}
+                          {outstanding > 0 && (
+                            <button onClick={() => setPayingBooking(b)} className="text-xs font-medium text-brand-600 hover:underline">
+                              Add payment
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -118,6 +127,9 @@ export function Bookings({ hotelId }: { hotelId: string }) {
 
       {payingBooking && (
         <AddPaymentModal booking={payingBooking} onClose={() => setPayingBooking(null)} onDone={refresh} />
+      )}
+      {checkingInBooking && (
+        <CheckInModal hotelId={hotelId} reservation={checkingInBooking} onClose={() => setCheckingInBooking(null)} onDone={refresh} />
       )}
     </div>
   );

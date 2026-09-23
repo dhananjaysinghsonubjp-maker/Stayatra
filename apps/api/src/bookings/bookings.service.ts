@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { BookingStatus, PaymentMethod } from '@prisma/client';
+import { BookingStatus, IdType, PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { computeCleaningDeadline, isDelayed } from '../common/delay.js';
@@ -73,6 +73,8 @@ export class BookingsService {
     roomId: string;
     guestName: string;
     guestPhone?: string;
+    idType: IdType;
+    idNumber: string;
     ratePlanId?: string;
     checkIn: Date;
     checkOut: Date;
@@ -84,6 +86,7 @@ export class BookingsService {
       throw new BadRequestException('Guest phone must be exactly 10 digits or blank');
     }
     if (input.nights < 1) throw new BadRequestException('Nights must be at least 1');
+    if (!input.idNumber.trim()) throw new BadRequestException('Guest ID number is required at check-in');
 
     const since = new Date(Date.now() - CHECK_IN_IDEMPOTENCY_WINDOW_MS);
     const recentDuplicate = await this.prisma.booking.findFirst({
@@ -107,6 +110,8 @@ export class BookingsService {
           hotelId: input.hotelId,
           guestName: input.guestName,
           guestPhone: input.guestPhone,
+          idType: input.idType,
+          idNumber: input.idNumber,
           roomCategoryId: room.roomCategoryId!,
           assignedRoomId: input.roomId,
           ratePlanId: input.ratePlanId,
@@ -129,21 +134,27 @@ export class BookingsService {
     return booking;
   }
 
-  /** §8.3 — an existing confirmed reservation (direct or OTA) arrives and is assigned a physical room. */
-  async checkInReservation(input: { bookingId: string; roomId: string; actorId: string }) {
+  /**
+   * §8.3 — an existing confirmed reservation (direct or OTA) arrives and is
+   * assigned a physical room. A manual booking (§8.4) doesn't collect ID at
+   * creation time (that's a phone/advance booking), so it's captured here,
+   * at the moment the guest is physically present.
+   */
+  async checkInReservation(input: { bookingId: string; roomId: string; idType: IdType; idNumber: string; actorId: string }) {
     const [booking, room] = await Promise.all([
       this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } }),
       this.prisma.room.findUniqueOrThrow({ where: { id: input.roomId } }),
     ]);
     if (booking.status === BookingStatus.checked_in) return booking; // idempotent
     if (booking.status !== BookingStatus.confirmed) throw new ConflictException(`Booking is ${booking.status}, cannot check in`);
+    if (!input.idNumber.trim()) throw new BadRequestException('Guest ID number is required at check-in');
     if (room.status !== 'available') throw new ConflictException('Room is not available');
     if (room.roomCategoryId !== booking.roomCategoryId) throw new ConflictException('Room category does not match the reservation');
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const result = await tx.booking.update({
         where: { id: input.bookingId },
-        data: { status: BookingStatus.checked_in, assignedRoomId: input.roomId },
+        data: { status: BookingStatus.checked_in, assignedRoomId: input.roomId, idType: input.idType, idNumber: input.idNumber },
       });
       await tx.room.update({
         where: { id: input.roomId },
@@ -200,6 +211,14 @@ export class BookingsService {
           : {}),
       },
       include: { payments: true },
+      orderBy: { checkIn: 'asc' },
+    });
+  }
+
+  /** Confirmed reservations not yet arrived — the "check in an existing booking" search list (§8.3/§8.4). */
+  async listUpcomingReservations(input: { hotelId: string; roomCategoryId?: string }) {
+    return this.prisma.booking.findMany({
+      where: { hotelId: input.hotelId, status: BookingStatus.confirmed, roomCategoryId: input.roomCategoryId },
       orderBy: { checkIn: 'asc' },
     });
   }

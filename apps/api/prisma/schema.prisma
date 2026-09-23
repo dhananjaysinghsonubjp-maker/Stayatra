@@ -250,6 +250,15 @@ enum BookingStatus {
   cancelled
 }
 
+// added beyond the MD spec's schema sketch — guest ID capture at check-in (§8.3)
+enum IdType {
+  aadhaar
+  passport
+  driving_license
+  voter_id
+  other
+}
+
 enum BookingSource {
   mmt_goibibo
   booking_com
@@ -268,6 +277,12 @@ model Booking {
   otaBookingRef    String?       @map("ota_booking_ref")
   guestName        String        @map("guest_name")
   guestPhone       String?       @map("guest_phone")
+  // captured at check-in (§8.3) — common regulatory requirement at Indian
+  // hotels. Stored in plaintext for now, same as guest name/phone; no
+  // field-level encryption yet despite being sensitive under DPDP (§11) —
+  // flagged as a real gap, not an oversight, if this needs hardening later.
+  idType           IdType?       @map("id_type")
+  idNumber         String?       @map("id_number")
   roomCategoryId   String        @map("room_category_id")
   ratePlanId       String?       @map("rate_plan_id")
   // set at check-in (§8.3); unlike rooms.current_stay_id (cleared on checkout), this
