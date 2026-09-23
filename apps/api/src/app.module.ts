@@ -11,6 +11,7 @@ import { BookingsModule } from './bookings/bookings.module.js';
 import { CleaningModule } from './cleaning/cleaning.module.js';
 import { OtaModule } from './ota/ota.module.js';
 import { SyncModule } from './sync/sync.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SyncModule } from './sync/sync.module.js';
     CleaningModule,
     OtaModule,
     SyncModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

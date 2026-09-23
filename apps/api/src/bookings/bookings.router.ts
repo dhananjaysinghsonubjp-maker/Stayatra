@@ -5,6 +5,7 @@ import { isHousekeeping, redactForHousekeeping } from './redact.js';
 
 const frontDeskUp = requireRole('pms', ['owner', 'manager', 'front_desk']);
 const anyPmsRole = requireRole('pms', ['owner', 'manager', 'front_desk', 'housekeeping']);
+const ownerOrManager = requireRole('pms', ['owner', 'manager']);
 
 export function createBookingsRouter(bookings: BookingsService) {
   return router({
@@ -65,5 +66,11 @@ export function createBookingsRouter(bookings: BookingsService) {
       if (!isHousekeeping(ctx.user.roles.pms)) return rows;
       return rows.map((r) => ({ ...r, currentStay: r.currentStay ? redactForHousekeeping(r.currentStay) : null }));
     }),
+
+    listInHouse: frontDeskUp.input(z.object({ hotelId: z.string() })).query(({ input }) => bookings.listInHouse(input.hotelId)),
+
+    resolveDelay: ownerOrManager
+      .input(z.object({ bookingId: z.string(), note: z.string().min(1) }))
+      .mutation(({ ctx, input }) => bookings.resolveDelay({ ...input, resolvedBy: ctx.user.userId })),
   });
 }

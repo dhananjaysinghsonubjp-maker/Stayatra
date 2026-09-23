@@ -44,5 +44,7 @@ export function createHotelsRouter(hotels: HotelsService) {
       .mutation(({ input }) => hotels.renameRoom(input)),
 
     listRooms: authedProcedure.input(z.object({ hotelId: z.string() })).query(({ input }) => hotels.listRooms(input.hotelId)),
+
+    listStaff: ownerOrManager.input(z.object({ hotelId: z.string() })).query(({ input }) => hotels.listStaff(input.hotelId)),
   });
 }

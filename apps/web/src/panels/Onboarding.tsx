@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Button, Card, CardBody, CardHeader, Field, PageHeader, inputClass } from '../components/ui';
-import type { Hotel, Room, RoomCategory } from '../types';
+import type { Hotel, Room, RoomCategory, StaffMember } from '../types';
 
 export function Onboarding({ hotel, onHotelCreated }: { hotel: Hotel | null; onHotelCreated: (h: Hotel) => void }) {
   const { token } = useAuth();
@@ -211,11 +211,20 @@ function RoomsSection({ hotelId, token }: { hotelId: string; token: string | nul
 }
 
 function StaffSection({ hotelId, token }: { hotelId: string; token: string | null }) {
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [staffName, setStaffName] = useState('');
   const [role, setRole] = useState<'front_desk' | 'housekeeping'>('front_desk');
   const [pin, setPin] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    setStaff(await query<StaffMember[]>('hotels.listStaff', { hotelId }, token ?? undefined));
+  }
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hotelId]);
 
   async function addStaff(e: React.FormEvent) {
     e.preventDefault();
@@ -226,6 +235,7 @@ function StaffSection({ hotelId, token }: { hotelId: string; token: string | nul
       setMessage(`Created ${staffName} (${role}) with PIN ${pin}`);
       setStaffName('');
       setPin('');
+      await refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed');
     }
@@ -235,6 +245,15 @@ function StaffSection({ hotelId, token }: { hotelId: string; token: string | nul
     <Card>
       <CardHeader title="Staff PINs" subtitle="Owner creates every staff account — no self-registration (§8.2)." />
       <CardBody>
+        {staff.length > 0 && (
+          <div className="mb-4 flex flex-wrap gap-2">
+            {staff.map((s) => (
+              <span key={s.id} className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                {s.name} · {s.role?.replace('_', ' ')}
+              </span>
+            ))}
+          </div>
+        )}
         <form onSubmit={addStaff} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Name">
             <input className={inputClass} value={staffName} onChange={(e) => setStaffName(e.target.value)} required />

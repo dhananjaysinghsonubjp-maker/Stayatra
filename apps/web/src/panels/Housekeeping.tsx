@@ -2,18 +2,20 @@ import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
-import type { CleaningRecord, Room } from '../types';
+import type { CleaningRecord, HousekeeperStat, Room } from '../types';
 
 export function Housekeeping({ hotelId }: { hotelId: string }) {
   const { token, user, role } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [records, setRecords] = useState<CleaningRecord[]>([]);
+  const [stats, setStats] = useState<HousekeeperStat[]>([]);
   const [roomId, setRoomId] = useState('');
   const [kind, setKind] = useState<'checkout' | 'guest_stay'>('checkout');
   const [photoCount, setPhotoCount] = useState(3);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const canResolve = ['owner', 'manager'].includes(role('pms') ?? '');
+  const canSeeTeamStatus = ['owner', 'manager', 'front_desk'].includes(role('pms') ?? '');
 
   async function refresh() {
     const [r, c] = await Promise.all([
@@ -22,9 +24,14 @@ export function Housekeeping({ hotelId }: { hotelId: string }) {
     ]);
     setRooms(r);
     setRecords(c);
+    if (canSeeTeamStatus) {
+      setStats(await query<HousekeeperStat[]>('cleaning.housekeeperStats', { hotelId }, token ?? undefined));
+    }
   }
   useEffect(() => {
     void refresh();
+    const id = setInterval(refresh, 15000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId]);
 
@@ -95,6 +102,53 @@ export function Housekeeping({ hotelId }: { hotelId: string }) {
           </form>
         </CardBody>
       </Card>
+
+      {canSeeTeamStatus && (
+        <Card className="mb-6">
+          <CardHeader title="Housekeeping team" subtitle="Who's cleaning, and how much they've done today." />
+          {stats.length === 0 ? (
+            <CardBody>
+              <EmptyState title="No housekeeping staff yet" hint="Add them from Staff & Setup" />
+            </CardBody>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
+                    <th className="px-5 py-3">Housekeeper</th>
+                    <th className="px-5 py-3">Today</th>
+                    <th className="px-5 py-3">All-time</th>
+                    <th className="px-5 py-3">Last cleaning</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {stats.map((s) => (
+                    <tr key={s.id} className="hover:bg-slate-50">
+                      <td className="px-5 py-3 font-medium text-slate-900">{s.name}</td>
+                      <td className="px-5 py-3 text-slate-700">{s.cleaningsToday}</td>
+                      <td className="px-5 py-3 text-slate-500">{s.cleaningsTotal}</td>
+                      <td className="px-5 py-3 text-slate-500">
+                        {s.lastCleaningAt ? (
+                          <>
+                            Room {s.lastRoomNumber} · {new Date(s.lastCleaningAt).toLocaleString()}
+                            {s.lastFlagged && (
+                              <span className="ml-1.5">
+                                <Badge tone="flagged">flagged</Badge>
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
 
       <Card>
         <CardHeader title="Cleaning history" />

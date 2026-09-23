@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { BookingStatus, PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
+import { computeCleaningDeadline, isDelayed } from '../common/delay.js';
 
 const CHECK_IN_IDEMPOTENCY_WINDOW_MS = 1000 * 60 * 5;
 
@@ -107,6 +108,7 @@ export class BookingsService {
           guestName: input.guestName,
           guestPhone: input.guestPhone,
           roomCategoryId: room.roomCategoryId!,
+          assignedRoomId: input.roomId,
           ratePlanId: input.ratePlanId,
           checkIn: input.checkIn,
           checkOut: input.checkOut,
@@ -139,7 +141,10 @@ export class BookingsService {
     if (room.roomCategoryId !== booking.roomCategoryId) throw new ConflictException('Room category does not match the reservation');
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const result = await tx.booking.update({ where: { id: input.bookingId }, data: { status: BookingStatus.checked_in } });
+      const result = await tx.booking.update({
+        where: { id: input.bookingId },
+        data: { status: BookingStatus.checked_in, assignedRoomId: input.roomId },
+      });
       await tx.room.update({
         where: { id: input.roomId },
         data: { status: 'occupied', currentStayId: result.id, statusChangedAt: new Date() },
@@ -211,6 +216,37 @@ export class BookingsService {
   async getBooking(bookingId: string) {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, include: { payments: true } });
     if (!booking) throw new NotFoundException('Booking not found');
+    return booking;
+  }
+
+  /** In-House Guests — every currently-occupied room with its live stay, including derived Delayed state (§8.7). */
+  async listInHouse(hotelId: string) {
+    const rooms = await this.prisma.room.findMany({
+      where: { hotelId, status: 'occupied', currentStayId: { not: null } },
+      include: { roomCategory: true, currentStay: { include: { payments: true } } },
+      orderBy: { roomNumber: 'asc' },
+    });
+
+    return rooms
+      .filter((r) => r.currentStay)
+      .map((r) => {
+        const stay = r.currentStay!;
+        return {
+          room: { id: r.id, roomNumber: r.roomNumber, roomCategory: r.roomCategory },
+          booking: stay,
+          delayed: isDelayed(stay.checkIn, stay.checkOut, stay.delayResolvedAt),
+          cleaningDeadline: computeCleaningDeadline(stay.checkIn, stay.checkOut),
+        };
+      });
+  }
+
+  /** Owner-only; note hidden from housekeeping at the router layer, same pattern as cleaning discrepancies (§8.7). */
+  async resolveDelay(input: { bookingId: string; resolvedBy: string; note: string }) {
+    const booking = await this.prisma.booking.update({
+      where: { id: input.bookingId },
+      data: { delayResolvedAt: new Date(), delayResolvedBy: input.resolvedBy, delayResolvedNote: input.note },
+    });
+    await this.audit.log({ hotelId: booking.hotelId, eventType: 'DELAY_RESOLVED', actorId: input.resolvedBy, subjectId: booking.id });
     return booking;
   }
 }

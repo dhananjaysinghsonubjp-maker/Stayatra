@@ -88,4 +88,14 @@ export class HotelsService {
   async listHotels(organizationId: string) {
     return this.prisma.hotel.findMany({ where: { organizationId } });
   }
+
+  /** PIN-login staff roster for a hotel (Front Desk + Housekeeping) — §8.2. */
+  async listStaff(hotelId: string) {
+    const users = await this.prisma.user.findMany({
+      where: { hotelId },
+      include: { moduleRoles: { where: { module: 'pms' } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return users.map((u) => ({ id: u.id, name: u.name, role: u.moduleRoles[0]?.role ?? null, createdAt: u.createdAt }));
+  }
 }

@@ -108,4 +108,38 @@ export class CleaningService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  /** "Housekeeping boys status" — who's cleaning, how many today/total, and their most recent room. */
+  async getHousekeeperStats(hotelId: string) {
+    const housekeepers = await this.prisma.user.findMany({
+      where: { hotelId, moduleRoles: { some: { module: 'pms', role: 'housekeeping' } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    return Promise.all(
+      housekeepers.map(async (hk) => {
+        const [cleaningsToday, cleaningsTotal, last] = await Promise.all([
+          this.prisma.cleaningRecord.count({ where: { hotelId, primaryHousekeeperId: hk.id, createdAt: { gte: todayStart } } }),
+          this.prisma.cleaningRecord.count({ where: { hotelId, primaryHousekeeperId: hk.id } }),
+          this.prisma.cleaningRecord.findFirst({
+            where: { hotelId, primaryHousekeeperId: hk.id },
+            orderBy: { createdAt: 'desc' },
+            include: { room: true },
+          }),
+        ]);
+        return {
+          id: hk.id,
+          name: hk.name,
+          cleaningsToday,
+          cleaningsTotal,
+          lastCleaningAt: last?.createdAt ?? null,
+          lastRoomNumber: last?.room.roomNumber ?? null,
+          lastFlagged: last?.flagged ?? false,
+        };
+      }),
+    );
+  }
 }

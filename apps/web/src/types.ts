@@ -44,7 +44,69 @@ export interface Booking {
   source: string;
   paidAmount: string | null;
   totalAmount: string;
+  delayResolvedAt: string | null;
+  delayResolvedNote: string | null;
   payments?: Payment[];
+}
+
+export interface InHouseRow {
+  room: { id: string; roomNumber: string; roomCategory: RoomCategory | null };
+  booking: Booking;
+  delayed: boolean;
+  cleaningDeadline: string;
+}
+
+export interface StaffMember {
+  id: string;
+  name: string;
+  role: 'owner' | 'manager' | 'front_desk' | 'housekeeping' | null;
+  createdAt: string;
+}
+
+export interface HousekeeperStat {
+  id: string;
+  name: string;
+  cleaningsToday: number;
+  cleaningsTotal: number;
+  lastCleaningAt: string | null;
+  lastRoomNumber: string | null;
+  lastFlagged: boolean;
+}
+
+export interface RoomsReportDay {
+  date: string;
+  checkIns: number;
+  cleanings: number;
+  guestCleanings: number;
+  checkouts: number;
+  discrepancies: number;
+  delaysResolved: number;
+  cash: number;
+  online: number;
+  card: number;
+}
+
+export interface RoomsReportRoomRow {
+  roomId: string;
+  roomNumber: string;
+  checkIns: number;
+  cleanings: number;
+  discrepancies: number;
+}
+
+export interface RoomsReport {
+  days: RoomsReportDay[];
+  rooms: RoomsReportRoomRow[];
+}
+
+export interface SaleReportDay {
+  date: string;
+  cash: number;
+  online: number;
+  card: number;
+  due: number;
+  totalSale: number;
+  bookings: { id: string; guestName: string; roomNumber: string | null; totalAmount: number; paidAmount: number; due: number }[];
 }
 
 export interface Payment {

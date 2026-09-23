@@ -5,6 +5,7 @@ import { createRatesRouter } from '../rates/rates.router.js';
 import { createBookingsRouter } from '../bookings/bookings.router.js';
 import { createCleaningRouter } from '../cleaning/cleaning.router.js';
 import { createOtaRouter } from '../ota/ota.router.js';
+import { createReportsRouter } from '../reports/reports.router.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { HotelsService } from '../hotels/hotels.service.js';
 import type { RatesService } from '../rates/rates.service.js';
@@ -12,6 +13,7 @@ import type { BookingsService } from '../bookings/bookings.service.js';
 import type { CleaningService } from '../cleaning/cleaning.service.js';
 import type { OtaService } from '../ota/ota.service.js';
 import type { OtaSyncService } from '../sync/ota-sync.service.js';
+import type { ReportsService } from '../reports/reports.service.js';
 
 export function createAppRouter(services: {
   auth: AuthService;
@@ -21,6 +23,7 @@ export function createAppRouter(services: {
   cleaning: CleaningService;
   ota: OtaService;
   sync: OtaSyncService;
+  reports: ReportsService;
 }) {
   return router({
     health: router({
@@ -35,6 +38,7 @@ export function createAppRouter(services: {
     bookings: createBookingsRouter(services.bookings),
     cleaning: createCleaningRouter(services.cleaning),
     ota: createOtaRouter(services.ota, services.sync),
+    reports: createReportsRouter(services.reports),
   });
 }
 

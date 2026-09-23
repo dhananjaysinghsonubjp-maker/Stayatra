@@ -5,9 +5,11 @@ import { LoginPanel } from './panels/LoginPanel';
 import { Dashboard } from './panels/Dashboard';
 import { Onboarding } from './panels/Onboarding';
 import { RoomBoard } from './panels/RoomBoard';
+import { InHouse } from './panels/InHouse';
 import { RateGrid } from './panels/RateGrid';
 import { Bookings } from './panels/Bookings';
 import { Housekeeping } from './panels/Housekeeping';
+import { Reports } from './panels/Reports';
 import { Sidebar, type Tab } from './layout/Sidebar';
 import type { Hotel } from './types';
 
@@ -52,9 +54,9 @@ function Shell() {
   const visibleTabs: Tab[] = [
     'dashboard',
     'rooms',
-    ...(!isHousekeeping ? (['bookings', 'grid'] as Tab[]) : []),
+    ...(!isHousekeeping ? (['inhouse', 'bookings', 'grid'] as Tab[]) : []),
     'housekeeping',
-    ...(canManage ? (['setup'] as Tab[]) : []),
+    ...(canManage ? (['reports', 'setup'] as Tab[]) : []),
   ];
 
   const roleLabel = pmsRole ? pmsRole.replace('_', ' ') : 'no role';
@@ -74,9 +76,11 @@ function Shell() {
         <div className="mx-auto max-w-6xl px-8 py-8">
           {tab === 'dashboard' && <Dashboard hotelId={hotel.id} onNavigate={setTab} />}
           {tab === 'rooms' && <RoomBoard hotelId={hotel.id} />}
+          {tab === 'inhouse' && !isHousekeeping && <InHouse hotelId={hotel.id} />}
           {tab === 'grid' && !isHousekeeping && <RateGrid hotelId={hotel.id} />}
           {tab === 'bookings' && !isHousekeeping && <Bookings hotelId={hotel.id} />}
           {tab === 'housekeeping' && <Housekeeping hotelId={hotel.id} />}
+          {tab === 'reports' && canManage && <Reports hotelId={hotel.id} />}
           {tab === 'setup' && canManage && <Onboarding hotel={hotel} onHotelCreated={setHotel} />}
         </div>
       </main>

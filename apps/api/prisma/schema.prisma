@@ -270,6 +270,10 @@ model Booking {
   guestPhone       String?       @map("guest_phone")
   roomCategoryId   String        @map("room_category_id")
   ratePlanId       String?       @map("rate_plan_id")
+  // set at check-in (§8.3); unlike rooms.current_stay_id (cleared on checkout), this
+  // persists so a completed stay can still be reported "per room" (§8.8) — added
+  // beyond the MD spec's schema sketch, which had no way to answer that after checkout.
+  assignedRoomId   String?       @map("assigned_room_id")
   checkIn          DateTime      @map("check_in") @db.Date
   checkOut         DateTime      @map("check_out") @db.Date
   nights           Int
@@ -288,6 +292,7 @@ model Booking {
   ratePlan      RatePlan?      @relation(fields: [ratePlanId], references: [id])
   payments      Payment[]
   room          Room?          @relation("CurrentStay")
+  assignedRoom  Room?          @relation("AssignedRoom", fields: [assignedRoomId], references: [id])
 
   @@index([hotelId, checkIn])
   @@index([hotelId, status])
@@ -336,6 +341,7 @@ model Room {
   roomCategory   RoomCategory?    @relation(fields: [roomCategoryId], references: [id])
   currentStay    Booking?         @relation("CurrentStay", fields: [currentStayId], references: [id])
   cleaningRecords CleaningRecord[]
+  assignedBookings Booking[]      @relation("AssignedRoom")
 
   @@unique([hotelId, roomNumber])
   @@map("rooms")
@@ -382,6 +388,7 @@ enum AuditEventType {
   MANUAL_BLOCK
   UNRECORDED_OCCUPANCY_FLAGGED
   SYNC_FAILED // added beyond the MD spec's list — OTA push exhausted retries (§7 Phase 1 #10, §2)
+  DELAY_RESOLVED // added beyond the MD spec's list — §8.7's "Delayed" state resolved by an owner/manager
 }
 
 model AuditLog {

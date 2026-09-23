@@ -34,5 +34,9 @@ export function createCleaningRouter(cleaning: CleaningService) {
         if (!isHousekeeping(ctx.user.roles.pms)) return rows;
         return rows.map((r) => ({ ...r, resolvedNote: null })); // note hidden from housekeeping (§8.7)
       }),
+
+    housekeeperStats: requireRole('pms', ['owner', 'manager', 'front_desk'])
+      .input(z.object({ hotelId: z.string() }))
+      .query(({ input }) => cleaning.getHousekeeperStats(input.hotelId)),
   });
 }
