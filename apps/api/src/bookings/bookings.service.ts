@@ -401,7 +401,7 @@ export class BookingsService {
   async getRoomBoard(hotelId: string) {
     return this.prisma.room.findMany({
       where: { hotelId, active: true },
-      include: { roomCategory: true, currentStay: true },
+      include: { roomCategory: true, currentStay: { include: { lineItems: true } } },
       orderBy: { roomNumber: 'asc' },
     });
   }
