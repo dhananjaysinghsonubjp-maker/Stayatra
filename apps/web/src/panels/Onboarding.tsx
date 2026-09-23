@@ -19,13 +19,17 @@ export function Onboarding({ hotel, onHotelCreated }: { hotel: Hotel | null; onH
     setError(null);
     setBusy(true);
     try {
-      const h = await mutate<Hotel>('hotels.create', {
-        name,
-        city,
-        expectedRoomCount: roomCount,
-        expectedStaffCount: staffCount,
-        dpdpConsent: true,
-      });
+      const h = await mutate<Hotel>(
+        'hotels.create',
+        {
+          name,
+          city,
+          expectedRoomCount: roomCount,
+          expectedStaffCount: staffCount,
+          dpdpConsent: true,
+        },
+        token ?? undefined,
+      );
       onHotelCreated(h);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to create hotel');
