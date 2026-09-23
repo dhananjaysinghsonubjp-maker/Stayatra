@@ -30,3 +30,13 @@ async function unwrap<T>(res: Response): Promise<T> {
   if (json.error) throw new ApiError(json.error.message ?? 'Request failed');
   return json.result.data as T;
 }
+
+// Outside tRPC (multipart) — see apps/api/src/id-extraction/id-scan.controller.ts.
+export async function uploadFile<T = unknown>(path: string, file: File, token?: string): Promise<T> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`/${path}`, { method: 'POST', headers: authHeader(token), body: form });
+  const json = await res.json();
+  if (!res.ok) throw new ApiError(json.message ?? 'Upload failed');
+  return json as T;
+}

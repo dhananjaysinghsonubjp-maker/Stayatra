@@ -103,6 +103,7 @@ model Hotel {
   auditLogs       AuditLog[]
   loginAttempts   LoginAttempt[]
   pinStaff        User[]
+  guests          Guest[]
 
   @@map("hotels")
 }
@@ -259,6 +260,45 @@ enum IdType {
   other
 }
 
+enum Gender {
+  male
+  female
+  other
+  prefer_not_to_say
+}
+
+// Reusable guest profile — added beyond the MD spec's schema sketch (which had
+// no guest CRM concept, just guest_name/guest_phone inline on bookings).
+// Searched by phone at check-in so a repeat guest's details autofill instead
+// of being retyped. Hotel-scoped, not organization-wide — revisit if a chain
+// wants guest history shared across properties.
+model Guest {
+  id          String    @id @default(cuid())
+  hotelId     String    @map("hotel_id")
+  title       String?
+  name        String
+  phone       String
+  email       String?
+  gender      Gender?
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+  address     String?
+  country     String?   @default("India")
+  state       String?
+  city        String?
+  pincode     String?
+  idType      IdType?   @map("id_type")
+  idNumber    String?   @map("id_number")
+  idPhotoPath String?   @map("id_photo_path") // local disk path (dev) — would move to S3 in production per §3
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  hotel    Hotel     @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([hotelId, phone])
+  @@map("guests")
+}
+
 enum BookingSource {
   mmt_goibibo
   booking_com
@@ -283,6 +323,10 @@ model Booking {
   // flagged as a real gap, not an oversight, if this needs hardening later.
   idType           IdType?       @map("id_type")
   idNumber         String?       @map("id_number")
+  // links to the reusable profile this snapshot was taken from (nullable —
+  // OTA-sourced bookings, and bookings made before Guest existed, have none)
+  guestId          String?       @map("guest_id")
+  purposeOfStay    String?       @map("purpose_of_stay")
   roomCategoryId   String        @map("room_category_id")
   ratePlanId       String?       @map("rate_plan_id")
   // set at check-in (§8.3); unlike rooms.current_stay_id (cleared on checkout), this
@@ -305,6 +349,7 @@ model Booking {
   hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   otaConnection OtaConnection? @relation(fields: [otaConnectionId], references: [id])
   ratePlan      RatePlan?      @relation(fields: [ratePlanId], references: [id])
+  guest         Guest?         @relation(fields: [guestId], references: [id])
   payments      Payment[]
   room          Room?          @relation("CurrentStay")
   assignedRoom  Room?          @relation("AssignedRoom", fields: [assignedRoomId], references: [id])

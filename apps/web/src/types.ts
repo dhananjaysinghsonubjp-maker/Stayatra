@@ -32,12 +32,34 @@ export interface Room {
 }
 
 export type IdType = 'aadhaar' | 'passport' | 'driving_license' | 'voter_id' | 'other';
+export type Gender = 'male' | 'female' | 'other' | 'prefer_not_to_say';
+
+export interface Guest {
+  id: string;
+  hotelId: string;
+  title: string | null;
+  name: string;
+  phone: string;
+  email: string | null;
+  gender: Gender | null;
+  dateOfBirth: string | null;
+  address: string | null;
+  country: string | null;
+  state: string | null;
+  city: string | null;
+  pincode: string | null;
+  idType: IdType | null;
+  idNumber: string | null;
+  idPhotoPath: string | null;
+}
 
 export interface Booking {
   id: string;
   hotelId: string;
   guestName: string;
   guestPhone: string | null;
+  guestId: string | null;
+  purposeOfStay: string | null;
   idType: IdType | null;
   idNumber: string | null;
   roomCategoryId: string;
@@ -124,6 +146,7 @@ export interface RatePlan {
   id: string;
   roomCategoryId: string;
   name: string;
+  mealPlan: string | null;
 }
 
 export interface OtaConnection {

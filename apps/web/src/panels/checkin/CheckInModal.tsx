@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { mutate, query, ApiError } from '../../api';
+import { useEffect, useRef, useState } from 'react';
+import { mutate, query, uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
-import { Button, Card, Field, inputClass } from '../../components/ui';
+import { Badge, Button, Card, Field, inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
-import type { Booking, IdType, Room } from '../../types';
+import type { Booking, Gender, Guest, IdType, RatePlan, Room } from '../../types';
 
 const ID_TYPES: { value: IdType; label: string }[] = [
   { value: 'aadhaar', label: 'Aadhaar' },
@@ -12,6 +12,17 @@ const ID_TYPES: { value: IdType; label: string }[] = [
   { value: 'voter_id', label: 'Voter ID' },
   { value: 'other', label: 'Other' },
 ];
+
+const TITLES = ['Mr', 'Mrs', 'Ms', 'Dr', 'Other'];
+
+const PURPOSES = ['Leisure', 'Business', 'Medical', 'Event/Wedding', 'Other'];
+
+function isAdult(dob: string): boolean {
+  const birth = new Date(dob);
+  const eighteenYearsAgo = new Date();
+  eighteenYearsAgo.setFullYear(eighteenYearsAgo.getFullYear() - 18);
+  return birth <= eighteenYearsAgo;
+}
 
 interface Props {
   hotelId: string;
@@ -27,20 +38,46 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
   const { token } = useAuth();
   const [mode, setMode] = useState<'new' | 'existing'>(reservation ? 'existing' : 'new');
 
-  // shared
+  // guest identity
+  const [guestId, setGuestId] = useState<string | undefined>(undefined);
+  const [title, setTitle] = useState('Mr');
+  const [guestName, setGuestName] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [gender, setGender] = useState<Gender | ''>('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [address, setAddress] = useState('');
+  const [country, setCountry] = useState('India');
+  const [state, setState] = useState('');
+  const [city, setCity] = useState('');
+  const [pincode, setPincode] = useState('');
+  const [purposeOfStay, setPurposeOfStay] = useState('');
   const [idType, setIdType] = useState<IdType>('aadhaar');
   const [idNumber, setIdNumber] = useState('');
+  const [idPhotoPath, setIdPhotoPath] = useState<string | undefined>(undefined);
+
+  // guest search / autofill
+  const [matches, setMatches] = useState<Guest[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  // AI check-in
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+
+  // stay / rate
+  const [ratePlans, setRatePlans] = useState<RatePlan[]>([]);
+  const [ratePlanId, setRatePlanId] = useState('');
+  const [amountPerNight, setAmountPerNight] = useState(2000);
+  const [nights, setNights] = useState(1);
+
+  // payment
   const [collectPayment, setCollectPayment] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online' | 'card'>('cash');
+
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  // new-guest mode
-  const [guestName, setGuestName] = useState('');
-  const [guestPhone, setGuestPhone] = useState('');
-  const [nights, setNights] = useState(1);
-  const [totalAmount, setTotalAmount] = useState(2000);
 
   // existing-reservation mode
   const [upcoming, setUpcoming] = useState<Booking[]>([]);
@@ -49,6 +86,9 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
   const [selectedRoomId, setSelectedRoomId] = useState(room?.id ?? '');
 
   const selectedReservation = reservation ?? upcoming.find((r) => r.id === selectedReservationId) ?? null;
+  const roomCategoryId = room?.roomCategoryId ?? selectedReservation?.roomCategoryId;
+  const totalAmount = mode === 'new' ? amountPerNight * nights : Number(selectedReservation?.totalAmount ?? 0);
+  const gst = computeGstSlab(totalAmount);
 
   useEffect(() => {
     if (mode !== 'existing' || reservation) return;
@@ -65,21 +105,121 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
   }, [reservation, hotelId]);
 
   useEffect(() => {
-    if (collectPayment && selectedReservation) {
-      const due = Number(selectedReservation.totalAmount) - Number(selectedReservation.paidAmount ?? 0);
-      setPaymentAmount(due);
-    } else if (collectPayment && mode === 'new') {
-      setPaymentAmount(totalAmount);
+    if (!roomCategoryId) {
+      setRatePlans([]);
+      return;
     }
+    query<RatePlan[]>('rates.listRatePlans', { roomCategoryId }, token ?? undefined).then(setRatePlans);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomCategoryId]);
+
+  // guest search-as-you-type once a full 10-digit phone is entered
+  useEffect(() => {
+    if (mode !== 'new' || !/^\d{10}$/.test(guestPhone)) {
+      setMatches([]);
+      return;
+    }
+    setSearching(true);
+    const id = setTimeout(() => {
+      query<Guest[]>('guests.search', { hotelId, phone: guestPhone }, token ?? undefined)
+        .then(setMatches)
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guestPhone, mode]);
+
+  useEffect(() => {
+    if (collectPayment) setPaymentAmount(mode === 'new' ? totalAmount : totalAmount - Number(selectedReservation?.paidAmount ?? 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collectPayment]);
+
+  function applyGuest(g: Guest) {
+    setGuestId(g.id);
+    setTitle(g.title ?? 'Mr');
+    setGuestName(g.name);
+    setGuestPhone(g.phone);
+    setEmail(g.email ?? '');
+    setGender(g.gender ?? '');
+    setDateOfBirth(g.dateOfBirth?.slice(0, 10) ?? '');
+    setAddress(g.address ?? '');
+    setCountry(g.country ?? 'India');
+    setState(g.state ?? '');
+    setCity(g.city ?? '');
+    setPincode(g.pincode ?? '');
+    if (g.idType) setIdType(g.idType);
+    if (g.idNumber) setIdNumber(g.idNumber);
+    setMatches([]);
+  }
+
+  async function handleAiCheckIn(file: File) {
+    setScanning(true);
+    setScanNotice(null);
+    setError(null);
+    try {
+      const result = await uploadFile<{ filePath: string; extracted: Record<string, string> & { confidence: string } }>(
+        'uploads/id-scan',
+        file,
+        token ?? undefined,
+      );
+      const { extracted, filePath } = result;
+      setIdPhotoPath(filePath);
+      if (extracted.name) setGuestName(extracted.name);
+      if (extracted.gender) setGender(extracted.gender as Gender);
+      if (extracted.dateOfBirth) setDateOfBirth(extracted.dateOfBirth);
+      if (extracted.address) setAddress(extracted.address);
+      if (extracted.country) setCountry(extracted.country);
+      if (extracted.state) setState(extracted.state);
+      if (extracted.city) setCity(extracted.city);
+      if (extracted.pincode) setPincode(extracted.pincode);
+      if (extracted.idType) setIdType(extracted.idType as IdType);
+      if (extracted.idNumber) setIdNumber(extracted.idNumber);
+      setScanNotice(
+        extracted.confidence === 'stub'
+          ? 'Scanned — this is simulated data (no ANTHROPIC_API_KEY configured yet). Fields below are placeholders, please verify.'
+          : 'Scanned — please verify the extracted fields before submitting.',
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Scan failed');
+    } finally {
+      setScanning(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (mode === 'new' && !purposeOfStay) {
+      setError('Purpose of stay is required');
+      return;
+    }
+    if (dateOfBirth && !isAdult(dateOfBirth)) {
+      setError('Guest must be at least 18 years old');
+      return;
+    }
+
     setBusy(true);
     try {
       const payment = collectPayment && paymentAmount > 0 ? { amount: paymentAmount, method: paymentMethod } : undefined;
+      const guestDetails = {
+        guestId,
+        title,
+        guestName,
+        guestPhone: guestPhone || undefined,
+        email: email || undefined,
+        gender: gender || undefined,
+        dateOfBirth: dateOfBirth || undefined,
+        address: address || undefined,
+        country: country || undefined,
+        state: state || undefined,
+        city: city || undefined,
+        pincode: pincode || undefined,
+        idType,
+        idNumber,
+        idPhotoPath,
+        purposeOfStay: purposeOfStay || undefined,
+      };
 
       if (mode === 'new') {
         if (!room) throw new Error('No room selected');
@@ -91,10 +231,8 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
           {
             hotelId,
             roomId: room.id,
-            guestName,
-            guestPhone: guestPhone || undefined,
-            idType,
-            idNumber,
+            ...guestDetails,
+            ratePlanId: ratePlanId || undefined,
             checkIn: checkIn.toISOString(),
             checkOut: checkOut.toISOString(),
             nights,
@@ -109,7 +247,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
         if (!roomId) throw new Error('Select a room');
         await mutate(
           'bookings.checkInReservation',
-          { bookingId: selectedReservation.id, roomId, idType, idNumber, payment },
+          { bookingId: selectedReservation.id, roomId, ...guestDetails, payment },
           token ?? undefined,
         );
       }
@@ -122,13 +260,15 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
     }
   }
 
-  const gst = mode === 'new' ? computeGstSlab(totalAmount) : selectedReservation ? computeGstSlab(Number(selectedReservation.totalAmount)) : null;
-  const title = room ? `Check in — ${room.roomNumber}` : selectedReservation ? `Check in — ${selectedReservation.guestName}` : 'Check in';
+  const title_ = room ? `Check in — ${room.roomNumber}` : selectedReservation ? `Check in — ${selectedReservation.guestName}` : 'Check in';
 
   return (
     <div className="fixed inset-0 z-10 flex items-center justify-center overflow-y-auto bg-slate-900/40 px-4 py-8" onClick={onClose}>
-      <Card className="w-full max-w-lg p-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-        <h4 className="mb-4 text-sm font-semibold text-slate-900">{title}</h4>
+      <Card className="w-full max-w-2xl p-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h4 className="text-sm font-semibold text-slate-900">{title_}</h4>
+          {room?.roomCategory && <Badge tone="slate">{room.roomCategory.name}</Badge>}
+        </div>
 
         {room && !reservation && (
           <div className="mb-4 flex rounded-lg bg-slate-100 p-1">
@@ -149,7 +289,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
           </div>
         )}
 
-        <form onSubmit={submit} className="space-y-3.5">
+        <form onSubmit={submit} className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
           {mode === 'existing' && !reservation && (
             <Field label="Reservation">
               <select className={inputClass} value={selectedReservationId} onChange={(e) => setSelectedReservationId(e.target.value)} required>
@@ -185,28 +325,148 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
                 {selectedReservation.checkOut.slice(0, 10)} · {selectedReservation.nights} night{selectedReservation.nights === 1 ? '' : 's'}
               </p>
               <p className="mt-1">
-                Total ₹{selectedReservation.totalAmount} {gst && `· GST slab ${gst.label}`}
+                Total ₹{selectedReservation.totalAmount} · GST slab {gst.label}
               </p>
             </div>
           )}
 
           {mode === 'new' && (
             <>
-              <Field label="Guest name">
-                <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required autoFocus />
-              </Field>
-              <Field label="Phone (10 digits, optional)">
-                <input className={inputClass} value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} pattern="\d{10}" />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Field label="Meal plan">
+                  <select className={inputClass} value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)}>
+                    <option value="">— none —</option>
+                    {ratePlans.map((rp) => (
+                      <option key={rp.id} value={rp.id}>
+                        {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Amount / night (₹)">
+                  <input className={inputClass} type="number" value={amountPerNight} onChange={(e) => setAmountPerNight(Number(e.target.value))} min={0} />
+                </Field>
                 <Field label="Nights">
                   <input className={inputClass} type="number" value={nights} onChange={(e) => setNights(Number(e.target.value))} min={1} max={365} />
                 </Field>
-                <Field label="Total amount (₹)">
-                  <input className={inputClass} type="number" value={totalAmount} onChange={(e) => setTotalAmount(Number(e.target.value))} min={0} />
+                <Field label="Total">
+                  <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>₹{totalAmount}</div>
                 </Field>
               </div>
-              {gst && <p className="-mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>}
+              <p className="-mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
+
+              <div className="flex items-center gap-3 rounded-lg border border-dashed border-slate-300 p-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => e.target.files?.[0] && handleAiCheckIn(e.target.files[0])}
+                />
+                <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={scanning}>
+                  {scanning ? 'Scanning…' : '✨ AI Check-in — scan ID'}
+                </Button>
+                {scanNotice && <p className="text-xs text-amber-600">{scanNotice}</p>}
+              </div>
+
+              <div className="relative">
+                <Field label="Mobile number">
+                  <input
+                    className={inputClass}
+                    value={guestPhone}
+                    onChange={(e) => {
+                      setGuestPhone(e.target.value);
+                      setGuestId(undefined);
+                    }}
+                    pattern="\d{10}"
+                    placeholder="10-digit number"
+                  />
+                </Field>
+                <p className="-mt-2 text-xs text-slate-400">
+                  {searching ? 'Searching…' : 'Enter 10 digits; if a saved guest appears, select them to load details.'}
+                </p>
+                {matches.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-md">
+                    {matches.map((g) => (
+                      <button
+                        key={g.id}
+                        type="button"
+                        onClick={() => applyGuest(g)}
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                      >
+                        <span className="font-medium text-slate-800">{g.name}</span>{' '}
+                        <span className="text-slate-400">{g.phone}{g.city ? ` · ${g.city}` : ''}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-4 gap-3">
+                <Field label="Title">
+                  <select className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)}>
+                    {TITLES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <div className="col-span-3">
+                  <Field label="Full name">
+                    <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required autoFocus />
+                  </Field>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="Email">
+                  <input className={inputClass} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                </Field>
+                <Field label="Gender">
+                  <select className={inputClass} value={gender} onChange={(e) => setGender(e.target.value as Gender)}>
+                    <option value="">— select —</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                    <option value="prefer_not_to_say">Prefer not to say</option>
+                  </select>
+                </Field>
+                <Field label="Date of birth">
+                  <input className={inputClass} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+                </Field>
+              </div>
+              {dateOfBirth && !isAdult(dateOfBirth) && <p className="-mt-2 text-xs text-red-600">Must be at least 18 years old</p>}
+
+              <Field label="Guest address">
+                <textarea className={`${inputClass} min-h-16`} value={address} onChange={(e) => setAddress(e.target.value)} />
+              </Field>
+
+              <div className="grid grid-cols-4 gap-3">
+                <Field label="Country">
+                  <input className={inputClass} value={country} onChange={(e) => setCountry(e.target.value)} />
+                </Field>
+                <Field label="State">
+                  <input className={inputClass} value={state} onChange={(e) => setState(e.target.value)} />
+                </Field>
+                <Field label="City">
+                  <input className={inputClass} value={city} onChange={(e) => setCity(e.target.value)} />
+                </Field>
+                <Field label="Pincode">
+                  <input className={inputClass} value={pincode} onChange={(e) => setPincode(e.target.value)} />
+                </Field>
+              </div>
+
+              <Field label="Purpose of stay *">
+                <select className={inputClass} value={purposeOfStay} onChange={(e) => setPurposeOfStay(e.target.value)} required>
+                  <option value="">— select —</option>
+                  {PURPOSES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             </>
           )}
 

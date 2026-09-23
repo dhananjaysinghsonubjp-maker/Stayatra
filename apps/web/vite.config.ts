@@ -8,6 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/trpc': 'http://localhost:3000',
+      '/uploads': 'http://localhost:3000',
     },
   },
 })

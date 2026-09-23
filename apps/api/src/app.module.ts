@@ -12,6 +12,9 @@ import { CleaningModule } from './cleaning/cleaning.module.js';
 import { OtaModule } from './ota/ota.module.js';
 import { SyncModule } from './sync/sync.module.js';
 import { ReportsModule } from './reports/reports.module.js';
+import { GuestsModule } from './guests/guests.module.js';
+import { IdExtractionModule } from './id-extraction/id-extraction.module.js';
+import { IdScanController } from './id-extraction/id-scan.controller.js';
 
 @Module({
   imports: [
@@ -26,8 +29,10 @@ import { ReportsModule } from './reports/reports.module.js';
     OtaModule,
     SyncModule,
     ReportsModule,
+    GuestsModule,
+    IdExtractionModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, IdScanController],
   providers: [AppService],
 })
 export class AppModule {}

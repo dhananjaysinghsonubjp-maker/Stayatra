@@ -8,7 +8,27 @@ const anyPmsRole = requireRole('pms', ['owner', 'manager', 'front_desk', 'housek
 const ownerOrManager = requireRole('pms', ['owner', 'manager']);
 
 const idTypeSchema = z.enum(['aadhaar', 'passport', 'driving_license', 'voter_id', 'other']);
+const genderSchema = z.enum(['male', 'female', 'other', 'prefer_not_to_say']);
 const paymentAtCheckInSchema = z.object({ amount: z.number().positive(), method: z.enum(['cash', 'online', 'card']) }).optional();
+
+const guestDetailsSchema = {
+  guestId: z.string().optional(),
+  title: z.string().optional(),
+  guestName: z.string().min(1),
+  guestPhone: z.string().regex(/^\d{10}$/).optional(),
+  email: z.string().email().optional(),
+  gender: genderSchema.optional(),
+  dateOfBirth: z.coerce.date().optional(),
+  address: z.string().optional(),
+  country: z.string().optional(),
+  state: z.string().optional(),
+  city: z.string().optional(),
+  pincode: z.string().optional(),
+  idType: idTypeSchema,
+  idNumber: z.string().min(1),
+  idPhotoPath: z.string().optional(),
+  purposeOfStay: z.string().optional(),
+};
 
 export function createBookingsRouter(bookings: BookingsService) {
   return router({
@@ -33,10 +53,7 @@ export function createBookingsRouter(bookings: BookingsService) {
         z.object({
           hotelId: z.string(),
           roomId: z.string(),
-          guestName: z.string().min(1),
-          guestPhone: z.string().regex(/^\d{10}$/).optional(),
-          idType: idTypeSchema,
-          idNumber: z.string().min(1),
+          ...guestDetailsSchema,
           ratePlanId: z.string().optional(),
           checkIn: z.coerce.date(),
           checkOut: z.coerce.date(),
@@ -54,7 +71,7 @@ export function createBookingsRouter(bookings: BookingsService) {
       }),
 
     checkInReservation: frontDeskUp
-      .input(z.object({ bookingId: z.string(), roomId: z.string(), idType: idTypeSchema, idNumber: z.string().min(1), payment: paymentAtCheckInSchema }))
+      .input(z.object({ bookingId: z.string(), roomId: z.string(), ...guestDetailsSchema, payment: paymentAtCheckInSchema }))
       .mutation(async ({ ctx, input }) => {
         const { payment, ...rest } = input;
         const booking = await bookings.checkInReservation({ ...rest, actorId: ctx.user.userId });

@@ -1,17 +1,65 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { BookingStatus, IdType, PaymentMethod } from '@prisma/client';
+import { BookingStatus, Gender, IdType, PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { computeCleaningDeadline, isDelayed } from '../common/delay.js';
+import { GuestsService } from '../guests/guests.service.js';
 
 const CHECK_IN_IDEMPOTENCY_WINDOW_MS = 1000 * 60 * 5;
+
+export interface CheckInGuestDetails {
+  guestId?: string;
+  title?: string;
+  guestName: string;
+  guestPhone?: string;
+  email?: string;
+  gender?: Gender;
+  dateOfBirth?: Date;
+  address?: string;
+  country?: string;
+  state?: string;
+  city?: string;
+  pincode?: string;
+  idType: IdType;
+  idNumber: string;
+  idPhotoPath?: string;
+}
 
 @Injectable()
 export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly guests: GuestsService,
   ) {}
+
+  /**
+   * Links (or creates/updates) a reusable Guest profile for this check-in.
+   * Only attempted when a phone number is given — phone is the de-facto
+   * lookup key (§ — reference UI's "saved guest" autofill), so without one
+   * there's nothing reliable to match a repeat guest against later.
+   */
+  private async linkGuestProfile(hotelId: string, details: CheckInGuestDetails): Promise<string | undefined> {
+    if (!details.guestPhone) return details.guestId;
+    const { id } = await this.guests.upsertForCheckIn(hotelId, {
+      guestId: details.guestId,
+      title: details.title,
+      name: details.guestName,
+      phone: details.guestPhone,
+      email: details.email,
+      gender: details.gender,
+      dateOfBirth: details.dateOfBirth,
+      address: details.address,
+      country: details.country,
+      state: details.state,
+      city: details.city,
+      pincode: details.pincode,
+      idType: details.idType,
+      idNumber: details.idNumber,
+      idPhotoPath: details.idPhotoPath,
+    });
+    return id;
+  }
 
   /**
    * §8.4 — Front Desk creating a future-dated reservation on behalf of someone
@@ -68,20 +116,19 @@ export class BookingsService {
   }
 
   /** §8.3 — guest standing at the desk right now, no prior reservation. Idempotent against double-submit. */
-  async checkInWalkIn(input: {
-    hotelId: string;
-    roomId: string;
-    guestName: string;
-    guestPhone?: string;
-    idType: IdType;
-    idNumber: string;
-    ratePlanId?: string;
-    checkIn: Date;
-    checkOut: Date;
-    nights: number;
-    totalAmount: number;
-    actorId: string;
-  }) {
+  async checkInWalkIn(
+    input: CheckInGuestDetails & {
+      hotelId: string;
+      roomId: string;
+      purposeOfStay?: string;
+      ratePlanId?: string;
+      checkIn: Date;
+      checkOut: Date;
+      nights: number;
+      totalAmount: number;
+      actorId: string;
+    },
+  ) {
     if (!/^\d{10}$/.test(input.guestPhone ?? '') && input.guestPhone) {
       throw new BadRequestException('Guest phone must be exactly 10 digits or blank');
     }
@@ -104,6 +151,8 @@ export class BookingsService {
     if (room.status !== 'available') throw new ConflictException('Room is not available');
     if (!room.roomCategoryId) throw new ConflictException('Room has no category assigned yet — sort it during onboarding first');
 
+    const guestId = await this.linkGuestProfile(input.hotelId, input);
+
     const booking = await this.prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
         data: {
@@ -112,6 +161,8 @@ export class BookingsService {
           guestPhone: input.guestPhone,
           idType: input.idType,
           idNumber: input.idNumber,
+          guestId,
+          purposeOfStay: input.purposeOfStay,
           roomCategoryId: room.roomCategoryId!,
           assignedRoomId: input.roomId,
           ratePlanId: input.ratePlanId,
@@ -136,11 +187,13 @@ export class BookingsService {
 
   /**
    * §8.3 — an existing confirmed reservation (direct or OTA) arrives and is
-   * assigned a physical room. A manual booking (§8.4) doesn't collect ID at
-   * creation time (that's a phone/advance booking), so it's captured here,
-   * at the moment the guest is physically present.
+   * assigned a physical room. A manual booking (§8.4) doesn't collect full
+   * guest details at creation time (that's a phone/advance booking), so
+   * they're captured here, at the moment the guest is physically present.
    */
-  async checkInReservation(input: { bookingId: string; roomId: string; idType: IdType; idNumber: string; actorId: string }) {
+  async checkInReservation(
+    input: CheckInGuestDetails & { bookingId: string; roomId: string; purposeOfStay?: string; actorId: string },
+  ) {
     const [booking, room] = await Promise.all([
       this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } }),
       this.prisma.room.findUniqueOrThrow({ where: { id: input.roomId } }),
@@ -151,10 +204,20 @@ export class BookingsService {
     if (room.status !== 'available') throw new ConflictException('Room is not available');
     if (room.roomCategoryId !== booking.roomCategoryId) throw new ConflictException('Room category does not match the reservation');
 
+    const guestId = await this.linkGuestProfile(booking.hotelId, input);
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const result = await tx.booking.update({
         where: { id: input.bookingId },
-        data: { status: BookingStatus.checked_in, assignedRoomId: input.roomId, idType: input.idType, idNumber: input.idNumber },
+        data: {
+          status: BookingStatus.checked_in,
+          assignedRoomId: input.roomId,
+          idType: input.idType,
+          idNumber: input.idNumber,
+          guestId,
+          purposeOfStay: input.purposeOfStay,
+          guestPhone: input.guestPhone ?? booking.guestPhone,
+        },
       });
       await tx.room.update({
         where: { id: input.roomId },
