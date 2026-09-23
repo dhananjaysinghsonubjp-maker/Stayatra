@@ -343,7 +343,9 @@ model Booking {
   delayResolvedAt  DateTime?     @map("delay_resolved_at")
   delayResolvedBy  String?       @map("delay_resolved_by")
   delayResolvedNote String?      @map("delay_resolved_note")
-  totalAmount      Decimal       @map("total_amount") @db.Decimal(10, 2)
+  totalAmount      Decimal       @map("total_amount") @db.Decimal(10, 2) // base room charge — the payable grand total also includes lineItems and subtracts discountAmount, see common/invoice.ts
+  discountAmount   Decimal?      @map("discount_amount") @db.Decimal(10, 2) // added beyond MD spec — flat discount off the grand total
+  gstExempt        Boolean       @default(false) @map("gst_exempt") // added beyond MD spec — bypasses the §5.1 GST slab entirely when true
   createdAt        DateTime      @default(now()) @map("created_at")
 
   hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
@@ -351,6 +353,7 @@ model Booking {
   ratePlan      RatePlan?      @relation(fields: [ratePlanId], references: [id])
   guest         Guest?         @relation(fields: [guestId], references: [id])
   payments      Payment[]
+  lineItems     InvoiceLineItem[]
   room          Room?          @relation("CurrentStay")
   assignedRoom  Room?          @relation("AssignedRoom", fields: [assignedRoomId], references: [id])
 
@@ -359,24 +362,51 @@ model Booking {
   @@map("bookings")
 }
 
+// expanded beyond the MD spec's cash/online/card sketch — real methods this
+// product's hotels use (§ user request, matching a reference competitor UI)
 enum PaymentMethod {
   cash
   online
   card
+  bank_transfer
+  company_settlement
+  agent_settlement
+  upi
+  credit_sale
+  cheque
+  cash_deposit
 }
 
 // one row per actual payment collection — the ledger behind bookings.paid_amount's running total
 model Payment {
-  id          String        @id @default(cuid())
-  bookingId   String        @map("booking_id")
-  amount      Decimal       @db.Decimal(10, 2)
-  method      PaymentMethod
-  collectedBy String        @map("collected_by")
-  collectedAt DateTime      @default(now()) @map("collected_at")
+  id             String        @id @default(cuid())
+  bookingId      String        @map("booking_id")
+  amount         Decimal       @db.Decimal(10, 2)
+  method         PaymentMethod
+  referenceNumber String?      @map("reference_number") // transaction/cheque/UPI ref — added beyond MD spec
+  receiptPhotoPath String?     @map("receipt_photo_path") // dev-local disk path, same pattern as Guest.idPhotoPath
+  collectedBy    String        @map("collected_by")
+  collectedAt    DateTime      @default(now()) @map("collected_at") // client-settable at entry time (backdated collections), defaults to now
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@map("payments")
+}
+
+// "Add Extra Charges" on the invoice (extra bed, food, laundry, damage, etc.) —
+// added beyond the MD spec, which only priced the room itself via inventory_rates.
+model InvoiceLineItem {
+  id          String   @id @default(cuid())
+  bookingId   String   @map("booking_id")
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
+  amount      Decimal  @db.Decimal(10, 2) // quantity * unitPrice, stored (not recomputed) so a later unitPrice edit never silently changes a past invoice line
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_line_items")
 }
 
 // ── §5.3 PMS: physical rooms, housekeeping ──────────────────────────────────

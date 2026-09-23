@@ -14,7 +14,7 @@ import { SyncModule } from './sync/sync.module.js';
 import { ReportsModule } from './reports/reports.module.js';
 import { GuestsModule } from './guests/guests.module.js';
 import { IdExtractionModule } from './id-extraction/id-extraction.module.js';
-import { IdScanController } from './id-extraction/id-scan.controller.js';
+import { UploadsController } from './id-extraction/uploads.controller.js';
 
 @Module({
   imports: [
@@ -32,7 +32,7 @@ import { IdScanController } from './id-extraction/id-scan.controller.js';
     GuestsModule,
     IdExtractionModule,
   ],
-  controllers: [AppController, IdScanController],
+  controllers: [AppController, UploadsController],
   providers: [AppService],
 })
 export class AppModule {}

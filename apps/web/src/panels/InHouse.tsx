@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Card, EmptyState, PageHeader } from '../components/ui';
+import { computeInvoiceTotals } from '../invoice';
 import type { InHouseRow } from '../types';
 
 export function InHouse({ hotelId }: { hotelId: string }) {
@@ -61,7 +62,13 @@ export function InHouse({ hotelId }: { hotelId: string }) {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((r) => {
-                  const due = Number(r.booking.totalAmount) - Number(r.booking.paidAmount ?? 0);
+                  const totals = computeInvoiceTotals({
+                    totalAmount: Number(r.booking.totalAmount),
+                    lineItems: r.booking.lineItems ?? [],
+                    discountAmount: r.booking.discountAmount ? Number(r.booking.discountAmount) : null,
+                    gstExempt: r.booking.gstExempt,
+                  });
+                  const due = totals.grandTotal - Number(r.booking.paidAmount ?? 0);
                   return (
                     <tr key={r.booking.id} className={r.delayed ? 'bg-red-50/60' : 'hover:bg-slate-50'}>
                       <td className="px-5 py-3 font-medium text-slate-900">{r.room.roomNumber}</td>

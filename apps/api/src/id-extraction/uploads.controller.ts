@@ -7,7 +7,7 @@ import path from 'node:path';
 import { AuthService } from '../auth/auth.service.js';
 import { ID_EXTRACTOR, type IdExtractor } from './id-extractor.interface.js';
 
-const UPLOAD_DIR = path.resolve(process.cwd(), 'uploads', 'id-scans'); // dev-only local disk — S3 in production, per §3
+const UPLOAD_ROOT = path.resolve(process.cwd(), 'uploads'); // dev-only local disk — S3 in production, per §3
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -15,29 +15,45 @@ const MAX_BYTES = 8 * 1024 * 1024;
 // file uploads cleanly. Same Bearer-token auth as every tRPC procedure,
 // just checked by hand here instead of via context middleware.
 @Controller('uploads')
-export class IdScanController {
+export class UploadsController {
   constructor(
     private readonly auth: AuthService,
     @Inject(ID_EXTRACTOR) private readonly extractor: IdExtractor,
   ) {}
 
-  @Post('id-scan')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
-  async uploadIdScan(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+  private async requireUser(authHeader?: string) {
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : undefined;
     const user = token ? await this.auth.resolveSession(token) : null;
     if (!user) throw new UnauthorizedException();
+    return user;
+  }
 
+  private async save(subdir: string, file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No file uploaded');
     if (!ALLOWED_MIME.has(file.mimetype)) throw new BadRequestException('Only JPEG/PNG/WebP images are accepted');
 
-    await mkdir(UPLOAD_DIR, { recursive: true });
+    const dir = path.join(UPLOAD_ROOT, subdir);
+    await mkdir(dir, { recursive: true });
     const filename = `${randomUUID()}${path.extname(file.originalname) || '.jpg'}`;
-    const filePath = path.join(UPLOAD_DIR, filename);
-    await writeFile(filePath, file.buffer);
+    await writeFile(path.join(dir, filename), file.buffer);
+    return path.join('uploads', subdir, filename);
+  }
 
+  @Post('id-scan')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  async uploadIdScan(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    await this.requireUser(authHeader);
+    const filePath = await this.save('id-scans', file);
     const extracted = await this.extractor.extract(file.buffer, file.mimetype);
+    return { filePath, extracted };
+  }
 
-    return { filePath: path.join('uploads', 'id-scans', filename), extracted };
+  /** No AI extraction — just storage, for payment receipt photos (§ added beyond MD spec). */
+  @Post('receipt')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  async uploadReceipt(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    await this.requireUser(authHeader);
+    const filePath = await this.save('receipts', file);
+    return { filePath };
   }
 }

@@ -2,7 +2,8 @@ import { Fragment, useState } from 'react';
 import { query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
-import type { RoomsReport, SaleReportDay } from '../types';
+import { PAYMENT_METHODS, paymentMethodLabel } from '../paymentMethods';
+import type { MethodBreakdown, RoomsReport, SaleReportDay } from '../types';
 
 function todayPlus(days: number) {
   return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -17,6 +18,25 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function methodsTotal(m: MethodBreakdown): number {
+  return Object.values(m).reduce((sum: number, v) => sum + (v ?? 0), 0);
+}
+
+function MethodsCell({ methods }: { methods: MethodBreakdown }) {
+  const entries = Object.entries(methods).filter(([, v]) => (v ?? 0) > 0) as [keyof MethodBreakdown, number][];
+  if (entries.length === 0) return <span className="text-slate-300">—</span>;
+  return (
+    <span className="text-slate-600">
+      {entries.map(([method, amount], i) => (
+        <span key={method}>
+          {i > 0 && ', '}
+          {paymentMethodLabel(method)} ₹{amount}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 export function Reports({ hotelId }: { hotelId: string }) {
@@ -60,9 +80,19 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
 
   function exportCsv() {
     if (!report) return;
+    const methodCols = PAYMENT_METHODS.map((m) => m.label);
     const rows: (string | number)[][] = [
-      ['Date', 'Check-ins', 'Cleanings', 'Guest cleanings', 'Checkouts', 'Discrepancies', 'Delays resolved', 'Cash', 'Online', 'Card'],
-      ...report.days.map((d) => [d.date, d.checkIns, d.cleanings, d.guestCleanings, d.checkouts, d.discrepancies, d.delaysResolved, d.cash, d.online, d.card]),
+      ['Date', 'Check-ins', 'Cleanings', 'Guest cleanings', 'Checkouts', 'Discrepancies', 'Delays resolved', ...methodCols],
+      ...report.days.map((d) => [
+        d.date,
+        d.checkIns,
+        d.cleanings,
+        d.guestCleanings,
+        d.checkouts,
+        d.discrepancies,
+        d.delaysResolved,
+        ...PAYMENT_METHODS.map((m) => d.methods[m.value] ?? 0),
+      ]),
     ];
     downloadCsv(`rooms-report-${from}-to-${to}.csv`, rows);
   }
@@ -72,7 +102,7 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
       checkIns: acc.checkIns + d.checkIns,
       cleanings: acc.cleanings + d.cleanings,
       discrepancies: acc.discrepancies + d.discrepancies,
-      collected: acc.collected + d.cash + d.online + d.card,
+      collected: acc.collected + methodsTotal(d.methods),
     }),
     { checkIns: 0, cleanings: 0, discrepancies: 0, collected: 0 },
   );
@@ -129,9 +159,7 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
                       <th className="px-5 py-3">Checkouts</th>
                       <th className="px-5 py-3">Discrepancies</th>
                       <th className="px-5 py-3">Delays resolved</th>
-                      <th className="px-5 py-3">Cash</th>
-                      <th className="px-5 py-3">Online</th>
-                      <th className="px-5 py-3">Card</th>
+                      <th className="px-5 py-3">Collections</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -144,9 +172,9 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
                         <td className="px-5 py-3">{d.checkouts}</td>
                         <td className="px-5 py-3">{d.discrepancies > 0 ? <span className="font-medium text-red-600">{d.discrepancies}</span> : 0}</td>
                         <td className="px-5 py-3">{d.delaysResolved}</td>
-                        <td className="px-5 py-3">₹{d.cash}</td>
-                        <td className="px-5 py-3">₹{d.online}</td>
-                        <td className="px-5 py-3">₹{d.card}</td>
+                        <td className="px-5 py-3">
+                          <MethodsCell methods={d.methods} />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -208,9 +236,10 @@ function SaleReportView({ hotelId }: { hotelId: string }) {
 
   function exportCsv() {
     if (!report) return;
+    const methodCols = PAYMENT_METHODS.map((m) => m.label);
     const rows: (string | number)[][] = [
-      ['Date', 'Cash', 'Online', 'Card', 'Due', 'Total sale'],
-      ...report.map((d) => [d.date, d.cash, d.online, d.card, d.due, d.totalSale]),
+      ['Date', ...methodCols, 'Due', 'Total sale'],
+      ...report.map((d) => [d.date, ...PAYMENT_METHODS.map((m) => d.methods[m.value] ?? 0), d.due, d.totalSale]),
     ];
     downloadCsv(`sale-report-${month}.csv`, rows);
   }
@@ -257,9 +286,7 @@ function SaleReportView({ hotelId }: { hotelId: string }) {
                   <thead>
                     <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
                       <th className="px-5 py-3">Date</th>
-                      <th className="px-5 py-3">Cash</th>
-                      <th className="px-5 py-3">Online</th>
-                      <th className="px-5 py-3">Card</th>
+                      <th className="px-5 py-3">Collections</th>
                       <th className="px-5 py-3">Due</th>
                       <th className="px-5 py-3">Total sale</th>
                       <th className="px-5 py-3"></th>
@@ -270,9 +297,9 @@ function SaleReportView({ hotelId }: { hotelId: string }) {
                       <Fragment key={d.date}>
                         <tr className="hover:bg-slate-50">
                           <td className="px-5 py-3 font-medium text-slate-900">{d.date}</td>
-                          <td className="px-5 py-3">₹{d.cash}</td>
-                          <td className="px-5 py-3">₹{d.online}</td>
-                          <td className="px-5 py-3">₹{d.card}</td>
+                          <td className="px-5 py-3">
+                            <MethodsCell methods={d.methods} />
+                          </td>
                           <td className="px-5 py-3">{d.due > 0 ? <span className="text-amber-600">₹{d.due}</span> : '—'}</td>
                           <td className="px-5 py-3 font-medium">₹{d.totalSale}</td>
                           <td className="px-5 py-3 text-right">
@@ -286,7 +313,7 @@ function SaleReportView({ hotelId }: { hotelId: string }) {
                         </tr>
                         {expanded === d.date && (
                           <tr>
-                            <td colSpan={7} className="bg-slate-50 px-5 py-3">
+                            <td colSpan={5} className="bg-slate-50 px-5 py-3">
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="text-left text-slate-500">
@@ -302,7 +329,7 @@ function SaleReportView({ hotelId }: { hotelId: string }) {
                                     <tr key={b.id}>
                                       <td className="py-1 pr-4">{b.guestName}</td>
                                       <td className="py-1 pr-4">{b.roomNumber ?? '—'}</td>
-                                      <td className="py-1 pr-4">₹{b.totalAmount}</td>
+                                      <td className="py-1 pr-4">₹{b.grandTotal}</td>
                                       <td className="py-1 pr-4">₹{b.paidAmount}</td>
                                       <td className="py-1">₹{b.due}</td>
                                     </tr>

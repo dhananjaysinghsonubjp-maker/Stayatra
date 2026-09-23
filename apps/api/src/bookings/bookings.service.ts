@@ -3,6 +3,7 @@ import { BookingStatus, Gender, IdType, PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { computeCleaningDeadline, isDelayed } from '../common/delay.js';
+import { computeInvoiceTotals } from '../common/invoice.js';
 import { GuestsService } from '../guests/guests.service.js';
 
 const CHECK_IN_IDEMPOTENCY_WINDOW_MS = 1000 * 60 * 5;
@@ -234,19 +235,41 @@ export class BookingsService {
    * §5.2 / §8.5 — never alters room or booking status; that's the whole point.
    * Refuses to collect more than the outstanding balance.
    */
-  async addPayment(input: { bookingId: string; amount: number; method: PaymentMethod; collectedBy: string }) {
+  async addPayment(input: {
+    bookingId: string;
+    amount: number;
+    method: PaymentMethod;
+    referenceNumber?: string;
+    receiptPhotoPath?: string;
+    collectedAt?: Date;
+    collectedBy: string;
+  }) {
     if (input.amount <= 0) throw new BadRequestException('Amount must be positive');
 
     return this.prisma.$transaction(async (tx) => {
-      const booking = await tx.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+      const booking = await tx.booking.findUniqueOrThrow({ where: { id: input.bookingId }, include: { lineItems: true } });
       const alreadyPaid = Number(booking.paidAmount ?? 0);
-      const outstanding = Number(booking.totalAmount) - alreadyPaid;
+      const { grandTotal } = computeInvoiceTotals({
+        totalAmount: Number(booking.totalAmount),
+        lineItems: booking.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: booking.discountAmount ? Number(booking.discountAmount) : null,
+        gstExempt: booking.gstExempt,
+      });
+      const outstanding = grandTotal - alreadyPaid;
       if (input.amount > outstanding + 0.01) {
         throw new ConflictException(`Cannot collect more than the outstanding balance (₹${outstanding.toFixed(2)})`);
       }
 
       const payment = await tx.payment.create({
-        data: { bookingId: input.bookingId, amount: input.amount, method: input.method, collectedBy: input.collectedBy },
+        data: {
+          bookingId: input.bookingId,
+          amount: input.amount,
+          method: input.method,
+          referenceNumber: input.referenceNumber,
+          receiptPhotoPath: input.receiptPhotoPath,
+          collectedAt: input.collectedAt,
+          collectedBy: input.collectedBy,
+        },
       });
       const updatedBooking = await tx.booking.update({
         where: { id: input.bookingId },
@@ -265,6 +288,49 @@ export class BookingsService {
     });
   }
 
+  /** "Add Extra Charges" on the invoice (§ added beyond MD spec). */
+  async addLineItem(input: { bookingId: string; description: string; quantity: number; unitPrice: number; actorId: string }) {
+    const amount = input.quantity * input.unitPrice;
+    const item = await this.prisma.invoiceLineItem.create({
+      data: { bookingId: input.bookingId, description: input.description, quantity: input.quantity, unitPrice: input.unitPrice, amount },
+    });
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    await this.audit.log({ hotelId: booking.hotelId, eventType: 'STAY_EDITED', actorId: input.actorId, subjectId: booking.id, detail: { addedLineItem: input.description } });
+    return item;
+  }
+
+  async removeLineItem(input: { lineItemId: string; actorId: string }) {
+    const item = await this.prisma.invoiceLineItem.delete({ where: { id: input.lineItemId }, include: { booking: true } });
+    await this.audit.log({ hotelId: item.booking.hotelId, eventType: 'STAY_EDITED', actorId: input.actorId, subjectId: item.bookingId, detail: { removedLineItem: item.description } });
+    return item;
+  }
+
+  async listLineItems(bookingId: string) {
+    return this.prisma.invoiceLineItem.findMany({ where: { bookingId }, orderBy: { createdAt: 'asc' } });
+  }
+
+  /** GST-exempt toggle + flat discount — owner/manager only, applies to the whole stay's invoice. */
+  async setInvoiceSettings(input: { bookingId: string; discountAmount?: number | null; gstExempt?: boolean; actorId: string }) {
+    const booking = await this.prisma.booking.update({
+      where: { id: input.bookingId },
+      data: { discountAmount: input.discountAmount, gstExempt: input.gstExempt },
+    });
+    await this.audit.log({ hotelId: booking.hotelId, eventType: 'STAY_EDITED', actorId: input.actorId, subjectId: booking.id, detail: { discountAmount: input.discountAmount, gstExempt: input.gstExempt } });
+    return booking;
+  }
+
+  /** The invoice as a whole — line items + computed totals, for the check-in wizard's step 2 and any future invoice view. */
+  async getInvoice(bookingId: string) {
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: { lineItems: true, payments: true } });
+    const totals = computeInvoiceTotals({
+      totalAmount: Number(booking.totalAmount),
+      lineItems: booking.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+      discountAmount: booking.discountAmount ? Number(booking.discountAmount) : null,
+      gstExempt: booking.gstExempt,
+    });
+    return { booking, lineItems: booking.lineItems, totals };
+  }
+
   async listReservations(input: { hotelId: string; from?: Date; to?: Date }) {
     return this.prisma.booking.findMany({
       where: {
@@ -273,7 +339,7 @@ export class BookingsService {
           ? { checkIn: { gte: input.from ?? undefined, lte: input.to ?? undefined } }
           : {}),
       },
-      include: { payments: true },
+      include: { payments: true, lineItems: true },
       orderBy: { checkIn: 'asc' },
     });
   }
@@ -296,7 +362,7 @@ export class BookingsService {
   }
 
   async getBooking(bookingId: string) {
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, include: { payments: true } });
+    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, include: { payments: true, lineItems: true } });
     if (!booking) throw new NotFoundException('Booking not found');
     return booking;
   }
@@ -305,7 +371,7 @@ export class BookingsService {
   async listInHouse(hotelId: string) {
     const rooms = await this.prisma.room.findMany({
       where: { hotelId, status: 'occupied', currentStayId: { not: null } },
-      include: { roomCategory: true, currentStay: { include: { payments: true } } },
+      include: { roomCategory: true, currentStay: { include: { payments: true, lineItems: true } } },
       orderBy: { roomNumber: 'asc' },
     });
 

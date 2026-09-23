@@ -3,7 +3,9 @@ import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
 import { CheckInModal } from './checkin/CheckInModal';
-import type { Booking, RoomCategory } from '../types';
+import { computeInvoiceTotals } from '../invoice';
+import { PAYMENT_METHODS } from '../paymentMethods';
+import type { Booking, PaymentMethod, RoomCategory } from '../types';
 
 function todayPlus(days: number) {
   return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -82,7 +84,13 @@ export function Bookings({ hotelId }: { hotelId: string }) {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {bookings.map((b) => {
-                  const outstanding = Number(b.totalAmount) - Number(b.paidAmount ?? 0);
+                  const totals = computeInvoiceTotals({
+                    totalAmount: Number(b.totalAmount),
+                    lineItems: b.lineItems ?? [],
+                    discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+                    gstExempt: b.gstExempt,
+                  });
+                  const outstanding = totals.grandTotal - Number(b.paidAmount ?? 0);
                   return (
                     <tr key={b.id} className="hover:bg-slate-50">
                       <td className="px-5 py-3 font-medium text-slate-900">{b.guestName}</td>
@@ -95,7 +103,7 @@ export function Bookings({ hotelId }: { hotelId: string }) {
                       <td className="px-5 py-3 text-slate-500">{b.source}</td>
                       <td className="px-5 py-3">
                         <span className="text-slate-900">₹{b.paidAmount ?? 0}</span>
-                        <span className="text-slate-400"> / ₹{b.totalAmount}</span>
+                        <span className="text-slate-400"> / ₹{totals.grandTotal.toFixed(2)}</span>
                         {outstanding > 0 ? (
                           <span className="ml-1.5 text-xs text-amber-600">₹{outstanding} due</span>
                         ) : (
@@ -211,16 +219,23 @@ function ManualBookingForm({
 
 function AddPaymentModal({ booking, onClose, onDone }: { booking: Booking; onClose: () => void; onDone: () => void }) {
   const { token } = useAuth();
-  const outstanding = Number(booking.totalAmount) - Number(booking.paidAmount ?? 0);
+  const totals = computeInvoiceTotals({
+    totalAmount: Number(booking.totalAmount),
+    lineItems: booking.lineItems ?? [],
+    discountAmount: booking.discountAmount ? Number(booking.discountAmount) : null,
+    gstExempt: booking.gstExempt,
+  });
+  const outstanding = totals.grandTotal - Number(booking.paidAmount ?? 0);
   const [amount, setAmount] = useState(outstanding);
-  const [method, setMethod] = useState<'cash' | 'online' | 'card'>('cash');
+  const [method, setMethod] = useState<PaymentMethod>('cash');
+  const [referenceNumber, setReferenceNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     try {
-      await mutate('bookings.addPayment', { bookingId: booking.id, amount, method }, token ?? undefined);
+      await mutate('bookings.addPayment', { bookingId: booking.id, amount, method, referenceNumber: referenceNumber || undefined }, token ?? undefined);
       onDone();
       onClose();
     } catch (err) {
@@ -230,20 +245,33 @@ function AddPaymentModal({ booking, onClose, onDone }: { booking: Booking; onClo
 
   return (
     <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
-      <Card className="w-full max-w-sm p-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+      <Card className="w-full max-w-md p-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
         <h4 className="mb-1 text-sm font-semibold text-slate-900">Add payment — {booking.guestName}</h4>
-        <p className="mb-4 text-xs text-slate-500">Outstanding: ₹{outstanding}</p>
+        <p className="mb-4 text-xs text-slate-500">Outstanding: ₹{outstanding.toFixed(2)}</p>
         <form onSubmit={submit} className="space-y-3.5">
           <Field label="Amount (₹)">
-            <input className={inputClass} type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} min={1} />
+            <input className={inputClass} type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} min={1} max={outstanding} />
           </Field>
-          <Field label="Method">
-            <select className={inputClass} value={method} onChange={(e) => setMethod(e.target.value as 'cash' | 'online' | 'card')}>
-              <option value="cash">Cash</option>
-              <option value="online">Online</option>
-              <option value="card">Card</option>
-            </select>
+          <Field label="Reference number">
+            <input className={inputClass} value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} placeholder="Optional" />
           </Field>
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-slate-600">Method</p>
+            <div className="flex flex-wrap gap-2">
+              {PAYMENT_METHODS.map((m) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => setMethod(m.value)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition-colors ${
+                    method === m.value ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="secondary" onClick={onClose}>

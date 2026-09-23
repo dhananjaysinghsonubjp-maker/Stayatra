@@ -3,6 +3,7 @@ import { mutate, query, uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Badge, Button, Card, Field, inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
+import { InvoiceStep } from './InvoiceStep';
 import type { Booking, Gender, Guest, IdType, RatePlan, Room } from '../../types';
 
 const ID_TYPES: { value: IdType; label: string }[] = [
@@ -36,6 +37,8 @@ interface Props {
 
 export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Props) {
   const { token } = useAuth();
+  const [step, setStep] = useState<1 | 2>(1);
+  const [checkedInBookingId, setCheckedInBookingId] = useState<string | null>(null);
   const [mode, setMode] = useState<'new' | 'existing'>(reservation ? 'existing' : 'new');
 
   // guest identity
@@ -70,11 +73,6 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
   const [ratePlanId, setRatePlanId] = useState('');
   const [amountPerNight, setAmountPerNight] = useState(2000);
   const [nights, setNights] = useState(1);
-
-  // payment
-  const [collectPayment, setCollectPayment] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online' | 'card'>('cash');
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,11 +127,6 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guestPhone, mode]);
 
-  useEffect(() => {
-    if (collectPayment) setPaymentAmount(mode === 'new' ? totalAmount : totalAmount - Number(selectedReservation?.paidAmount ?? 0));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collectPayment]);
-
   function applyGuest(g: Guest) {
     setGuestId(g.id);
     setTitle(g.title ?? 'Mr');
@@ -186,7 +179,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
     }
   }
 
-  async function submit(e: React.FormEvent) {
+  async function submitStepOne(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -201,7 +194,6 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
 
     setBusy(true);
     try {
-      const payment = collectPayment && paymentAmount > 0 ? { amount: paymentAmount, method: paymentMethod } : undefined;
       const guestDetails = {
         guestId,
         title,
@@ -221,12 +213,13 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
         purposeOfStay: purposeOfStay || undefined,
       };
 
+      let bookingId: string;
       if (mode === 'new') {
         if (!room) throw new Error('No room selected');
         if (!Number.isInteger(nights) || nights < 1 || nights > 365) throw new Error('Nights must be between 1 and 365');
         const checkIn = new Date();
         const checkOut = new Date(Date.now() + nights * 86400000);
-        await mutate(
+        const result = await mutate<{ booking: Booking }>(
           'bookings.checkInWalkIn',
           {
             hotelId,
@@ -237,22 +230,23 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
             checkOut: checkOut.toISOString(),
             nights,
             totalAmount,
-            payment,
           },
           token ?? undefined,
         );
+        bookingId = result.booking.id;
       } else {
         if (!selectedReservation) throw new Error('Select a reservation');
         const roomId = reservation ? selectedRoomId : (room?.id ?? '');
         if (!roomId) throw new Error('Select a room');
-        await mutate(
+        const result = await mutate<{ booking: Booking }>(
           'bookings.checkInReservation',
-          { bookingId: selectedReservation.id, roomId, ...guestDetails, payment },
+          { bookingId: selectedReservation.id, roomId, ...guestDetails },
           token ?? undefined,
         );
+        bookingId = result.booking.id;
       }
-      onDone();
-      onClose();
+      setCheckedInBookingId(bookingId);
+      setStep(2);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Check-in failed');
     } finally {
@@ -270,253 +264,261 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
           {room?.roomCategory && <Badge tone="slate">{room.roomCategory.name}</Badge>}
         </div>
 
-        {room && !reservation && (
-          <div className="mb-4 flex rounded-lg bg-slate-100 p-1">
-            <button
-              type="button"
-              onClick={() => setMode('new')}
-              className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${mode === 'new' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-            >
-              New guest
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('existing')}
-              className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${mode === 'existing' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-            >
-              Existing reservation
-            </button>
-          </div>
+        <div className="mb-5 flex items-center justify-center gap-3">
+          <StepDot n={1} active={step === 1} done={step > 1} />
+          <div className={`h-px w-10 ${step > 1 ? 'bg-brand-500' : 'bg-slate-200'}`} />
+          <StepDot n={2} active={step === 2} done={false} />
+        </div>
+
+        {step === 1 && (
+          <>
+            {room && !reservation && (
+              <div className="mb-4 flex rounded-lg bg-slate-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setMode('new')}
+                  className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${mode === 'new' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                >
+                  New guest
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode('existing')}
+                  className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${mode === 'existing' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                >
+                  Existing reservation
+                </button>
+              </div>
+            )}
+
+            <form onSubmit={submitStepOne} className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
+              {mode === 'existing' && !reservation && (
+                <Field label="Reservation">
+                  <select className={inputClass} value={selectedReservationId} onChange={(e) => setSelectedReservationId(e.target.value)} required>
+                    <option value="">— select —</option>
+                    {upcoming.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.guestName} · {r.checkIn.slice(0, 10)} → {r.checkOut.slice(0, 10)}
+                      </option>
+                    ))}
+                  </select>
+                  {upcoming.length === 0 && <p className="mt-1 text-xs text-slate-400">No upcoming reservations for this room category.</p>}
+                </Field>
+              )}
+
+              {mode === 'existing' && reservation && (
+                <Field label="Room">
+                  <select className={inputClass} value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)} required>
+                    <option value="">— select —</option>
+                    {availableRooms.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.roomNumber}
+                      </option>
+                    ))}
+                  </select>
+                  {availableRooms.length === 0 && <p className="mt-1 text-xs text-slate-400">No available rooms in this category right now.</p>}
+                </Field>
+              )}
+
+              {mode === 'existing' && selectedReservation && (
+                <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+                  <p>
+                    <span className="font-medium text-slate-800">{selectedReservation.guestName}</span> · {selectedReservation.checkIn.slice(0, 10)} →{' '}
+                    {selectedReservation.checkOut.slice(0, 10)} · {selectedReservation.nights} night{selectedReservation.nights === 1 ? '' : 's'}
+                  </p>
+                  <p className="mt-1">
+                    Total ₹{selectedReservation.totalAmount} · GST slab {gst.label}
+                  </p>
+                </div>
+              )}
+
+              {mode === 'new' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <Field label="Meal plan">
+                      <select className={inputClass} value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)}>
+                        <option value="">— none —</option>
+                        {ratePlans.map((rp) => (
+                          <option key={rp.id} value={rp.id}>
+                            {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Amount / night (₹)">
+                      <input className={inputClass} type="number" value={amountPerNight} onChange={(e) => setAmountPerNight(Number(e.target.value))} min={0} />
+                    </Field>
+                    <Field label="Nights">
+                      <input className={inputClass} type="number" value={nights} onChange={(e) => setNights(Number(e.target.value))} min={1} max={365} />
+                    </Field>
+                    <Field label="Total">
+                      <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>₹{totalAmount}</div>
+                    </Field>
+                  </div>
+                  <p className="-mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
+
+                  <div className="flex items-center gap-3 rounded-lg border border-dashed border-slate-300 p-3">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => e.target.files?.[0] && handleAiCheckIn(e.target.files[0])}
+                    />
+                    <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={scanning}>
+                      {scanning ? 'Scanning…' : '✨ AI Check-in — scan ID'}
+                    </Button>
+                    {scanNotice && <p className="text-xs text-amber-600">{scanNotice}</p>}
+                  </div>
+
+                  <div className="relative">
+                    <Field label="Mobile number">
+                      <input
+                        className={inputClass}
+                        value={guestPhone}
+                        onChange={(e) => {
+                          setGuestPhone(e.target.value);
+                          setGuestId(undefined);
+                        }}
+                        pattern="\d{10}"
+                        placeholder="10-digit number"
+                      />
+                    </Field>
+                    <p className="-mt-2 text-xs text-slate-400">
+                      {searching ? 'Searching…' : 'Enter 10 digits; if a saved guest appears, select them to load details.'}
+                    </p>
+                    {matches.length > 0 && (
+                      <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-md">
+                        {matches.map((g) => (
+                          <button
+                            key={g.id}
+                            type="button"
+                            onClick={() => applyGuest(g)}
+                            className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                          >
+                            <span className="font-medium text-slate-800">{g.name}</span>{' '}
+                            <span className="text-slate-400">{g.phone}{g.city ? ` · ${g.city}` : ''}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-3">
+                    <Field label="Title">
+                      <select className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)}>
+                        {TITLES.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <div className="col-span-3">
+                      <Field label="Full name">
+                        <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required autoFocus />
+                      </Field>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <Field label="Email">
+                      <input className={inputClass} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                    </Field>
+                    <Field label="Gender">
+                      <select className={inputClass} value={gender} onChange={(e) => setGender(e.target.value as Gender)}>
+                        <option value="">— select —</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                        <option value="prefer_not_to_say">Prefer not to say</option>
+                      </select>
+                    </Field>
+                    <Field label="Date of birth">
+                      <input className={inputClass} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+                    </Field>
+                  </div>
+                  {dateOfBirth && !isAdult(dateOfBirth) && <p className="-mt-2 text-xs text-red-600">Must be at least 18 years old</p>}
+
+                  <Field label="Guest address">
+                    <textarea className={`${inputClass} min-h-16`} value={address} onChange={(e) => setAddress(e.target.value)} />
+                  </Field>
+
+                  <div className="grid grid-cols-4 gap-3">
+                    <Field label="Country">
+                      <input className={inputClass} value={country} onChange={(e) => setCountry(e.target.value)} />
+                    </Field>
+                    <Field label="State">
+                      <input className={inputClass} value={state} onChange={(e) => setState(e.target.value)} />
+                    </Field>
+                    <Field label="City">
+                      <input className={inputClass} value={city} onChange={(e) => setCity(e.target.value)} />
+                    </Field>
+                    <Field label="Pincode">
+                      <input className={inputClass} value={pincode} onChange={(e) => setPincode(e.target.value)} />
+                    </Field>
+                  </div>
+
+                  <Field label="Purpose of stay *">
+                    <select className={inputClass} value={purposeOfStay} onChange={(e) => setPurposeOfStay(e.target.value)} required>
+                      <option value="">— select —</option>
+                      {PURPOSES.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="ID type">
+                  <select className={inputClass} value={idType} onChange={(e) => setIdType(e.target.value as IdType)}>
+                    {ID_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="ID number">
+                  <input className={inputClass} value={idNumber} onChange={(e) => setIdNumber(e.target.value)} required />
+                </Field>
+              </div>
+
+              {error && <p className="text-sm text-red-600">{error}</p>}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="secondary" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={busy}>
+                  {busy ? 'Checking in…' : 'Next · Payment'}
+                </Button>
+              </div>
+            </form>
+          </>
         )}
 
-        <form onSubmit={submit} className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
-          {mode === 'existing' && !reservation && (
-            <Field label="Reservation">
-              <select className={inputClass} value={selectedReservationId} onChange={(e) => setSelectedReservationId(e.target.value)} required>
-                <option value="">— select —</option>
-                {upcoming.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.guestName} · {r.checkIn.slice(0, 10)} → {r.checkOut.slice(0, 10)}
-                  </option>
-                ))}
-              </select>
-              {upcoming.length === 0 && <p className="mt-1 text-xs text-slate-400">No upcoming reservations for this room category.</p>}
-            </Field>
-          )}
-
-          {mode === 'existing' && reservation && (
-            <Field label="Room">
-              <select className={inputClass} value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)} required>
-                <option value="">— select —</option>
-                {availableRooms.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.roomNumber}
-                  </option>
-                ))}
-              </select>
-              {availableRooms.length === 0 && <p className="mt-1 text-xs text-slate-400">No available rooms in this category right now.</p>}
-            </Field>
-          )}
-
-          {mode === 'existing' && selectedReservation && (
-            <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
-              <p>
-                <span className="font-medium text-slate-800">{selectedReservation.guestName}</span> · {selectedReservation.checkIn.slice(0, 10)} →{' '}
-                {selectedReservation.checkOut.slice(0, 10)} · {selectedReservation.nights} night{selectedReservation.nights === 1 ? '' : 's'}
-              </p>
-              <p className="mt-1">
-                Total ₹{selectedReservation.totalAmount} · GST slab {gst.label}
-              </p>
-            </div>
-          )}
-
-          {mode === 'new' && (
-            <>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Field label="Meal plan">
-                  <select className={inputClass} value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)}>
-                    <option value="">— none —</option>
-                    {ratePlans.map((rp) => (
-                      <option key={rp.id} value={rp.id}>
-                        {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Amount / night (₹)">
-                  <input className={inputClass} type="number" value={amountPerNight} onChange={(e) => setAmountPerNight(Number(e.target.value))} min={0} />
-                </Field>
-                <Field label="Nights">
-                  <input className={inputClass} type="number" value={nights} onChange={(e) => setNights(Number(e.target.value))} min={1} max={365} />
-                </Field>
-                <Field label="Total">
-                  <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>₹{totalAmount}</div>
-                </Field>
-              </div>
-              <p className="-mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
-
-              <div className="flex items-center gap-3 rounded-lg border border-dashed border-slate-300 p-3">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  onChange={(e) => e.target.files?.[0] && handleAiCheckIn(e.target.files[0])}
-                />
-                <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={scanning}>
-                  {scanning ? 'Scanning…' : '✨ AI Check-in — scan ID'}
-                </Button>
-                {scanNotice && <p className="text-xs text-amber-600">{scanNotice}</p>}
-              </div>
-
-              <div className="relative">
-                <Field label="Mobile number">
-                  <input
-                    className={inputClass}
-                    value={guestPhone}
-                    onChange={(e) => {
-                      setGuestPhone(e.target.value);
-                      setGuestId(undefined);
-                    }}
-                    pattern="\d{10}"
-                    placeholder="10-digit number"
-                  />
-                </Field>
-                <p className="-mt-2 text-xs text-slate-400">
-                  {searching ? 'Searching…' : 'Enter 10 digits; if a saved guest appears, select them to load details.'}
-                </p>
-                {matches.length > 0 && (
-                  <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-md">
-                    {matches.map((g) => (
-                      <button
-                        key={g.id}
-                        type="button"
-                        onClick={() => applyGuest(g)}
-                        className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                      >
-                        <span className="font-medium text-slate-800">{g.name}</span>{' '}
-                        <span className="text-slate-400">{g.phone}{g.city ? ` · ${g.city}` : ''}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-4 gap-3">
-                <Field label="Title">
-                  <select className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)}>
-                    {TITLES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <div className="col-span-3">
-                  <Field label="Full name">
-                    <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required autoFocus />
-                  </Field>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <Field label="Email">
-                  <input className={inputClass} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                </Field>
-                <Field label="Gender">
-                  <select className={inputClass} value={gender} onChange={(e) => setGender(e.target.value as Gender)}>
-                    <option value="">— select —</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
-                    <option value="prefer_not_to_say">Prefer not to say</option>
-                  </select>
-                </Field>
-                <Field label="Date of birth">
-                  <input className={inputClass} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
-                </Field>
-              </div>
-              {dateOfBirth && !isAdult(dateOfBirth) && <p className="-mt-2 text-xs text-red-600">Must be at least 18 years old</p>}
-
-              <Field label="Guest address">
-                <textarea className={`${inputClass} min-h-16`} value={address} onChange={(e) => setAddress(e.target.value)} />
-              </Field>
-
-              <div className="grid grid-cols-4 gap-3">
-                <Field label="Country">
-                  <input className={inputClass} value={country} onChange={(e) => setCountry(e.target.value)} />
-                </Field>
-                <Field label="State">
-                  <input className={inputClass} value={state} onChange={(e) => setState(e.target.value)} />
-                </Field>
-                <Field label="City">
-                  <input className={inputClass} value={city} onChange={(e) => setCity(e.target.value)} />
-                </Field>
-                <Field label="Pincode">
-                  <input className={inputClass} value={pincode} onChange={(e) => setPincode(e.target.value)} />
-                </Field>
-              </div>
-
-              <Field label="Purpose of stay *">
-                <select className={inputClass} value={purposeOfStay} onChange={(e) => setPurposeOfStay(e.target.value)} required>
-                  <option value="">— select —</option>
-                  {PURPOSES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="ID type">
-              <select className={inputClass} value={idType} onChange={(e) => setIdType(e.target.value as IdType)}>
-                {ID_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="ID number">
-              <input className={inputClass} value={idNumber} onChange={(e) => setIdNumber(e.target.value)} required />
-            </Field>
+        {step === 2 && checkedInBookingId && (
+          <div className="max-h-[70vh] overflow-y-auto pr-1">
+            <InvoiceStep bookingId={checkedInBookingId} onClose={onClose} onDone={onDone} />
           </div>
-
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" checked={collectPayment} onChange={(e) => setCollectPayment(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
-            Collect payment now
-          </label>
-
-          {collectPayment && (
-            <div className="grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3">
-              <Field label="Amount (₹)">
-                <input className={inputClass} type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(Number(e.target.value))} min={0} />
-              </Field>
-              <Field label="Method">
-                <select className={inputClass} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as 'cash' | 'online' | 'card')}>
-                  <option value="cash">Cash</option>
-                  <option value="online">Online</option>
-                  <option value="card">Card</option>
-                </select>
-              </Field>
-            </div>
-          )}
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy}>
-              {busy ? 'Checking in…' : 'Check in'}
-            </Button>
-          </div>
-        </form>
+        )}
       </Card>
+    </div>
+  );
+}
+
+function StepDot({ n, active, done }: { n: number; active: boolean; done: boolean }) {
+  return (
+    <div
+      className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-semibold ${
+        done ? 'border-brand-500 bg-brand-500 text-white' : active ? 'border-brand-500 text-brand-600' : 'border-slate-200 text-slate-400'
+      }`}
+    >
+      {done ? '✓' : n}
     </div>
   );
 }

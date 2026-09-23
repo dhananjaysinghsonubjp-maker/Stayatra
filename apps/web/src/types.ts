@@ -53,6 +53,16 @@ export interface Guest {
   idPhotoPath: string | null;
 }
 
+export interface InvoiceLineItem {
+  id: string;
+  bookingId: string;
+  description: string;
+  quantity: number;
+  unitPrice: string;
+  amount: string;
+  createdAt: string;
+}
+
 export interface Booking {
   id: string;
   hotelId: string;
@@ -70,9 +80,21 @@ export interface Booking {
   source: string;
   paidAmount: string | null;
   totalAmount: string;
+  discountAmount: string | null;
+  gstExempt: boolean;
   delayResolvedAt: string | null;
   delayResolvedNote: string | null;
   payments?: Payment[];
+  lineItems?: InvoiceLineItem[];
+}
+
+export interface InvoiceTotals {
+  basePrice: number;
+  extraCharges: number;
+  subtotal: number;
+  discount: number;
+  gst: { rate: number; label: string; amount: number };
+  grandTotal: number;
 }
 
 export interface InHouseRow {
@@ -99,6 +121,20 @@ export interface HousekeeperStat {
   lastFlagged: boolean;
 }
 
+export type PaymentMethod =
+  | 'cash'
+  | 'online'
+  | 'card'
+  | 'bank_transfer'
+  | 'company_settlement'
+  | 'agent_settlement'
+  | 'upi'
+  | 'credit_sale'
+  | 'cheque'
+  | 'cash_deposit';
+
+export type MethodBreakdown = Partial<Record<PaymentMethod, number>>;
+
 export interface RoomsReportDay {
   date: string;
   checkIns: number;
@@ -107,9 +143,7 @@ export interface RoomsReportDay {
   checkouts: number;
   discrepancies: number;
   delaysResolved: number;
-  cash: number;
-  online: number;
-  card: number;
+  methods: MethodBreakdown;
 }
 
 export interface RoomsReportRoomRow {
@@ -127,18 +161,18 @@ export interface RoomsReport {
 
 export interface SaleReportDay {
   date: string;
-  cash: number;
-  online: number;
-  card: number;
+  methods: MethodBreakdown;
   due: number;
   totalSale: number;
-  bookings: { id: string; guestName: string; roomNumber: string | null; totalAmount: number; paidAmount: number; due: number }[];
+  bookings: { id: string; guestName: string; roomNumber: string | null; grandTotal: number; paidAmount: number; due: number }[];
 }
 
 export interface Payment {
   id: string;
   amount: string;
-  method: 'cash' | 'online' | 'card';
+  method: PaymentMethod;
+  referenceNumber: string | null;
+  receiptPhotoPath: string | null;
   collectedAt: string;
 }
 

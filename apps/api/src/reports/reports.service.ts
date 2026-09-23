@@ -1,14 +1,27 @@
 import { Injectable } from '@nestjs/common';
+import type { PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { computeInvoiceTotals } from '../common/invoice.js';
 
 function dayKey(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
 function endOfDay(d: Date): Date {
+  // Must match dayKey's UTC-based bucketing. `d` arrives as a UTC-midnight
+  // Date (parsed from a "YYYY-MM-DD" string) — using local setHours() here
+  // shifted the boundary by the server's UTC offset (e.g. -5:30 on an
+  // IST-hosted server, which is exactly where this is meant to run per §3),
+  // silently dropping evening activity from "today"'s report bucket.
   const end = new Date(d);
-  end.setHours(23, 59, 59, 999);
+  end.setUTCHours(23, 59, 59, 999);
   return end;
+}
+
+export type MethodBreakdown = Partial<Record<PaymentMethod, number>>;
+
+function addToMethod(breakdown: MethodBreakdown, method: PaymentMethod, amount: number) {
+  breakdown[method] = (breakdown[method] ?? 0) + amount;
 }
 
 export interface RoomsReportDay {
@@ -19,9 +32,7 @@ export interface RoomsReportDay {
   checkouts: number;
   discrepancies: number;
   delaysResolved: number;
-  cash: number;
-  online: number;
-  card: number;
+  methods: MethodBreakdown;
 }
 
 export interface RoomsReportRoomRow {
@@ -34,12 +45,10 @@ export interface RoomsReportRoomRow {
 
 export interface SaleReportDay {
   date: string;
-  cash: number;
-  online: number;
-  card: number;
+  methods: MethodBreakdown;
   due: number;
   totalSale: number;
-  bookings: { id: string; guestName: string; roomNumber: string | null; totalAmount: number; paidAmount: number; due: number }[];
+  bookings: { id: string; guestName: string; roomNumber: string | null; grandTotal: number; paidAmount: number; due: number }[];
 }
 
 @Injectable()
@@ -48,9 +57,11 @@ export class ReportsService {
 
   /**
    * §8.8 Rooms Report — check-ins, cleanings, guest cleanings, checkouts,
-   * delays, discrepancies, collections by method, daily breakdown, per-room
-   * rows. "Automatic checkouts" in the spec's language are, in this product,
-   * every Checkout Cleaning (§8.6 — that's the only checkout path there is).
+   * delays, discrepancies, collections by method (dynamic — §, expanded beyond
+   * the MD spec's implied cash/online/card to the full method list), daily
+   * breakdown, per-room rows. "Automatic checkouts" in the spec's language
+   * are, in this product, every Checkout Cleaning (§8.6 — the only checkout
+   * path there is).
    */
   async getRoomsReport(input: { hotelId: string; from: Date; to: Date }) {
     // `to` arrives as a calendar-day boundary (midnight) — treat it as inclusive
@@ -71,7 +82,7 @@ export class ReportsService {
     const dayRow = (key: string): RoomsReportDay => {
       let row = days.get(key);
       if (!row) {
-        row = { date: key, checkIns: 0, cleanings: 0, guestCleanings: 0, checkouts: 0, discrepancies: 0, delaysResolved: 0, cash: 0, online: 0, card: 0 };
+        row = { date: key, checkIns: 0, cleanings: 0, guestCleanings: 0, checkouts: 0, discrepancies: 0, delaysResolved: 0, methods: {} };
         days.set(key, row);
       }
       return row;
@@ -86,8 +97,7 @@ export class ReportsService {
       if (c.flagged) row.discrepancies++;
     }
     for (const p of payments) {
-      const row = dayRow(dayKey(p.collectedAt));
-      row[p.method] += Number(p.amount);
+      addToMethod(dayRow(dayKey(p.collectedAt)).methods, p.method, Number(p.amount));
     }
     for (const d of resolvedDelays) dayRow(dayKey(d.delayResolvedAt!)).delaysResolved++;
 
@@ -106,10 +116,13 @@ export class ReportsService {
   }
 
   /**
-   * §8.8 Sale Report — total sale split by Cash/Online/Card/Due, one line per
-   * day expanding to room-wise bookings. Revenue counts per booking on its
-   * check-in day, never per night (§8.8) — a stay spanning a month boundary
-   * is counted once, in the month it checked in.
+   * §8.8 Sale Report — total sale split by payment method (dynamic) + Due,
+   * one line per day expanding to room-wise bookings. Revenue counts per
+   * booking on its check-in day, never per night (§8.8) — a stay spanning a
+   * month boundary is counted once, in the month it checked in. "Due" and
+   * "total sale" both go through computeInvoiceTotals so extra charges and
+   * discounts (§ added beyond MD spec) are reflected correctly, not just the
+   * base room price.
    */
   async getSaleReport(input: { hotelId: string; month: string }) {
     const start = new Date(`${input.month}-01T00:00:00.000Z`);
@@ -118,7 +131,7 @@ export class ReportsService {
 
     const bookings = await this.prisma.booking.findMany({
       where: { hotelId: input.hotelId, checkIn: { gte: start, lt: end }, status: { not: 'cancelled' } },
-      include: { payments: true, assignedRoom: true },
+      include: { payments: true, assignedRoom: true, lineItems: true },
       orderBy: { checkIn: 'asc' },
     });
 
@@ -127,31 +140,28 @@ export class ReportsService {
       const key = dayKey(b.checkIn);
       let row = days.get(key);
       if (!row) {
-        row = { date: key, cash: 0, online: 0, card: 0, due: 0, totalSale: 0, bookings: [] };
+        row = { date: key, methods: {}, due: 0, totalSale: 0, bookings: [] };
         days.set(key, row);
       }
 
-      let cash = 0;
-      let online = 0;
-      let card = 0;
-      for (const p of b.payments) {
-        if (p.method === 'cash') cash += Number(p.amount);
-        else if (p.method === 'online') online += Number(p.amount);
-        else if (p.method === 'card') card += Number(p.amount);
-      }
-      const paid = Number(b.paidAmount ?? 0);
-      const due = Number(b.totalAmount) - paid;
+      for (const p of b.payments) addToMethod(row.methods, p.method, Number(p.amount));
 
-      row.cash += cash;
-      row.online += online;
-      row.card += card;
+      const paid = Number(b.paidAmount ?? 0);
+      const { grandTotal } = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      const due = grandTotal - paid;
+
       row.due += due;
-      row.totalSale += Number(b.totalAmount);
+      row.totalSale += grandTotal;
       row.bookings.push({
         id: b.id,
         guestName: b.guestName,
         roomNumber: b.assignedRoom?.roomNumber ?? null,
-        totalAmount: Number(b.totalAmount),
+        grandTotal,
         paidAmount: paid,
         due,
       });

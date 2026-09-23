@@ -9,7 +9,26 @@ const ownerOrManager = requireRole('pms', ['owner', 'manager']);
 
 const idTypeSchema = z.enum(['aadhaar', 'passport', 'driving_license', 'voter_id', 'other']);
 const genderSchema = z.enum(['male', 'female', 'other', 'prefer_not_to_say']);
-const paymentAtCheckInSchema = z.object({ amount: z.number().positive(), method: z.enum(['cash', 'online', 'card']) }).optional();
+const paymentMethodSchema = z.enum([
+  'cash',
+  'online',
+  'card',
+  'bank_transfer',
+  'company_settlement',
+  'agent_settlement',
+  'upi',
+  'credit_sale',
+  'cheque',
+  'cash_deposit',
+]);
+const paymentDetailsSchema = z.object({
+  amount: z.number().positive(),
+  method: paymentMethodSchema,
+  referenceNumber: z.string().optional(),
+  receiptPhotoPath: z.string().optional(),
+  collectedAt: z.coerce.date().optional(),
+});
+const paymentAtCheckInSchema = paymentDetailsSchema.optional();
 
 const guestDetailsSchema = {
   guestId: z.string().optional(),
@@ -85,8 +104,22 @@ export function createBookingsRouter(bookings: BookingsService) {
       .query(({ input }) => bookings.listUpcomingReservations(input)),
 
     addPayment: frontDeskUp
-      .input(z.object({ bookingId: z.string(), amount: z.number().positive(), method: z.enum(['cash', 'online', 'card']) }))
+      .input(z.object({ bookingId: z.string() }).merge(paymentDetailsSchema))
       .mutation(({ ctx, input }) => bookings.addPayment({ ...input, collectedBy: ctx.user.userId })),
+
+    addLineItem: frontDeskUp
+      .input(z.object({ bookingId: z.string(), description: z.string().min(1), quantity: z.number().int().positive(), unitPrice: z.number().nonnegative() }))
+      .mutation(({ ctx, input }) => bookings.addLineItem({ ...input, actorId: ctx.user.userId })),
+
+    removeLineItem: frontDeskUp
+      .input(z.object({ lineItemId: z.string() }))
+      .mutation(({ ctx, input }) => bookings.removeLineItem({ ...input, actorId: ctx.user.userId })),
+
+    setInvoiceSettings: ownerOrManager
+      .input(z.object({ bookingId: z.string(), discountAmount: z.number().nonnegative().nullable().optional(), gstExempt: z.boolean().optional() }))
+      .mutation(({ ctx, input }) => bookings.setInvoiceSettings({ ...input, actorId: ctx.user.userId })),
+
+    getInvoice: anyPmsRole.input(z.object({ bookingId: z.string() })).query(({ input }) => bookings.getInvoice(input.bookingId)),
 
     listReservations: anyPmsRole
       .input(z.object({ hotelId: z.string(), from: z.coerce.date().optional(), to: z.coerce.date().optional() }))
