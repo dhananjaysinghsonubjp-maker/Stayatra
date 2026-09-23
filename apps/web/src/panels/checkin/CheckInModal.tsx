@@ -3,7 +3,7 @@ import { mutate, query, uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Badge, Button, Card, Field, inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
-import { InvoiceStep } from './InvoiceStep';
+import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
 import type { Booking, Gender, Guest, IdType, RatePlan, Room } from '../../types';
 
 const ID_TYPES: { value: IdType; label: string }[] = [
@@ -38,7 +38,6 @@ interface Props {
 export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Props) {
   const { token } = useAuth();
   const [step, setStep] = useState<1 | 2>(1);
-  const [checkedInBookingId, setCheckedInBookingId] = useState<string | null>(null);
   const [mode, setMode] = useState<'new' | 'existing'>(reservation ? 'existing' : 'new');
 
   // guest identity
@@ -179,7 +178,8 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
     }
   }
 
-  async function submitStepOne(e: React.FormEvent) {
+  /** Pure validation + advance — nothing is saved until completeCheckIn (step 2's "Complete Check-in"). */
+  function goToStepTwo(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -191,14 +191,39 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
       setError('Guest must be at least 18 years old');
       return;
     }
+    if (mode === 'new' && (!Number.isInteger(nights) || nights < 1 || nights > 365)) {
+      setError('Nights must be between 1 and 365');
+      return;
+    }
+    if (mode === 'new' && !room) {
+      setError('No room selected');
+      return;
+    }
+    if (mode === 'existing' && !selectedReservation) {
+      setError('Select a reservation');
+      return;
+    }
+    if (mode === 'existing' && !(reservation ? selectedRoomId : room?.id)) {
+      setError('Select a room');
+      return;
+    }
 
+    setStep(2);
+  }
+
+  /** The one point where anything actually commits — everything from both steps bundled into a single mutation. */
+  async function completeCheckIn(draft: InvoiceDraft) {
+    setError(null);
     setBusy(true);
     try {
+      // 'existing' mode never shows the guest-detail fields (they belong to the
+      // reservation already) — fall back to what's on the reservation itself,
+      // otherwise this silently sent an empty guestName and failed validation.
       const guestDetails = {
         guestId,
         title,
-        guestName,
-        guestPhone: guestPhone || undefined,
+        guestName: mode === 'new' ? guestName : (selectedReservation?.guestName ?? ''),
+        guestPhone: (mode === 'new' ? guestPhone : (selectedReservation?.guestPhone ?? undefined)) || undefined,
         email: email || undefined,
         gender: gender || undefined,
         dateOfBirth: dateOfBirth || undefined,
@@ -212,14 +237,18 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
         idPhotoPath,
         purposeOfStay: purposeOfStay || undefined,
       };
+      const invoiceExtras = {
+        lineItems: draft.lineItems.map((li) => ({ description: li.description, quantity: li.quantity, unitPrice: li.unitPrice })),
+        discountAmount: draft.discountAmount ?? undefined,
+        gstExempt: draft.gstExempt,
+        payment: draft.payment,
+      };
 
-      let bookingId: string;
       if (mode === 'new') {
         if (!room) throw new Error('No room selected');
-        if (!Number.isInteger(nights) || nights < 1 || nights > 365) throw new Error('Nights must be between 1 and 365');
         const checkIn = new Date();
         const checkOut = new Date(Date.now() + nights * 86400000);
-        const result = await mutate<{ booking: Booking }>(
+        await mutate(
           'bookings.checkInWalkIn',
           {
             hotelId,
@@ -230,23 +259,18 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
             checkOut: checkOut.toISOString(),
             nights,
             totalAmount,
+            ...invoiceExtras,
           },
           token ?? undefined,
         );
-        bookingId = result.booking.id;
       } else {
         if (!selectedReservation) throw new Error('Select a reservation');
         const roomId = reservation ? selectedRoomId : (room?.id ?? '');
         if (!roomId) throw new Error('Select a room');
-        const result = await mutate<{ booking: Booking }>(
-          'bookings.checkInReservation',
-          { bookingId: selectedReservation.id, roomId, ...guestDetails },
-          token ?? undefined,
-        );
-        bookingId = result.booking.id;
+        await mutate('bookings.checkInReservation', { bookingId: selectedReservation.id, roomId, ...guestDetails, ...invoiceExtras }, token ?? undefined);
       }
-      setCheckedInBookingId(bookingId);
-      setStep(2);
+      onDone();
+      onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Check-in failed');
     } finally {
@@ -291,7 +315,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
               </div>
             )}
 
-            <form onSubmit={submitStepOne} className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
+            <form onSubmit={goToStepTwo} className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
               {mode === 'existing' && !reservation && (
                 <Field label="Reservation">
                   <select className={inputClass} value={selectedReservationId} onChange={(e) => setSelectedReservationId(e.target.value)} required>
@@ -493,17 +517,24 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
                 <Button type="button" variant="secondary" onClick={onClose}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={busy}>
-                  {busy ? 'Checking in…' : 'Next · Payment'}
-                </Button>
+                <Button type="submit">Next · Payment</Button>
               </div>
             </form>
           </>
         )}
 
-        {step === 2 && checkedInBookingId && (
+        {step === 2 && (
           <div className="max-h-[70vh] overflow-y-auto pr-1">
-            <InvoiceStep bookingId={checkedInBookingId} onClose={onClose} onDone={onDone} />
+            <InvoiceStep
+              guestName={mode === 'new' ? guestName : (selectedReservation?.guestName ?? '')}
+              guestPhone={mode === 'new' ? guestPhone || undefined : (selectedReservation?.guestPhone ?? undefined)}
+              totalAmount={totalAmount}
+              alreadyPaid={mode === 'existing' ? Number(selectedReservation?.paidAmount ?? 0) : 0}
+              onBack={() => setStep(1)}
+              onClose={onClose}
+              onComplete={completeCheckIn}
+              busy={busy}
+            />
           </div>
         )}
       </Card>

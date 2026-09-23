@@ -116,7 +116,14 @@ export class BookingsService {
     });
   }
 
-  /** §8.3 — guest standing at the desk right now, no prior reservation. Idempotent against double-submit. */
+  /**
+   * §8.3 — guest standing at the desk right now, no prior reservation.
+   * Idempotent against double-submit. lineItems/discountAmount/gstExempt
+   * (added beyond MD spec) are created atomically with the booking, so the
+   * whole check-in wizard — guest details, extra charges, discount — commits
+   * as one unit only when the user finishes it, never partially from an
+   * abandoned step 2.
+   */
   async checkInWalkIn(
     input: CheckInGuestDetails & {
       hotelId: string;
@@ -127,6 +134,9 @@ export class BookingsService {
       checkOut: Date;
       nights: number;
       totalAmount: number;
+      lineItems?: { description: string; quantity: number; unitPrice: number }[];
+      discountAmount?: number;
+      gstExempt?: boolean;
       actorId: string;
     },
   ) {
@@ -171,10 +181,23 @@ export class BookingsService {
           checkOut: input.checkOut,
           nights: input.nights,
           totalAmount: input.totalAmount,
+          discountAmount: input.discountAmount,
+          gstExempt: input.gstExempt ?? false,
           status: BookingStatus.checked_in,
           source: 'walk_in',
         },
       });
+      if (input.lineItems?.length) {
+        await tx.invoiceLineItem.createMany({
+          data: input.lineItems.map((li) => ({
+            bookingId: created.id,
+            description: li.description,
+            quantity: li.quantity,
+            unitPrice: li.unitPrice,
+            amount: li.quantity * li.unitPrice,
+          })),
+        });
+      }
       await tx.room.update({
         where: { id: input.roomId },
         data: { status: 'occupied', currentStayId: created.id, statusChangedAt: new Date() },
@@ -193,7 +216,15 @@ export class BookingsService {
    * they're captured here, at the moment the guest is physically present.
    */
   async checkInReservation(
-    input: CheckInGuestDetails & { bookingId: string; roomId: string; purposeOfStay?: string; actorId: string },
+    input: CheckInGuestDetails & {
+      bookingId: string;
+      roomId: string;
+      purposeOfStay?: string;
+      lineItems?: { description: string; quantity: number; unitPrice: number }[];
+      discountAmount?: number;
+      gstExempt?: boolean;
+      actorId: string;
+    },
   ) {
     const [booking, room] = await Promise.all([
       this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } }),
@@ -216,10 +247,24 @@ export class BookingsService {
           idType: input.idType,
           idNumber: input.idNumber,
           guestId,
+          guestName: input.guestName || booking.guestName, // lets front desk correct a typo at check-in; required field, so this rarely falls back
           purposeOfStay: input.purposeOfStay,
           guestPhone: input.guestPhone ?? booking.guestPhone,
+          discountAmount: input.discountAmount,
+          gstExempt: input.gstExempt ?? booking.gstExempt,
         },
       });
+      if (input.lineItems?.length) {
+        await tx.invoiceLineItem.createMany({
+          data: input.lineItems.map((li) => ({
+            bookingId: result.id,
+            description: li.description,
+            quantity: li.quantity,
+            unitPrice: li.unitPrice,
+            amount: li.quantity * li.unitPrice,
+          })),
+        });
+      }
       await tx.room.update({
         where: { id: input.roomId },
         data: { status: 'occupied', currentStayId: result.id, statusChangedAt: new Date() },

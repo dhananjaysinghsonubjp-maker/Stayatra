@@ -1,19 +1,56 @@
 import { useEffect, useRef, useState } from 'react';
-import { mutate, query, uploadFile, ApiError } from '../../api';
+import { uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Badge, Button, Card, Field, inputClass } from '../../components/ui';
 import { computeInvoiceTotals } from '../../invoice';
 import { PAYMENT_METHODS } from '../../paymentMethods';
-import type { Booking, InvoiceLineItem, PaymentMethod } from '../../types';
+import type { PaymentMethod } from '../../types';
 
 type PaymentMode = 'full' | 'partial' | 'due';
 
-export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string; onClose: () => void; onDone: () => void }) {
+export interface DraftLineItem {
+  key: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+}
+
+export interface InvoiceDraft {
+  lineItems: DraftLineItem[];
+  discountAmount: number | null;
+  gstExempt: boolean;
+  payment?: { amount: number; method: PaymentMethod; referenceNumber?: string; receiptPhotoPath?: string; collectedAt: string };
+}
+
+/**
+ * Nothing here touches the server — this is a local draft only. The whole
+ * point: closing/going back out of check-in before finishing must leave zero
+ * trace (no booking, no occupied room), which wasn't true when this step
+ * operated on an already-created booking via live API calls. Everything
+ * commits in one shot when the wizard actually finishes (§ — fixes a real
+ * "ghost checked-in guest" bug from an abandoned step 2).
+ */
+export function InvoiceStep({
+  guestName,
+  guestPhone,
+  totalAmount,
+  alreadyPaid,
+  onBack,
+  onClose,
+  onComplete,
+  busy,
+}: {
+  guestName: string;
+  guestPhone?: string;
+  totalAmount: number;
+  alreadyPaid: number;
+  onBack: () => void;
+  onClose: () => void;
+  onComplete: (draft: InvoiceDraft) => void;
+  busy: boolean;
+}) {
   const { token } = useAuth();
-  const [booking, setBooking] = useState<Booking | null>(null);
-  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   // payment
   const [mode, setMode] = useState<PaymentMode>('full');
@@ -23,12 +60,14 @@ export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string;
   const [referenceNumber, setReferenceNumber] = useState('');
   const [receiptPath, setReceiptPath] = useState<string | undefined>(undefined);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
-  // invoice settings
+  // invoice settings — local draft only
   const [gstEnabled, setGstEnabled] = useState(true);
   const [discountEnabled, setDiscountEnabled] = useState(false);
   const [discountAmount, setDiscountAmount] = useState(0);
+  const [lineItems, setLineItems] = useState<DraftLineItem[]>([]);
 
   // add-charge form
   const [addingCharge, setAddingCharge] = useState(false);
@@ -36,108 +75,61 @@ export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string;
   const [chargeQty, setChargeQty] = useState(1);
   const [chargeUnitPrice, setChargeUnitPrice] = useState(0);
 
-  async function refresh() {
-    const invoice = await query<{ booking: Booking; lineItems: InvoiceLineItem[] }>('bookings.getInvoice', { bookingId }, token ?? undefined);
-    setBooking(invoice.booking);
-    setLineItems(invoice.lineItems);
-    setGstEnabled(!invoice.booking.gstExempt);
-    const d = Number(invoice.booking.discountAmount ?? 0);
-    setDiscountEnabled(d > 0);
-    setDiscountAmount(d);
-  }
-  useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookingId]);
-
-  const totals = booking
-    ? computeInvoiceTotals({
-        totalAmount: Number(booking.totalAmount),
-        lineItems,
-        discountAmount: discountEnabled ? discountAmount : 0,
-        gstExempt: !gstEnabled,
-      })
-    : null;
-  const alreadyPaid = Number(booking?.paidAmount ?? 0);
-  const outstanding = totals ? totals.grandTotal - alreadyPaid : 0;
+  const totals = computeInvoiceTotals({
+    totalAmount,
+    lineItems: lineItems.map((li) => ({ amount: li.amount })),
+    discountAmount: discountEnabled ? discountAmount : 0,
+    gstExempt: !gstEnabled,
+  });
+  const outstanding = Math.max(0, totals.grandTotal - alreadyPaid);
 
   useEffect(() => {
-    if (mode === 'full') setAmount(Math.max(0, outstanding));
+    if (mode === 'full') setAmount(outstanding);
     else if (mode === 'due') setAmount(0);
     // partial: leave whatever the user typed
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, outstanding]);
 
-  async function toggleGst(next: boolean) {
-    setGstEnabled(next);
-    await mutate('bookings.setInvoiceSettings', { bookingId, gstExempt: !next }, token ?? undefined);
-  }
-
-  async function toggleDiscount(next: boolean) {
-    setDiscountEnabled(next);
-    await mutate('bookings.setInvoiceSettings', { bookingId, discountAmount: next ? discountAmount : null }, token ?? undefined);
-  }
-
-  async function saveDiscountAmount(value: number) {
-    setDiscountAmount(value);
-    if (discountEnabled) await mutate('bookings.setInvoiceSettings', { bookingId, discountAmount: value }, token ?? undefined);
-  }
-
-  async function addCharge(e: React.FormEvent) {
+  function addCharge(e: React.FormEvent) {
     e.preventDefault();
-    await mutate('bookings.addLineItem', { bookingId, description: chargeDesc, quantity: chargeQty, unitPrice: chargeUnitPrice }, token ?? undefined);
+    setLineItems((prev) => [
+      ...prev,
+      { key: crypto.randomUUID(), description: chargeDesc, quantity: chargeQty, unitPrice: chargeUnitPrice, amount: chargeQty * chargeUnitPrice },
+    ]);
     setChargeDesc('');
     setChargeQty(1);
     setChargeUnitPrice(0);
     setAddingCharge(false);
-    await refresh();
   }
 
-  async function removeCharge(lineItemId: string) {
-    await mutate('bookings.removeLineItem', { lineItemId }, token ?? undefined);
-    await refresh();
+  function removeCharge(key: string) {
+    setLineItems((prev) => prev.filter((li) => li.key !== key));
   }
 
   async function uploadReceipt(file: File) {
     setUploadingReceipt(true);
+    setUploadError(null);
     try {
       const result = await uploadFile<{ filePath: string }>('uploads/receipt', file, token ?? undefined);
       setReceiptPath(result.filePath);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Receipt upload failed');
+      setUploadError(err instanceof ApiError ? err.message : 'Receipt upload failed');
     } finally {
       setUploadingReceipt(false);
     }
   }
 
-  async function finish() {
-    setError(null);
-    setBusy(true);
-    try {
-      if (mode !== 'due' && amount > 0) {
-        await mutate(
-          'bookings.addPayment',
-          {
-            bookingId,
-            amount,
-            method,
-            referenceNumber: referenceNumber || undefined,
-            receiptPhotoPath: receiptPath,
-            collectedAt: new Date(collectedAt).toISOString(),
-          },
-          token ?? undefined,
-        );
-      }
-      onDone();
-      onClose();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Payment failed');
-    } finally {
-      setBusy(false);
-    }
+  function finish() {
+    onComplete({
+      lineItems,
+      discountAmount: discountEnabled ? discountAmount : null,
+      gstExempt: !gstEnabled,
+      payment:
+        mode !== 'due' && amount > 0
+          ? { amount, method, referenceNumber: referenceNumber || undefined, receiptPhotoPath: receiptPath, collectedAt: new Date(collectedAt).toISOString() }
+          : undefined,
+    });
   }
-
-  if (!booking || !totals) return <p className="py-8 text-center text-sm text-slate-400">Loading…</p>;
 
   return (
     <div className="space-y-5">
@@ -200,6 +192,7 @@ export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string;
                 >
                   {uploadingReceipt ? 'Uploading…' : receiptPath ? 'Receipt uploaded ✓' : 'Click to upload'}
                 </button>
+                {uploadError && <p className="mt-1 text-xs text-red-600">{uploadError}</p>}
               </div>
             </div>
 
@@ -230,19 +223,19 @@ export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string;
       <div className="grid grid-cols-2 gap-4">
         <Card className="flex items-center justify-between p-4">
           <span className="text-sm font-medium text-slate-700">GST & Tax</span>
-          <Toggle checked={gstEnabled} onChange={toggleGst} />
+          <Toggle checked={gstEnabled} onChange={setGstEnabled} />
         </Card>
         <Card className="p-4">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-slate-700">Discount</span>
-            <Toggle checked={discountEnabled} onChange={toggleDiscount} />
+            <Toggle checked={discountEnabled} onChange={setDiscountEnabled} />
           </div>
           {discountEnabled && (
             <input
               className={`${inputClass} mt-3`}
               type="number"
               value={discountAmount}
-              onChange={(e) => saveDiscountAmount(Number(e.target.value))}
+              onChange={(e) => setDiscountAmount(Number(e.target.value))}
               min={0}
               placeholder="Discount amount (₹)"
             />
@@ -259,8 +252,8 @@ export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string;
             <Badge tone="slate">1 room</Badge>
           </div>
           <div className="flex items-center gap-3 text-xs text-slate-500">
-            <span>{booking.guestName}</span>
-            {booking.guestPhone && <span>{booking.guestPhone}</span>}
+            <span>{guestName}</span>
+            {guestPhone && <span>{guestPhone}</span>}
           </div>
         </div>
 
@@ -270,7 +263,6 @@ export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string;
               <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
                 <th className="px-5 py-3">Description</th>
                 <th className="px-5 py-3">Qty</th>
-                <th className="px-5 py-3">Check-in / Check-out</th>
                 <th className="px-5 py-3">Unit price</th>
                 <th className="px-5 py-3">Amount</th>
                 <th className="px-5 py-3"></th>
@@ -280,24 +272,18 @@ export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string;
               <tr>
                 <td className="px-5 py-3 font-medium text-slate-900">Room charge</td>
                 <td className="px-5 py-3">1</td>
-                <td className="px-5 py-3 text-slate-500">
-                  {booking.checkIn.slice(0, 10)} → {booking.checkOut.slice(0, 10)} ({booking.nights} night{booking.nights === 1 ? '' : 's'})
-                </td>
-                <td className="px-5 py-3">
-                  ₹{(Number(booking.totalAmount) / booking.nights).toFixed(2)} × {booking.nights}
-                </td>
-                <td className="px-5 py-3 font-medium">₹{Number(booking.totalAmount).toFixed(2)}</td>
+                <td className="px-5 py-3">₹{totalAmount.toFixed(2)}</td>
+                <td className="px-5 py-3 font-medium">₹{totalAmount.toFixed(2)}</td>
                 <td></td>
               </tr>
               {lineItems.map((li) => (
-                <tr key={li.id}>
+                <tr key={li.key}>
                   <td className="px-5 py-3 text-slate-700">{li.description}</td>
                   <td className="px-5 py-3">{li.quantity}</td>
-                  <td className="px-5 py-3 text-slate-400">—</td>
-                  <td className="px-5 py-3">₹{Number(li.unitPrice).toFixed(2)}</td>
-                  <td className="px-5 py-3">₹{Number(li.amount).toFixed(2)}</td>
+                  <td className="px-5 py-3">₹{li.unitPrice.toFixed(2)}</td>
+                  <td className="px-5 py-3">₹{li.amount.toFixed(2)}</td>
                   <td className="px-5 py-3 text-right">
-                    <button type="button" onClick={() => removeCharge(li.id)} className="text-xs text-red-500 hover:underline">
+                    <button type="button" onClick={() => removeCharge(li.key)} className="text-xs text-red-500 hover:underline">
                       Remove
                     </button>
                   </td>
@@ -368,14 +354,17 @@ export function InvoiceStep({ bookingId, onClose, onDone }: { bookingId: string;
         </div>
       </Card>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose}>
-          Close
-        </Button>
+      <div className="flex justify-between gap-2">
+        <div className="flex gap-2">
+          <Button type="button" variant="secondary" onClick={onBack}>
+            ← Back
+          </Button>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel check-in
+          </Button>
+        </div>
         <Button type="button" onClick={finish} disabled={busy}>
-          {busy ? 'Saving…' : 'Done'}
+          {busy ? 'Completing…' : 'Complete Check-in'}
         </Button>
       </div>
     </div>

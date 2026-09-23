@@ -1,12 +1,14 @@
 import { computeGstSlab } from './gst';
-import type { InvoiceLineItem, InvoiceTotals } from './types';
+import type { InvoiceTotals } from './types';
 
 // Mirrors apps/api/src/common/invoice.ts — every "due"/"total" shown in the
 // simulator must go through this, not a raw totalAmount - paidAmount, now
 // that extra charges and discounts exist on top of the base room price.
+// `amount` accepts string (API's Decimal-as-string) or number (a client-side
+// draft line item that never round-tripped through the server, e.g. mid-wizard).
 export function computeInvoiceTotals(input: {
   totalAmount: number;
-  lineItems: Pick<InvoiceLineItem, 'amount'>[];
+  lineItems: { amount: string | number }[];
   discountAmount?: number | null;
   gstExempt?: boolean;
 }): InvoiceTotals {

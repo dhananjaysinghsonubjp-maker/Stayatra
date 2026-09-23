@@ -30,6 +30,10 @@ const paymentDetailsSchema = z.object({
 });
 const paymentAtCheckInSchema = paymentDetailsSchema.optional();
 
+const lineItemsAtCheckInSchema = z
+  .array(z.object({ description: z.string().min(1), quantity: z.number().int().positive(), unitPrice: z.number().nonnegative() }))
+  .optional();
+
 const guestDetailsSchema = {
   guestId: z.string().optional(),
   title: z.string().optional(),
@@ -78,6 +82,9 @@ export function createBookingsRouter(bookings: BookingsService) {
           checkOut: z.coerce.date(),
           nights: z.number().int().positive().max(365),
           totalAmount: z.number().nonnegative(),
+          lineItems: lineItemsAtCheckInSchema,
+          discountAmount: z.number().nonnegative().optional(),
+          gstExempt: z.boolean().optional(),
           payment: paymentAtCheckInSchema,
         }),
       )
@@ -90,7 +97,17 @@ export function createBookingsRouter(bookings: BookingsService) {
       }),
 
     checkInReservation: frontDeskUp
-      .input(z.object({ bookingId: z.string(), roomId: z.string(), ...guestDetailsSchema, payment: paymentAtCheckInSchema }))
+      .input(
+        z.object({
+          bookingId: z.string(),
+          roomId: z.string(),
+          ...guestDetailsSchema,
+          lineItems: lineItemsAtCheckInSchema,
+          discountAmount: z.number().nonnegative().optional(),
+          gstExempt: z.boolean().optional(),
+          payment: paymentAtCheckInSchema,
+        }),
+      )
       .mutation(async ({ ctx, input }) => {
         const { payment, ...rest } = input;
         const booking = await bookings.checkInReservation({ ...rest, actorId: ctx.user.userId });
