@@ -1,6 +1,6 @@
 import type { Hotel } from '../types';
 
-export type Tab = 'dashboard' | 'rooms' | 'inhouse' | 'bookings' | 'housekeeping' | 'reports' | 'grid' | 'setup';
+export type Tab = 'dashboard' | 'rooms' | 'inhouse' | 'bookings' | 'dues' | 'housekeeping' | 'reports' | 'grid' | 'setup';
 
 interface NavItem {
   id: Tab;
@@ -21,6 +21,7 @@ const NAV: NavItem[] = [
   { id: 'rooms', label: 'Room Board', icon: Icon('M4 6h16M4 6a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2M4 6l8-3 8 3M9 13h6') },
   { id: 'inhouse', label: 'In-House Guests', icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z') },
   { id: 'bookings', label: 'Reservations', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
+  { id: 'dues', label: 'Dues', icon: Icon('M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z') },
   { id: 'housekeeping', label: 'Housekeeping', icon: Icon('M9 3v2m6-2v2M4 8h16M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8H5z') },
   { id: 'reports', label: 'Reports', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
   { id: 'grid', label: 'Rate Grid', icon: Icon('M3 3h18v18H3V3zm0 6h18M3 15h18M9 3v18M15 3v18') },

@@ -388,6 +388,36 @@ export class BookingsService {
       });
   }
 
+  /**
+   * Hotel-wide Dues — every booking (in-house, already checked out, or a
+   * future reservation) with money still owed, computed via the same
+   * computeInvoiceTotals grand-total logic as everywhere else (§ added
+   * beyond MD spec, at the user's request — "the Due feature like Skymax").
+   * Checked-out-with-a-balance is flagged as the most urgent case: the
+   * guest has already left without settling.
+   */
+  async listDues(hotelId: string) {
+    const bookings = await this.prisma.booking.findMany({
+      where: { hotelId, status: { not: 'cancelled' } },
+      include: { payments: true, lineItems: true, assignedRoom: true },
+      orderBy: { checkIn: 'desc' },
+    });
+
+    return bookings
+      .map((b) => {
+        const totals = computeInvoiceTotals({
+          totalAmount: Number(b.totalAmount),
+          lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+          discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+          gstExempt: b.gstExempt,
+        });
+        const due = totals.grandTotal - Number(b.paidAmount ?? 0);
+        return { booking: b, roomNumber: b.assignedRoom?.roomNumber ?? null, grandTotal: totals.grandTotal, due };
+      })
+      .filter((r) => r.due > 0.01)
+      .sort((a, b) => b.due - a.due);
+  }
+
   /** Owner-only; note hidden from housekeeping at the router layer, same pattern as cleaning discrepancies (§8.7). */
   async resolveDelay(input: { bookingId: string; resolvedBy: string; note: string }) {
     const booking = await this.prisma.booking.update({

@@ -141,6 +141,8 @@ export function createBookingsRouter(bookings: BookingsService) {
 
     listInHouse: frontDeskUp.input(z.object({ hotelId: z.string() })).query(({ input }) => bookings.listInHouse(input.hotelId)),
 
+    listDues: frontDeskUp.input(z.object({ hotelId: z.string() })).query(({ input }) => bookings.listDues(input.hotelId)),
+
     resolveDelay: ownerOrManager
       .input(z.object({ bookingId: z.string(), note: z.string().min(1) }))
       .mutation(({ ctx, input }) => bookings.resolveDelay({ ...input, resolvedBy: ctx.user.userId })),

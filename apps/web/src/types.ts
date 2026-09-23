@@ -88,6 +88,13 @@ export interface Booking {
   lineItems?: InvoiceLineItem[];
 }
 
+export interface DueRow {
+  booking: Booking;
+  roomNumber: string | null;
+  grandTotal: number;
+  due: number;
+}
+
 export interface InvoiceTotals {
   basePrice: number;
   extraCharges: number;

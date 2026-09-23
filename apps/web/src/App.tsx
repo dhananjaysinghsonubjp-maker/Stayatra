@@ -8,6 +8,7 @@ import { RoomBoard } from './panels/RoomBoard';
 import { InHouse } from './panels/InHouse';
 import { RateGrid } from './panels/RateGrid';
 import { Bookings } from './panels/Bookings';
+import { Dues } from './panels/Dues';
 import { Housekeeping } from './panels/Housekeeping';
 import { Reports } from './panels/Reports';
 import { Sidebar, type Tab } from './layout/Sidebar';
@@ -54,7 +55,7 @@ function Shell() {
   const visibleTabs: Tab[] = [
     'dashboard',
     'rooms',
-    ...(!isHousekeeping ? (['inhouse', 'bookings', 'grid'] as Tab[]) : []),
+    ...(!isHousekeeping ? (['inhouse', 'bookings', 'dues', 'grid'] as Tab[]) : []),
     'housekeeping',
     ...(canManage ? (['reports', 'setup'] as Tab[]) : []),
   ];
@@ -79,6 +80,7 @@ function Shell() {
           {tab === 'inhouse' && !isHousekeeping && <InHouse hotelId={hotel.id} />}
           {tab === 'grid' && !isHousekeeping && <RateGrid hotelId={hotel.id} />}
           {tab === 'bookings' && !isHousekeeping && <Bookings hotelId={hotel.id} />}
+          {tab === 'dues' && !isHousekeeping && <Dues hotelId={hotel.id} />}
           {tab === 'housekeeping' && <Housekeeping hotelId={hotel.id} />}
           {tab === 'reports' && canManage && <Reports hotelId={hotel.id} />}
           {tab === 'setup' && canManage && <Onboarding hotel={hotel} onHotelCreated={setHotel} />}
