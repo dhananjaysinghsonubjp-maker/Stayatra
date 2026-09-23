@@ -82,6 +82,10 @@ export function InvoiceStep({
     gstExempt: !gstEnabled,
   });
   const outstanding = Math.max(0, totals.grandTotal - alreadyPaid);
+  // what's actually left owing once the amount currently entered is applied —
+  // this is what should drive the "Due" indicator, not the static outstanding
+  // total, otherwise typing a partial amount never visibly does anything.
+  const remainingAfterPayment = Math.max(0, outstanding - (mode === 'due' ? 0 : amount));
 
   useEffect(() => {
     if (mode === 'full') setAmount(outstanding);
@@ -140,7 +144,12 @@ export function InvoiceStep({
             <h5 className="text-sm font-semibold text-slate-900">Payment</h5>
             <p className="text-xs text-slate-500">Collect now or leave as due</p>
           </div>
-          <Badge tone={outstanding > 0 ? 'occupied' : 'available'}>Due ₹{outstanding.toFixed(2)}</Badge>
+          <div className="text-right">
+            <Badge tone={remainingAfterPayment > 0 ? 'occupied' : 'available'}>
+              {mode === 'due' ? 'Due' : 'Due after this payment'} ₹{remainingAfterPayment.toFixed(2)}
+            </Badge>
+            {mode !== 'due' && amount > 0 && <p className="mt-1 text-xs text-slate-400">Total owed ₹{outstanding.toFixed(2)} − paying ₹{amount.toFixed(2)} now</p>}
+          </div>
         </div>
 
         <div className="mb-4 flex rounded-lg bg-slate-100 p-1">
@@ -350,6 +359,22 @@ export function InvoiceStep({
           <div className="mt-2 flex justify-between rounded-lg bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-800">
             <span>Total</span>
             <span>₹{totals.grandTotal.toFixed(2)}</span>
+          </div>
+          {alreadyPaid > 0 && (
+            <div className="flex justify-between text-slate-500">
+              <span>Already paid</span>
+              <span>₹{alreadyPaid.toFixed(2)}</span>
+            </div>
+          )}
+          {mode !== 'due' && amount > 0 && (
+            <div className="flex justify-between text-emerald-600">
+              <span>Paying now</span>
+              <span>₹{amount.toFixed(2)}</span>
+            </div>
+          )}
+          <div className={`flex justify-between font-medium ${remainingAfterPayment > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+            <span>Due</span>
+            <span>{remainingAfterPayment > 0 ? `₹${remainingAfterPayment.toFixed(2)}` : 'Paid in full'}</span>
           </div>
         </div>
       </Card>
