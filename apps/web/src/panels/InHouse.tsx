@@ -3,13 +3,16 @@ import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Card, EmptyState, PageHeader } from '../components/ui';
 import { computeInvoiceTotals } from '../invoice';
+import { EditBookingModal } from './EditBookingModal';
 import type { InHouseRow } from '../types';
 
 export function InHouse({ hotelId }: { hotelId: string }) {
   const { token, role } = useAuth();
   const [rows, setRows] = useState<InHouseRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
   const canResolve = ['owner', 'manager'].includes(role('pms') ?? '');
+  const canManage = ['owner', 'manager', 'front_desk'].includes(role('pms') ?? '');
 
   async function refresh() {
     try {
@@ -87,11 +90,18 @@ export function InHouse({ hotelId }: { hotelId: string }) {
                         )}
                       </td>
                       <td className="px-5 py-3 text-right">
-                        {r.delayed && canResolve && (
-                          <button onClick={() => resolveDelay(r.booking.id)} className="text-xs font-medium text-brand-600 hover:underline">
-                            Resolve
-                          </button>
-                        )}
+                        <div className="flex justify-end gap-3">
+                          {canManage && (
+                            <button onClick={() => setEditingBookingId(r.booking.id)} className="text-xs font-medium text-brand-600 hover:underline">
+                              Manage
+                            </button>
+                          )}
+                          {r.delayed && canResolve && (
+                            <button onClick={() => resolveDelay(r.booking.id)} className="text-xs font-medium text-brand-600 hover:underline">
+                              Resolve
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -101,6 +111,15 @@ export function InHouse({ hotelId }: { hotelId: string }) {
           </div>
         )}
       </Card>
+
+      {editingBookingId && (
+        <EditBookingModal
+          hotelId={hotelId}
+          bookingId={editingBookingId}
+          onClose={() => setEditingBookingId(null)}
+          onDone={refresh}
+        />
+      )}
     </div>
   );
 }

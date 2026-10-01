@@ -1,9 +1,12 @@
 // Foundation schema for the hotel platform (MASTER_SPEC.md §5, §8).
 // Scope matches the agreed hotel #1 launch bar: Channel Manager core + shared
-// bookings/payments + PMS rooms/check-in/housekeeping/audit. Billing (§5.4),
-// affiliate/commission tables (§5.5), guest messaging (§5.2's guest_messages,
-// Phase 2), and theft-protection-specific reconciliation logic (§8.7) are
-// deliberately deferred — see memory/hotel_platform_build_plan.md.
+// bookings/payments + PMS rooms/check-in/housekeeping/audit. Guest messaging
+// (§5.2's guest_messages, Phase 2) and theft-protection-specific
+// reconciliation logic (§8.7) are still deliberately deferred — see
+// memory/hotel_platform_build_plan.md. Billing (§5.4) now has a real, simple
+// version: SubscriptionPlan/Subscription below, with the actual gateway call
+// stubbed (no Razorpay credentials exist yet) — same swap-later pattern as
+// id-extraction's StubIdExtractor.
 
 generator client {
   provider = "prisma-client-js"
@@ -23,16 +26,121 @@ enum ModuleType {
 }
 
 model Organization {
-  id       String   @id @default(cuid())
-  name     String
-  planTier String?  @map("plan_tier")
+  id        String   @id @default(cuid())
+  name      String
+  planTier  String?  @map("plan_tier")
+  // platform-admin kill switch for a tenant — separate from billing state
+  // (below); this is a manual ops action, not a payment lapse.
+  suspended Boolean  @default(false)
+  // §5.5 — set by a platform admin assigning this tenant to a reseller/
+  // white-label partner; null means it came in direct. Only tracking today
+  // (name + tag), no commission payout math — that's derived from billing
+  // (below) × Affiliate.commissionRate, not built yet.
+  referredByAffiliateId String? @map("referred_by_affiliate_id")
   createdAt DateTime @default(now()) @map("created_at")
 
-  modules OrganizationModule[]
-  users   User[]
-  hotels  Hotel[]
+  modules      OrganizationModule[]
+  users        User[]
+  hotels       Hotel[]
+  affiliate    Affiliate?           @relation(fields: [referredByAffiliateId], references: [id])
+  subscription Subscription?
 
   @@map("organizations")
+}
+
+// §5.4 catalog — what's actually for sale. Seeded once at API boot
+// (see PlansService), editable afterward from Super Admin. `modules` is the
+// set of ModuleType this plan grants on purchase — the one place plan
+// selection turns into real OrganizationModule rows.
+model SubscriptionPlan {
+  id            String       @id @default(cuid())
+  key           String       @unique // stable slug used by the signup UI, e.g. "cm_pms_theft"
+  name          String
+  description   String
+  modules       ModuleType[]
+  priceMonthly  Decimal      @map("price_monthly") @db.Decimal(10, 2) // placeholder pricing — edit for real numbers later
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  subscriptions Subscription[]
+
+  @@map("subscription_plans")
+}
+
+// §5.4, simplified: one active subscription per organization. The actual
+// gateway call is stubbed (StubPaymentGateway — no Razorpay credentials
+// exist yet); "buying" a plan activates it immediately rather than routing
+// through a real charge. `gatewayReference` stays null until a real gateway
+// is wired in, at which point it'd point at that gateway's own subscription
+// object, same as the spec's original design.
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String             @unique @map("organization_id")
+  planId             String             @map("plan_id")
+  status             SubscriptionStatus @default(active)
+  trialEndsAt        DateTime?          @map("trial_ends_at")
+  currentPeriodStart DateTime           @default(now()) @map("current_period_start")
+  currentPeriodEnd   DateTime           @map("current_period_end")
+  gatewayReference   String?            @map("gateway_reference")
+  createdAt          DateTime           @default(now()) @map("created_at")
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  locked
+  cancelled
+}
+
+// A reseller/white-label partner (§5.5). Gets a scoped, re-skinned copy of
+// the Super Admin console — same capabilities (module entitlements, suspend/
+// reactivate), but only ever sees organizations it referred, never the whole
+// platform. `brandName`/`logoUrl`/`primaryColor` re-skin that portal's own
+// chrome; this does NOT change how any individual hotel's PMS looks — the
+// spec is explicit that white-label only re-skins the partner's own console,
+// not each downstream hotel's product. No self-registration — a platform
+// admin creates every affiliate account, mirroring how hotel staff and
+// platform admins themselves are onboarded (never a public signup form).
+model Affiliate {
+  id             String   @id @default(cuid())
+  name           String
+  email          String   @unique
+  passwordHash   String   @map("password_hash")
+  // tracking only for now — % of what the hotel pays us, once billing (§5.4)
+  // exists to compute an actual payout from. Not used for math yet.
+  commissionRate Decimal? @map("commission_rate") @db.Decimal(5, 2)
+  brandName      String?  @map("brand_name")
+  logoUrl        String?  @map("logo_url")
+  primaryColor   String?  @map("primary_color") // hex, e.g. "#4f46e5" — the one color this partner's portal is themed with
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organizations Organization[]
+  sessions      Session[]
+
+  @@map("affiliates")
+}
+
+// A platform operator — manages every tenant organization, not scoped to any
+// one of them. Deliberately its own model rather than a flag on `User`: a
+// `User` always belongs to exactly one Organization (§5.5), which is the wrong
+// shape for someone who oversees all of them. No self-registration, same as
+// hotel staff (§8.2) — the first row is created by a one-off ops script, not
+// a public endpoint (see apps/api/scripts/create-platform-admin.mjs).
+model PlatformAdmin {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  sessions Session[]
+
+  @@map("platform_admins")
 }
 
 // enforces §5.5's rule: theft_protection can only be enabled if pms is also
@@ -86,7 +194,10 @@ model Hotel {
   id                  String   @id @default(cuid())
   organizationId      String   @map("organization_id")
   name                String
+  addressLine         String?  @map("address_line") // street address — added beyond MD spec's sketch, for Super Admin's hotel detail view
   city                String?
+  state               String?
+  pincode             String?
   shortCode           String   @unique @map("short_code") // Hotel ID for PMS PIN login (§8.1)
   gstRegistration     String?  @map("gst_registration")
   dpdpConsentAt       DateTime? @map("dpdp_consent_at")
@@ -104,6 +215,7 @@ model Hotel {
   loginAttempts   LoginAttempt[]
   pinStaff        User[]
   guests          Guest[]
+  notifications   Notification[]
 
   @@map("hotels")
 }
@@ -147,6 +259,8 @@ enum OtaCode {
   cleartrip
   expedia
   airbnb
+  easemytrip
+  yatra
 }
 
 model OtaConnection {
@@ -155,6 +269,10 @@ model OtaConnection {
   otaCode       OtaCode  @map("ota_code")
   status        String   @default("pending") // 'pending' | 'connected' | 'error'
   credentialRef String?  @map("credential_ref") // points at the vault, never inline (§5.1)
+  // channel economics (§6 Unified Ledger Dashboard: "store commission %
+  // per channel even before this screen reads them") — used to derive
+  // "payable to property" on the bookings table without a second accounting system.
+  commissionRatePercent Decimal? @map("commission_rate_percent") @db.Decimal(5, 2)
   createdAt     DateTime @default(now()) @map("created_at")
 
   hotel           Hotel            @relation(fields: [hotelId], references: [id], onDelete: Cascade)
@@ -162,16 +280,63 @@ model OtaConnection {
   inventoryRates  InventoryRate[]
   restrictions    Restriction[]
   bookings        Booking[]
+  credential      OtaCredential?
+  apiLogs         OtaApiLog[]
 
   @@unique([hotelId, otaCode])
   @@map("ota_connections")
 }
 
+// Encrypted at rest (AES-256-GCM, CredentialVaultService) — never plaintext,
+// never inline on OtaConnection itself (§3, §7 Phase 1 #13, §11's "never embed
+// a password in anything client-readable" anti-pattern warning).
+model OtaCredential {
+  id              String   @id @default(cuid())
+  otaConnectionId String   @unique @map("ota_connection_id")
+  cipherText      String   @map("cipher_text")
+  iv              String
+  authTag         String   @map("auth_tag")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  otaConnection OtaConnection @relation(fields: [otaConnectionId], references: [id], onDelete: Cascade)
+
+  @@map("ota_credentials")
+}
+
+// Every real adapter's raw request/response, per direct-ota-integration-guide.md
+// §2.3: "OTA support always asks for exact payloads + timestamps." Card data
+// never transits ARI calls, so nothing here needs masking — but this table is
+// insert-only, same write-once discipline as cleaning photos, for the same
+// audit-trail reason.
+model OtaApiLog {
+  id              String   @id @default(cuid())
+  otaConnectionId String   @map("ota_connection_id")
+  direction       String // 'outbound' | 'inbound'
+  endpoint        String
+  requestBody     String?  @map("request_body") @db.Text
+  responseBody    String?  @map("response_body") @db.Text
+  httpStatus      Int?     @map("http_status")
+  latencyMs       Int?     @map("latency_ms")
+  errorMessage    String?  @map("error_message")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  otaConnection OtaConnection @relation(fields: [otaConnectionId], references: [id], onDelete: Cascade)
+
+  @@index([otaConnectionId, createdAt])
+  @@map("ota_api_logs")
+}
+
 model OtaRoomMapping {
-  id              String @id @default(cuid())
-  otaConnectionId String @map("ota_connection_id")
-  roomCategoryId  String @map("room_category_id")
-  otaRoomName     String @map("ota_room_name")
+  id              String  @id @default(cuid())
+  otaConnectionId String  @map("ota_connection_id")
+  roomCategoryId  String  @map("room_category_id")
+  otaRoomName     String  @map("ota_room_name") // free-text display label — always present, works for every OTA
+  // A real adapter (e.g. Agoda's SetAriV2) pushes by the OTA's own room/rate
+  // *code*, not a display name — nullable because stub-only OTAs (no public
+  // API yet) have no code to fetch, only the human-entered name above.
+  otaRoomCode     String? @map("ota_room_code")
+  otaRatePlanCode String? @map("ota_rate_plan_code")
 
   otaConnection OtaConnection @relation(fields: [otaConnectionId], references: [id], onDelete: Cascade)
   roomCategory  RoomCategory  @relation(fields: [roomCategoryId], references: [id], onDelete: Cascade)
@@ -306,6 +471,8 @@ enum BookingSource {
   cleartrip
   expedia
   airbnb
+  easemytrip
+  yatra
   direct // manual/future-dated entry, §8.4
   walk_in // checked in on the spot, §8.3
 }
@@ -346,6 +513,11 @@ model Booking {
   totalAmount      Decimal       @map("total_amount") @db.Decimal(10, 2) // base room charge — the payable grand total also includes lineItems and subtracts discountAmount, see common/invoice.ts
   discountAmount   Decimal?      @map("discount_amount") @db.Decimal(10, 2) // added beyond MD spec — flat discount off the grand total
   gstExempt        Boolean       @default(false) @map("gst_exempt") // added beyond MD spec — bypasses the §5.1 GST slab entirely when true
+  // set the moment status becomes checked_in (both walk-in and reservation
+  // check-in) — the basis for the 1-hour post-check-in edit window (§ added
+  // beyond MD spec, at user request). Distinct from `createdAt`: for a
+  // reservation checked in days after it was created, createdAt is stale.
+  checkedInAt      DateTime?     @map("checked_in_at")
   createdAt        DateTime      @default(now()) @map("created_at")
 
   hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
@@ -354,6 +526,7 @@ model Booking {
   guest         Guest?         @relation(fields: [guestId], references: [id])
   payments      Payment[]
   lineItems     InvoiceLineItem[]
+  guests        BookingGuest[]
   room          Room?          @relation("CurrentStay")
   assignedRoom  Room?          @relation("AssignedRoom", fields: [assignedRoomId], references: [id])
 
@@ -407,6 +580,26 @@ model InvoiceLineItem {
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@map("invoice_line_items")
+}
+
+// A co-occupant on an existing booking — "add another guest" (§ added beyond
+// MD spec, user request). No separate room or payment; just another name/ID
+// recorded against the same stay. Reuses the same guest-detail shape as the
+// primary guest, but deliberately its own row rather than a second Booking —
+// this person didn't book a room, they're sharing one.
+model BookingGuest {
+  id        String   @id @default(cuid())
+  bookingId String   @map("booking_id")
+  title     String?
+  name      String
+  phone     String?
+  idType    IdType?  @map("id_type")
+  idNumber  String?  @map("id_number")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("booking_guests")
 }
 
 // ── §5.3 PMS: physical rooms, housekeeping ──────────────────────────────────
@@ -479,6 +672,16 @@ enum AuditEventType {
   UNRECORDED_OCCUPANCY_FLAGGED
   SYNC_FAILED // added beyond the MD spec's list — OTA push exhausted retries (§7 Phase 1 #10, §2)
   DELAY_RESOLVED // added beyond the MD spec's list — §8.7's "Delayed" state resolved by an owner/manager
+  // Channel Manager's own audit trail (Phase 2's "Audit logs screen" — §7) — a bulk/override write
+  // already carries its own source/changed_by on inventory_rates itself (§5.1), but these are the
+  // actions with no other durable record anywhere: restriction rules, room mapping, connection
+  // setup, and credentials being touched at all (never the credential values themselves).
+  RATE_BULK_UPDATE
+  RATE_VALUE_OVERRIDE
+  RESTRICTION_UPDATED
+  ROOM_MAPPING_UPDATED
+  CREDENTIALS_UPDATED
+  CHANNEL_CONNECTED
 }
 
 model AuditLog {
@@ -496,16 +699,44 @@ model AuditLog {
   @@map("audit_log")
 }
 
+// In-app alerts (§7 Phase 1 #10/#11) — the interim alert surface until mobile
+// push exists (Expo push per §3/§9.2 needs a mobile client to send to).
+enum NotificationType {
+  sync_failed
+  booking_created
+  booking_cancelled
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  hotelId   String           @map("hotel_id")
+  type      NotificationType
+  title     String
+  body      String
+  link      String? // deep-link within the web app, e.g. a tab name
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, read, createdAt])
+  @@map("notifications")
+}
+
 // ── §5.3 Sessions & PIN login lockouts ───────────────────────────────────────
 
 model Session {
-  id        String   @id @default(cuid())
-  userId    String?  @map("user_id") // null for PMS PIN sessions not tied to a `users` row
-  token     String   @unique
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id              String   @id @default(cuid())
+  userId          String?  @map("user_id") // null for PMS PIN sessions not tied to a `users` row
+  platformAdminId String?  @map("platform_admin_id") // exactly one of these three is set per session, never more than one
+  affiliateId     String?  @map("affiliate_id")
+  token           String   @unique
+  expiresAt       DateTime @map("expires_at")
+  createdAt       DateTime @default(now()) @map("created_at")
 
-  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platformAdmin PlatformAdmin? @relation(fields: [platformAdminId], references: [id], onDelete: Cascade)
+  affiliate     Affiliate?     @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
 
   @@map("sessions")
 }

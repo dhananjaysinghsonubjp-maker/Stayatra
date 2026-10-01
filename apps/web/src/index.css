@@ -9,6 +9,16 @@
   --color-brand-600: #4f46e5;
   --color-brand-700: #4338ca;
 
+  /* Royal blue — Check-In's own accent palette (§ scoped to the check-in
+     wizard only, so the rest of the app keeps its indigo `brand` colors). */
+  --color-royal-50: #eef2ff;
+  --color-royal-100: #e0e9ff;
+  --color-royal-200: #c2d3ff;
+  --color-royal-500: #5578e8;
+  --color-royal-600: #4169e1;
+  --color-royal-700: #3151b8;
+  --color-royal-800: #263e8f;
+
   --color-status-available: #10b981;
   --color-status-available-bg: #ecfdf5;
   --color-status-occupied: #f59e0b;
@@ -27,4 +37,14 @@ body {
   margin: 0;
   background: #f8fafc;
   color: #0f172a;
+}
+
+/* Plain amount fields, no spinner arrows — every number input in the app. */
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }

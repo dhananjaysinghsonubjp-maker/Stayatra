@@ -13,6 +13,11 @@ import { OtaService } from './ota/ota.service.js';
 import { OtaSyncService } from './sync/ota-sync.service.js';
 import { ReportsService } from './reports/reports.service.js';
 import { GuestsService } from './guests/guests.service.js';
+import { PlatformAdminService } from './platform-admin/platform-admin.service.js';
+import { AffiliateService } from './platform-admin/affiliate.service.js';
+import { PlansService } from './plans/plans.service.js';
+import { NotificationsService } from './notifications/notifications.service.js';
+import { AuditService } from './common/audit.service.js';
 import { createAppRouter } from './trpc/app.router.js';
 import { createContextFactory } from './trpc/context.js';
 
@@ -22,6 +27,10 @@ async function bootstrap() {
 
   const prisma = app.get(PrismaService);
   const auth = app.get(AuthService);
+  const platformAdmin = app.get(PlatformAdminService);
+  const affiliate = app.get(AffiliateService);
+  const plans = app.get(PlansService);
+  await plans.seedDefaults();
   const appRouter = createAppRouter({
     auth,
     hotels: app.get(HotelsService),
@@ -32,13 +41,18 @@ async function bootstrap() {
     sync: app.get(OtaSyncService),
     reports: app.get(ReportsService),
     guests: app.get(GuestsService),
+    platformAdmin,
+    affiliate,
+    plans,
+    notifications: app.get(NotificationsService),
+    audit: app.get(AuditService),
   });
 
   app.use(
     '/trpc',
     createExpressMiddleware({
       router: appRouter,
-      createContext: createContextFactory(prisma, auth),
+      createContext: createContextFactory(prisma, auth, platformAdmin, affiliate),
     }),
   );
 

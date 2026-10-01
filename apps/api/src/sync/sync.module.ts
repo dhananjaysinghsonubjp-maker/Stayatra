@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
 import { PgBossQueueService } from './pg-boss-queue.service.js';
 import { OtaSyncService } from './ota-sync.service.js';
 import { JOB_QUEUE } from './queue.interface.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
+import { OtaModule } from '../ota/ota.module.js';
 
 @Module({
+  imports: [NotificationsModule, OtaModule],
   providers: [{ provide: JOB_QUEUE, useClass: PgBossQueueService }, OtaSyncService],
   exports: [OtaSyncService],
 })

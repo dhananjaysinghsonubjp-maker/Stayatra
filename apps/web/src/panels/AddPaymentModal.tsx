@@ -33,8 +33,8 @@ export function AddPaymentModal({ booking, onClose, onDone }: { booking: Booking
   }
 
   return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
-      <Card className="w-full max-w-md p-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-4">
+      <Card className="w-full max-w-md p-5">
         <h4 className="mb-1 text-sm font-semibold text-slate-900">Add payment — {booking.guestName}</h4>
         <p className="mb-4 text-xs text-slate-500">Outstanding: ₹{outstanding.toFixed(2)}</p>
         <form onSubmit={submit} className="space-y-3.5">

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { mutate, query, uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
-import { Badge, Button, Card, Field, inputClass } from '../../components/ui';
+import { Badge, Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
 import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
 import type { Booking, Gender, Guest, IdType, RatePlan, Room } from '../../types';
@@ -178,11 +178,27 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
     }
   }
 
-  /** Pure validation + advance — nothing is saved until completeCheckIn (step 2's "Complete Check-in"). */
+  /**
+   * Pure validation + advance — nothing is saved until completeCheckIn (step
+   * 2's "Complete Check-in"). The form has noValidate (see JSX below): every
+   * constraint that used to live only as a `required`/`min`/`max` HTML
+   * attribute silently intercepted submission before this handler ever ran,
+   * making the matching custom error message below dead code and surfacing
+   * an inconsistent native browser popup instead — so each one is
+   * re-checked here explicitly.
+   */
   function goToStepTwo(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
+    if (mode === 'new' && !guestName.trim()) {
+      setError('Full name is required');
+      return;
+    }
+    if (mode === 'new' && guestPhone && !/^\d{10}$/.test(guestPhone)) {
+      setError('Mobile number must be exactly 10 digits');
+      return;
+    }
     if (mode === 'new' && !purposeOfStay) {
       setError('Purpose of stay is required');
       return;
@@ -193,6 +209,10 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
     }
     if (mode === 'new' && (!Number.isInteger(nights) || nights < 1 || nights > 365)) {
       setError('Nights must be between 1 and 365');
+      return;
+    }
+    if (!idNumber.trim()) {
+      setError('ID number is required');
       return;
     }
     if (mode === 'new' && !room) {
@@ -258,7 +278,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
             checkIn: checkIn.toISOString(),
             checkOut: checkOut.toISOString(),
             nights,
-            totalAmount,
+            totalAmount: draft.adjustedTotalAmount ?? totalAmount,
             ...invoiceExtras,
           },
           token ?? undefined,
@@ -281,8 +301,12 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
   const title_ = room ? `Check in — ${room.roomNumber}` : selectedReservation ? `Check in — ${selectedReservation.guestName}` : 'Check in';
 
   return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center overflow-y-auto bg-slate-900/40 px-4 py-8" onClick={onClose}>
-      <Card className="w-full max-w-2xl p-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-10 flex items-center justify-center overflow-y-auto bg-slate-900/40 px-4 py-8">
+      {/* No click-outside-to-close here on purpose: this is a long, multi-step
+          form (guest details + payment), and a stray click just past the
+          card's edge used to silently discard everything typed so far with
+          no confirmation. Leaving via "Cancel"/"Cancel check-in" is explicit. */}
+      <Card className="w-full max-w-2xl p-5">
         <div className="mb-4 flex items-center justify-between">
           <h4 className="text-sm font-semibold text-slate-900">{title_}</h4>
           {room?.roomCategory && <Badge tone="slate">{room.roomCategory.name}</Badge>}
@@ -290,7 +314,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
 
         <div className="mb-5 flex items-center justify-center gap-3">
           <StepDot n={1} active={step === 1} done={step > 1} />
-          <div className={`h-px w-10 ${step > 1 ? 'bg-brand-500' : 'bg-slate-200'}`} />
+          <div className={`h-px w-10 ${step > 1 ? 'bg-royal-500' : 'bg-slate-200'}`} />
           <StepDot n={2} active={step === 2} done={false} />
         </div>
 
@@ -315,7 +339,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
               </div>
             )}
 
-            <form onSubmit={goToStepTwo} className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
+            <form onSubmit={goToStepTwo} noValidate className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
               {mode === 'existing' && !reservation && (
                 <Field label="Reservation">
                   <select className={inputClass} value={selectedReservationId} onChange={(e) => setSelectedReservationId(e.target.value)} required>
@@ -395,37 +419,39 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
                     {scanNotice && <p className="text-xs text-amber-600">{scanNotice}</p>}
                   </div>
 
-                  <div className="relative">
+                  <div>
                     <Field label="Mobile number">
-                      <input
-                        className={inputClass}
-                        value={guestPhone}
-                        onChange={(e) => {
-                          setGuestPhone(e.target.value);
-                          setGuestId(undefined);
-                        }}
-                        pattern="\d{10}"
-                        placeholder="10-digit number"
-                      />
+                      <div className="relative">
+                        <input
+                          className={`${inputClass} w-full`}
+                          value={guestPhone}
+                          onChange={(e) => {
+                            setGuestPhone(e.target.value);
+                            setGuestId(undefined);
+                          }}
+                          pattern="\d{10}"
+                          placeholder="10-digit number"
+                        />
+                        {matches.length > 0 && (
+                          <div className="absolute z-10 mt-1.5 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-md">
+                            {matches.map((g) => (
+                              <button
+                                key={g.id}
+                                type="button"
+                                onClick={() => applyGuest(g)}
+                                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                              >
+                                <span className="font-medium text-slate-800">{g.name}</span>{' '}
+                                <span className="text-slate-400">{g.phone}{g.city ? ` · ${g.city}` : ''}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </Field>
-                    <p className="-mt-2 text-xs text-slate-400">
+                    <p className="mt-1.5 text-xs text-slate-400">
                       {searching ? 'Searching…' : 'Enter 10 digits; if a saved guest appears, select them to load details.'}
                     </p>
-                    {matches.length > 0 && (
-                      <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-md">
-                        {matches.map((g) => (
-                          <button
-                            key={g.id}
-                            type="button"
-                            onClick={() => applyGuest(g)}
-                            className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                          >
-                            <span className="font-medium text-slate-800">{g.name}</span>{' '}
-                            <span className="text-slate-400">{g.phone}{g.city ? ` · ${g.city}` : ''}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
 
                   <div className="grid grid-cols-4 gap-3">
@@ -517,7 +543,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
                 <Button type="button" variant="secondary" onClick={onClose}>
                   Cancel
                 </Button>
-                <Button type="submit">Next · Payment</Button>
+                <Button type="submit" variant="royal">Next · Payment</Button>
               </div>
             </form>
           </>
@@ -546,7 +572,7 @@ function StepDot({ n, active, done }: { n: number; active: boolean; done: boolea
   return (
     <div
       className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-semibold ${
-        done ? 'border-brand-500 bg-brand-500 text-white' : active ? 'border-brand-500 text-brand-600' : 'border-slate-200 text-slate-400'
+        done ? 'border-royal-500 bg-royal-500 text-white' : active ? 'border-royal-500 text-royal-600' : 'border-slate-200 text-slate-400'
       }`}
     >
       {done ? '✓' : n}

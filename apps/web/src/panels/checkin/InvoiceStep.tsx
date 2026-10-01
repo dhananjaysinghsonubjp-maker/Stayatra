@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
-import { Badge, Button, Card, Field, inputClass } from '../../components/ui';
+import { Badge, Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
+import { computeGstSlab } from '../../gst';
 import { computeInvoiceTotals } from '../../invoice';
 import { PAYMENT_METHODS } from '../../paymentMethods';
 import type { PaymentMethod } from '../../types';
 
 type PaymentMode = 'full' | 'partial' | 'due';
+type GstMode = 'exclusive' | 'inclusive' | 'exempt';
+type DiscountType = 'flat' | 'percent';
 
 export interface DraftLineItem {
   key: string;
@@ -20,6 +23,13 @@ export interface InvoiceDraft {
   lineItems: DraftLineItem[];
   discountAmount: number | null;
   gstExempt: boolean;
+  /**
+   * Only set when GST mode is "inclusive" — the room charge the guest agreed
+   * to already includes tax, so this is the backed-out pre-tax base (what
+   * every other screen's `computeInvoiceTotals` call expects `totalAmount` to
+   * be). Callers should send this instead of their own pre-tax figure when present.
+   */
+  adjustedTotalAmount?: number;
   payment?: { amount: number; method: PaymentMethod; referenceNumber?: string; receiptPhotoPath?: string; collectedAt: string };
 }
 
@@ -64,22 +74,44 @@ export function InvoiceStep({
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
   // invoice settings — local draft only
-  const [gstEnabled, setGstEnabled] = useState(true);
+  const [gstMode, setGstMode] = useState<GstMode>('exclusive');
   const [discountEnabled, setDiscountEnabled] = useState(false);
-  const [discountAmount, setDiscountAmount] = useState(0);
+  const [discountType, setDiscountType] = useState<DiscountType>('flat');
+  // '' rather than 0 so the field starts genuinely empty — a real 0 renders as
+  // an opaque "0", indistinguishable from an intentional entry, whereas an
+  // empty value lets the placeholder show through at its normal low opacity
+  // as a hint of what to fill in.
+  const [discountAmount, setDiscountAmount] = useState<number | ''>('');
+  const [discountPercent, setDiscountPercent] = useState(10);
   const [lineItems, setLineItems] = useState<DraftLineItem[]>([]);
 
-  // add-charge form
+  // add-charge form — same empty-by-default reasoning as discountAmount above
   const [addingCharge, setAddingCharge] = useState(false);
   const [chargeDesc, setChargeDesc] = useState('');
-  const [chargeQty, setChargeQty] = useState(1);
-  const [chargeUnitPrice, setChargeUnitPrice] = useState(0);
+  const [chargeQty, setChargeQty] = useState<number | ''>('');
+  const [chargeUnitPrice, setChargeUnitPrice] = useState<number | ''>('');
+
+  const extraChargesSum = lineItems.reduce((sum, li) => sum + li.amount, 0);
+  // "Inclusive" means the room rate the guest agreed to already has GST baked
+  // in, so the pre-tax base every other screen's computeInvoiceTotals expects
+  // has to be backed out first — everything downstream still adds GST back on
+  // top of this, reconstructing the same grand total the guest was quoted.
+  const inclusiveRate = computeGstSlab(totalAmount).rate;
+  const effectiveTotalAmount =
+    gstMode === 'inclusive' ? Math.round((totalAmount / (1 + inclusiveRate / 100)) * 100) / 100 : totalAmount;
+  const discountBase = effectiveTotalAmount + extraChargesSum;
+  const effectiveDiscountAmount = discountEnabled
+    ? discountType === 'percent'
+      ? Math.round(((discountPercent / 100) * discountBase + Number.EPSILON) * 100) / 100
+      : Number(discountAmount) || 0
+    : 0;
+  const discountActive = discountEnabled && effectiveDiscountAmount > 0;
 
   const totals = computeInvoiceTotals({
-    totalAmount,
+    totalAmount: effectiveTotalAmount,
     lineItems: lineItems.map((li) => ({ amount: li.amount })),
-    discountAmount: discountEnabled ? discountAmount : 0,
-    gstExempt: !gstEnabled,
+    discountAmount: effectiveDiscountAmount,
+    gstExempt: gstMode === 'exempt',
   });
   const outstanding = Math.max(0, totals.grandTotal - alreadyPaid);
   // what's actually left owing once the amount currently entered is applied —
@@ -88,7 +120,7 @@ export function InvoiceStep({
   const remainingAfterPayment = Math.max(0, outstanding - (mode === 'due' ? 0 : amount));
 
   useEffect(() => {
-    if (mode === 'full') setAmount(outstanding);
+    if (mode === 'full') setAmount(Math.round(outstanding * 100) / 100);
     else if (mode === 'due') setAmount(0);
     // partial: leave whatever the user typed
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -96,13 +128,12 @@ export function InvoiceStep({
 
   function addCharge(e: React.FormEvent) {
     e.preventDefault();
-    setLineItems((prev) => [
-      ...prev,
-      { key: crypto.randomUUID(), description: chargeDesc, quantity: chargeQty, unitPrice: chargeUnitPrice, amount: chargeQty * chargeUnitPrice },
-    ]);
+    const quantity = Number(chargeQty) || 1;
+    const unitPrice = Number(chargeUnitPrice) || 0;
+    setLineItems((prev) => [...prev, { key: crypto.randomUUID(), description: chargeDesc, quantity, unitPrice, amount: quantity * unitPrice }]);
     setChargeDesc('');
-    setChargeQty(1);
-    setChargeUnitPrice(0);
+    setChargeQty('');
+    setChargeUnitPrice('');
     setAddingCharge(false);
   }
 
@@ -126,8 +157,9 @@ export function InvoiceStep({
   function finish() {
     onComplete({
       lineItems,
-      discountAmount: discountEnabled ? discountAmount : null,
-      gstExempt: !gstEnabled,
+      discountAmount: discountEnabled ? effectiveDiscountAmount : null,
+      gstExempt: gstMode === 'exempt',
+      adjustedTotalAmount: gstMode === 'inclusive' ? effectiveTotalAmount : undefined,
       payment:
         mode !== 'due' && amount > 0
           ? { amount, method, referenceNumber: referenceNumber || undefined, receiptPhotoPath: receiptPath, collectedAt: new Date(collectedAt).toISOString() }
@@ -216,7 +248,7 @@ export function InvoiceStep({
                     type="button"
                     onClick={() => setMethod(m.value)}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition-colors ${
-                      method === m.value ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
+                      method === m.value ? 'bg-royal-600 text-white ring-royal-600' : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
                     }`}
                   >
                     {m.label}
@@ -228,26 +260,101 @@ export function InvoiceStep({
         )}
       </Card>
 
-      {/* GST & Discount toggles */}
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="flex items-center justify-between p-4">
-          <span className="text-sm font-medium text-slate-700">GST & Tax</span>
-          <Toggle checked={gstEnabled} onChange={setGstEnabled} />
-        </Card>
+      {/* GST & Discount */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card className="p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-slate-700">Discount</span>
-            <Toggle checked={discountEnabled} onChange={setDiscountEnabled} />
+          <div className="mb-3 flex items-center gap-2.5">
+            <IconBadge><ReceiptIcon /></IconBadge>
+            <span className="text-sm font-medium text-slate-700">GST & Tax</span>
+          </div>
+          <div className="flex rounded-lg bg-slate-100 p-1">
+            {(['exclusive', 'inclusive', 'exempt'] as GstMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setGstMode(m)}
+                className={`flex-1 rounded-md py-1.5 text-xs font-semibold capitalize transition-colors ${
+                  gstMode === m ? 'bg-royal-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            {gstMode === 'exempt' ? (
+              'No GST applied to this stay'
+            ) : (
+              <>
+                <span className="rounded-full bg-royal-50 px-2 py-1 font-semibold text-royal-700">{totals.gst.rate}% GST</span>{' '}
+                {gstMode === 'inclusive' ? 'already included in the room rate' : 'added on top of the room rate'}
+              </>
+            )}
+          </p>
+        </Card>
+
+        <Card className={`p-4 transition-colors ${discountActive ? 'border-royal-200 bg-gradient-to-br from-royal-50/70 to-white' : ''}`}>
+          <div className="mb-3 flex items-center justify-between pr-2">
+            <div className="flex items-center gap-2.5">
+              <IconBadge active={discountActive}>
+                <TagIcon />
+              </IconBadge>
+              <span className="text-sm font-medium text-slate-700">Discount</span>
+            </div>
+            {/* The switch's on/off look reflects whether a discount is actually
+                applied right now (a real nonzero amount), not just whether the
+                picker below is open — so it stays at the left until a value is
+                actually entered, not the moment the panel is revealed. */}
+            <Toggle checked={discountActive} onChange={setDiscountEnabled} />
           </div>
           {discountEnabled && (
-            <input
-              className={`${inputClass} mt-3`}
-              type="number"
-              value={discountAmount}
-              onChange={(e) => setDiscountAmount(Number(e.target.value))}
-              min={0}
-              placeholder="Discount amount (₹)"
-            />
+            <>
+              <div className="mb-3 flex rounded-lg bg-slate-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setDiscountType('percent')}
+                  className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-colors ${
+                    discountType === 'percent' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                  }`}
+                >
+                  %
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiscountType('flat')}
+                  className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-colors ${
+                    discountType === 'flat' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                  }`}
+                >
+                  ₹
+                </button>
+              </div>
+              {discountType === 'percent' ? (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={discountPercent}
+                    onChange={(e) => setDiscountPercent(Number(e.target.value))}
+                    className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-royal-100 accent-royal-600"
+                  />
+                  <span className="rounded-full bg-royal-600 px-2.5 py-1 text-xs font-semibold text-white">{discountPercent}%</span>
+                </div>
+              ) : (
+                <input
+                  className={inputClass}
+                  type="number"
+                  value={discountAmount}
+                  onChange={(e) => setDiscountAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                  min={0}
+                  placeholder="Discount amount (₹)"
+                />
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                Discount amount: <span className="font-semibold text-amber-600">−₹{effectiveDiscountAmount.toFixed(2)}</span>
+              </p>
+            </>
           )}
         </Card>
       </div>
@@ -279,10 +386,13 @@ export function InvoiceStep({
             </thead>
             <tbody className="divide-y divide-slate-100">
               <tr>
-                <td className="px-5 py-3 font-medium text-slate-900">Room charge</td>
+                <td className="px-5 py-3 font-medium text-slate-900">
+                  Room charge
+                  {gstMode === 'inclusive' && <span className="ml-1.5 text-xs font-normal text-slate-400">(GST-inclusive rate: ₹{totalAmount.toFixed(2)})</span>}
+                </td>
                 <td className="px-5 py-3">1</td>
-                <td className="px-5 py-3">₹{totalAmount.toFixed(2)}</td>
-                <td className="px-5 py-3 font-medium">₹{totalAmount.toFixed(2)}</td>
+                <td className="px-5 py-3">₹{totals.basePrice.toFixed(2)}</td>
+                <td className="px-5 py-3 font-medium">₹{totals.basePrice.toFixed(2)}</td>
                 <td></td>
               </tr>
               {lineItems.map((li) => (
@@ -304,19 +414,26 @@ export function InvoiceStep({
 
         <div className="border-t border-slate-100 px-5 py-3">
           {!addingCharge ? (
-            <button type="button" onClick={() => setAddingCharge(true)} className="text-xs font-medium text-brand-600 hover:underline">
+            <button type="button" onClick={() => setAddingCharge(true)} className="text-xs font-medium text-royal-600 hover:underline">
               + Add Extra Charges
             </button>
           ) : (
             <form onSubmit={addCharge} className="grid grid-cols-4 gap-2">
               <input className={inputClass} placeholder="Description" value={chargeDesc} onChange={(e) => setChargeDesc(e.target.value)} required />
-              <input className={inputClass} type="number" placeholder="Qty" value={chargeQty} onChange={(e) => setChargeQty(Number(e.target.value))} min={1} />
               <input
                 className={inputClass}
                 type="number"
-                placeholder="Unit price"
+                placeholder="1"
+                value={chargeQty}
+                onChange={(e) => setChargeQty(e.target.value === '' ? '' : Number(e.target.value))}
+                min={1}
+              />
+              <input
+                className={inputClass}
+                type="number"
+                placeholder="0.00"
                 value={chargeUnitPrice}
-                onChange={(e) => setChargeUnitPrice(Number(e.target.value))}
+                onChange={(e) => setChargeUnitPrice(e.target.value === '' ? '' : Number(e.target.value))}
                 min={0}
               />
               <div className="flex gap-2">
@@ -353,10 +470,12 @@ export function InvoiceStep({
             </div>
           )}
           <div className="flex justify-between text-slate-500">
-            <span>GST ({totals.gst.label})</span>
+            <span>
+              GST <span className="text-slate-400">({totals.gst.rate}%{gstMode === 'inclusive' ? ' · included' : ''})</span>
+            </span>
             <span>₹{totals.gst.amount.toFixed(2)}</span>
           </div>
-          <div className="mt-2 flex justify-between rounded-lg bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-800">
+          <div className="mt-2 flex justify-between rounded-lg bg-royal-50 px-3 py-2 text-base font-semibold text-royal-800">
             <span>Total</span>
             <span>₹{totals.grandTotal.toFixed(2)}</span>
           </div>
@@ -388,7 +507,7 @@ export function InvoiceStep({
             Cancel check-in
           </Button>
         </div>
-        <Button type="button" onClick={finish} disabled={busy}>
+        <Button type="button" variant="royal" onClick={finish} disabled={busy}>
           {busy ? 'Completing…' : 'Complete Check-in'}
         </Button>
       </div>
@@ -401,9 +520,40 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (next: bool
     <button
       type="button"
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-brand-600' : 'bg-slate-300'}`}
+      className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-royal-600' : 'bg-slate-300'}`}
     >
       <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
     </button>
+  );
+}
+
+function IconBadge({ children, active = true }: { children: React.ReactNode; active?: boolean }) {
+  return (
+    <div
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+        active ? 'bg-royal-100 text-royal-700' : 'bg-slate-100 text-slate-400'
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ReceiptIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2h12a1 1 0 0 1 1 1v18l-3-2-2 2-2-2-2 2-2-2-3 2V3a1 1 0 0 1 1-1z" />
+      <line x1="9" y1="7" x2="15" y2="7" />
+      <line x1="9" y1="11" x2="15" y2="11" />
+    </svg>
+  );
+}
+
+function TagIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12.59 2.59a2 2 0 0 0-1.42-.59H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.41l8 8a2 2 0 0 0 2.82 0l7.17-7.17a2 2 0 0 0 0-2.82l-8-8z" />
+      <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
   );
 }

@@ -29,6 +29,8 @@ export interface Room {
   currentStayId: string | null;
   roomCategory: RoomCategory | null;
   currentStay: Booking | null;
+  /** Only present on bookings.getRoomBoard's response — past its cleaning deadline (§8.7), not on other room-listing endpoints. */
+  delayed?: boolean;
 }
 
 export type IdType = 'aadhaar' | 'passport' | 'driving_license' | 'voter_id' | 'other';
@@ -73,6 +75,7 @@ export interface Booking {
   idType: IdType | null;
   idNumber: string | null;
   roomCategoryId: string;
+  assignedRoomId: string | null;
   checkIn: string;
   checkOut: string;
   nights: number;
@@ -84,6 +87,9 @@ export interface Booking {
   gstExempt: boolean;
   delayResolvedAt: string | null;
   delayResolvedNote: string | null;
+  /** Set the moment status becomes checked_in — basis for the 1-hour post-check-in edit window. */
+  checkedInAt: string | null;
+  createdAt: string;
   payments?: Payment[];
   lineItems?: InvoiceLineItem[];
 }
@@ -183,11 +189,28 @@ export interface Payment {
   collectedAt: string;
 }
 
+/** A co-occupant sharing a booking's room/stay — "add another guest," not a separate booking. */
+export interface BookingGuest {
+  id: string;
+  bookingId: string;
+  title: string | null;
+  name: string;
+  phone: string | null;
+  idType: IdType | null;
+  idNumber: string | null;
+  createdAt: string;
+}
+
 export interface RatePlan {
   id: string;
   roomCategoryId: string;
   name: string;
   mealPlan: string | null;
+  isDerived: boolean;
+  baseRatePlanId: string | null;
+  formula: string | null;
+  /** Only present on rates.listAllRatePlansForHotel's response (Rate/Inventory Update's hotel-wide row list). */
+  roomCategoryName?: string;
 }
 
 export interface OtaConnection {
@@ -195,6 +218,7 @@ export interface OtaConnection {
   hotelId: string;
   otaCode: string;
   status: string;
+  commissionRatePercent: string | null;
 }
 
 export interface InventoryRate {
@@ -202,6 +226,9 @@ export interface InventoryRate {
   date: string;
   occupancyTier: number;
   price: string;
+  extraAdultPrice: string | null;
+  child1Price: string | null;
+  child2Price: string | null;
   availability: number;
   source: 'bulk_update' | 'value_override' | 'ota_push';
   gst: { rate: number; itcEligible: boolean; label: string };
@@ -212,7 +239,48 @@ export interface Restriction {
   date: string;
   channelBlocked: boolean;
   ratePlanClosed: boolean;
+  closedToArrival: boolean;
+  closedToDeparture: boolean;
   minLos: number | null;
+  maxLos: number | null;
+  bookableNights: number | null;
+  minAdvanceDays: number | null;
+  maxAdvanceDays: number | null;
+  policyOverrideId: string | null;
+  minLosArrival: number | null;
+  maxLosArrival: number | null;
+  exactLosArrival: number | null;
+  cap: number | null;
+  cutoffHours: number | null;
+  allocationCount: number | null;
+}
+
+export interface OtaRoomMapping {
+  id: string;
+  otaConnectionId: string;
+  roomCategoryId: string;
+  otaRoomName: string;
+  otaRoomCode: string | null;
+  otaRatePlanCode: string | null;
+}
+
+/** What a real adapter's fetchRemoteProducts returns — empty for stub-only OTAs. */
+export interface OtaRemoteProduct {
+  roomCode: string;
+  roomName: string;
+  ratePlanCode: string;
+  ratePlanName: string;
+}
+
+export interface Notification {
+  id: string;
+  hotelId: string;
+  type: 'sync_failed' | 'booking_created' | 'booking_cancelled';
+  title: string;
+  body: string;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
 }
 
 export interface CleaningRecord {

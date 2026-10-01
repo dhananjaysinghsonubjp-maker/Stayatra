@@ -1,12 +1,19 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { BookingStatus, Gender, IdType, PaymentMethod } from '@prisma/client';
+import { BookingSource, BookingStatus, Gender, IdType, PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { computeCleaningDeadline, isDelayed } from '../common/delay.js';
 import { computeInvoiceTotals } from '../common/invoice.js';
 import { GuestsService } from '../guests/guests.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
+import { RatesService } from '../rates/rates.service.js';
 
 const CHECK_IN_IDEMPOTENCY_WINDOW_MS = 1000 * 60 * 5;
+const BOOKING_EDIT_WINDOW_MS = 1000 * 60 * 60; // 1 hour after check-in (§ added beyond MD spec, at user request)
+
+function dateLabel(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
 
 export interface CheckInGuestDetails {
   guestId?: string;
@@ -32,6 +39,8 @@ export class BookingsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly guests: GuestsService,
+    private readonly notifications: NotificationsService,
+    private readonly rates: RatesService,
   ) {}
 
   /**
@@ -99,7 +108,7 @@ export class BookingsService {
       throw new ConflictException('No rooms available in this category for the selected dates');
     }
 
-    return this.prisma.booking.create({
+    const booking = await this.prisma.booking.create({
       data: {
         hotelId: input.hotelId,
         guestName: input.guestName,
@@ -114,6 +123,14 @@ export class BookingsService {
         source: 'direct',
       },
     });
+    await this.rates.adjustAvailabilityForStay({
+      hotelId: input.hotelId,
+      roomCategoryId: input.roomCategoryId,
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      delta: -1,
+    });
+    return booking;
   }
 
   /**
@@ -184,6 +201,7 @@ export class BookingsService {
           discountAmount: input.discountAmount,
           gstExempt: input.gstExempt ?? false,
           status: BookingStatus.checked_in,
+          checkedInAt: new Date(),
           source: 'walk_in',
         },
       });
@@ -206,6 +224,13 @@ export class BookingsService {
     });
 
     await this.audit.log({ hotelId: input.hotelId, eventType: 'CHECK_IN', actorId: input.actorId, subjectId: booking.id });
+    await this.rates.adjustAvailabilityForStay({
+      hotelId: input.hotelId,
+      roomCategoryId: booking.roomCategoryId,
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      delta: -1,
+    });
     return booking;
   }
 
@@ -243,6 +268,7 @@ export class BookingsService {
         where: { id: input.bookingId },
         data: {
           status: BookingStatus.checked_in,
+          checkedInAt: new Date(),
           assignedRoomId: input.roomId,
           idType: input.idType,
           idNumber: input.idNumber,
@@ -364,6 +390,204 @@ export class BookingsService {
     return booking;
   }
 
+  /** Shared by every "correct a recent check-in mistake" action below. */
+  private assertWithinEditWindow(booking: { status: BookingStatus; checkedInAt: Date | null }) {
+    if (booking.status !== BookingStatus.checked_in) {
+      throw new ConflictException(`Booking is ${booking.status}, not checked in — nothing to edit`);
+    }
+    if (!booking.checkedInAt || Date.now() - booking.checkedInAt.getTime() > BOOKING_EDIT_WINDOW_MS) {
+      throw new ConflictException('The 1-hour post-check-in edit window has closed');
+    }
+  }
+
+  /**
+   * Correcting a recent check-in mistake — guest details, stay dates/amount,
+   * room assignment, invoice line items, discount/GST — all in one shot, only
+   * within the 1-hour window (§ added beyond MD spec, user request). Payments
+   * are handled separately (addPayment/deletePayment) since they're an
+   * append-only ledger, not a field on the booking itself.
+   */
+  async updateBooking(input: {
+    bookingId: string;
+    guestId?: string;
+    title?: string;
+    guestName?: string;
+    guestPhone?: string;
+    email?: string;
+    gender?: Gender;
+    dateOfBirth?: Date;
+    address?: string;
+    country?: string;
+    state?: string;
+    city?: string;
+    pincode?: string;
+    idType?: IdType;
+    idNumber?: string;
+    purposeOfStay?: string;
+    roomId?: string;
+    checkIn?: Date;
+    checkOut?: Date;
+    nights?: number;
+    totalAmount?: number;
+    lineItems?: { description: string; quantity: number; unitPrice: number }[];
+    discountAmount?: number | null;
+    gstExempt?: boolean;
+    actorId: string;
+  }) {
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    this.assertWithinEditWindow(booking);
+
+    if (input.guestPhone && !/^\d{10}$/.test(input.guestPhone)) {
+      throw new BadRequestException('Guest phone must be exactly 10 digits or blank');
+    }
+    if (input.nights !== undefined && input.nights < 1) throw new BadRequestException('Nights must be at least 1');
+    if (input.idNumber !== undefined && !input.idNumber.trim()) throw new BadRequestException('Guest ID number is required');
+
+    const guestId =
+      input.guestPhone || input.guestId
+        ? await this.linkGuestProfile(booking.hotelId, {
+            guestId: input.guestId ?? booking.guestId ?? undefined,
+            title: input.title,
+            guestName: input.guestName ?? booking.guestName,
+            guestPhone: input.guestPhone,
+            email: input.email,
+            gender: input.gender,
+            dateOfBirth: input.dateOfBirth,
+            address: input.address,
+            country: input.country,
+            state: input.state,
+            city: input.city,
+            pincode: input.pincode,
+            idType: input.idType ?? booking.idType ?? 'other',
+            idNumber: input.idNumber ?? booking.idNumber ?? '',
+            idPhotoPath: undefined,
+          })
+        : (booking.guestId ?? undefined);
+
+    let newRoom: { id: string; roomCategoryId: string | null; status: string } | null = null;
+    if (input.roomId && input.roomId !== booking.assignedRoomId) {
+      const candidate = await this.prisma.room.findUniqueOrThrow({ where: { id: input.roomId } });
+      if (candidate.roomCategoryId !== booking.roomCategoryId) {
+        throw new ConflictException('The new room is not in the same category as this booking');
+      }
+      if (candidate.status !== 'available') {
+        throw new ConflictException('The new room is not available');
+      }
+      newRoom = candidate;
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.booking.update({
+        where: { id: input.bookingId },
+        data: {
+          guestId,
+          guestName: input.guestName,
+          guestPhone: input.guestPhone,
+          idType: input.idType,
+          idNumber: input.idNumber,
+          purposeOfStay: input.purposeOfStay,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          nights: input.nights,
+          totalAmount: input.totalAmount,
+          discountAmount: input.discountAmount,
+          gstExempt: input.gstExempt,
+          assignedRoomId: newRoom?.id,
+        },
+      });
+
+      if (input.lineItems) {
+        await tx.invoiceLineItem.deleteMany({ where: { bookingId: input.bookingId } });
+        if (input.lineItems.length) {
+          await tx.invoiceLineItem.createMany({
+            data: input.lineItems.map((li) => ({
+              bookingId: input.bookingId,
+              description: li.description,
+              quantity: li.quantity,
+              unitPrice: li.unitPrice,
+              amount: li.quantity * li.unitPrice,
+            })),
+          });
+        }
+      }
+
+      if (newRoom) {
+        const oldRoom = await tx.room.findFirst({ where: { currentStayId: booking.id } });
+        if (oldRoom) await tx.room.update({ where: { id: oldRoom.id }, data: { status: 'available', currentStayId: null, statusChangedAt: new Date() } });
+        await tx.room.update({ where: { id: newRoom.id }, data: { status: 'occupied', currentStayId: booking.id, statusChangedAt: new Date() } });
+      }
+
+      return result;
+    });
+
+    await this.audit.log({
+      hotelId: booking.hotelId,
+      eventType: newRoom ? 'ROOM_CHANGED' : 'STAY_EDITED',
+      actorId: input.actorId,
+      subjectId: booking.id,
+      detail: { roomChanged: Boolean(newRoom) },
+    });
+    return updated;
+  }
+
+  /** Undoing a mis-entered payment, same 1-hour window as updateBooking. Recomputed from the remaining ledger, never a raw subtraction. */
+  async deletePayment(input: { paymentId: string; actorId: string }) {
+    return this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findUniqueOrThrow({ where: { id: input.paymentId }, include: { booking: true } });
+      this.assertWithinEditWindow(payment.booking);
+
+      await tx.payment.delete({ where: { id: input.paymentId } });
+      const remaining = await tx.payment.aggregate({ where: { bookingId: payment.bookingId }, _sum: { amount: true } });
+      const updated = await tx.booking.update({
+        where: { id: payment.bookingId },
+        data: { paidAmount: remaining._sum.amount ?? 0 },
+      });
+
+      await this.audit.log({
+        hotelId: payment.booking.hotelId,
+        eventType: 'STAY_EDITED',
+        actorId: input.actorId,
+        subjectId: payment.bookingId,
+        detail: { paymentDeleted: input.paymentId, amount: Number(payment.amount) },
+      });
+      return updated;
+    });
+  }
+
+  /**
+   * "Add another guest" — a co-occupant sharing this same room/stay, not a
+   * separate booking (§ added beyond MD spec, user request). Available for
+   * the whole stay, not just the 1-hour edit window — a companion arriving
+   * hours later is a normal front-desk operation, not a mistake to correct.
+   */
+  async addBookingGuest(input: { bookingId: string; title?: string; name: string; phone?: string; idType?: IdType; idNumber?: string; actorId: string }) {
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    if (booking.status !== BookingStatus.checked_in) throw new ConflictException(`Booking is ${booking.status}, not checked in`);
+
+    const guest = await this.prisma.bookingGuest.create({
+      data: {
+        bookingId: input.bookingId,
+        title: input.title,
+        name: input.name,
+        phone: input.phone,
+        idType: input.idType,
+        idNumber: input.idNumber,
+      },
+    });
+    await this.audit.log({ hotelId: booking.hotelId, eventType: 'STAY_EDITED', actorId: input.actorId, subjectId: booking.id, detail: { addedGuest: input.name } });
+    return guest;
+  }
+
+  async listBookingGuests(bookingId: string) {
+    return this.prisma.bookingGuest.findMany({ where: { bookingId }, orderBy: { createdAt: 'asc' } });
+  }
+
+  async removeBookingGuest(input: { id: string; actorId: string }) {
+    const guest = await this.prisma.bookingGuest.delete({ where: { id: input.id }, include: { booking: true } });
+    await this.audit.log({ hotelId: guest.booking.hotelId, eventType: 'STAY_EDITED', actorId: input.actorId, subjectId: guest.bookingId, detail: { removedGuest: guest.name } });
+    return guest;
+  }
+
   /** The invoice as a whole — line items + computed totals, for the check-in wizard's step 2 and any future invoice view. */
   async getInvoice(bookingId: string) {
     const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: { lineItems: true, payments: true } });
@@ -376,17 +600,138 @@ export class BookingsService {
     return { booking, lineItems: booking.lineItems, totals };
   }
 
-  async listReservations(input: { hotelId: string; from?: Date; to?: Date }) {
+  /** §7 Phase 1 #5 — list + calendar of bookings pulled from every connected channel; otaConnectionId filters to one. */
+  async listReservations(input: { hotelId: string; from?: Date; to?: Date; otaConnectionId?: string }) {
     return this.prisma.booking.findMany({
       where: {
         hotelId: input.hotelId,
         ...(input.from || input.to
           ? { checkIn: { gte: input.from ?? undefined, lte: input.to ?? undefined } }
           : {}),
+        ...(input.otaConnectionId ? { otaConnectionId: input.otaConnectionId } : {}),
       },
       include: { payments: true, lineItems: true },
       orderBy: { checkIn: 'asc' },
     });
+  }
+
+  /**
+   * §7 Phase 1 #5's "one-time historical import" — no real OTA connectivity
+   * exists yet (§ every adapter is a stub), so this is the interim path to get
+   * a channel's existing reservations into the system: an owner pastes/uploads
+   * rows exported from the OTA extranet. `status` defaults by date, same as a
+   * human would classify these: past checkout date -> checked_out, else confirmed.
+   */
+  async importHistoricalBookings(input: {
+    hotelId: string;
+    otaConnectionId: string;
+    source: BookingSource;
+    rows: Array<{
+      guestName: string;
+      guestPhone?: string;
+      roomCategoryId: string;
+      checkIn: Date;
+      checkOut: Date;
+      nights: number;
+      totalAmount: number;
+      otaBookingRef?: string;
+    }>;
+  }) {
+    const now = new Date();
+    const created = await this.prisma.$transaction(
+      input.rows.map((row) =>
+        this.prisma.booking.create({
+          data: {
+            hotelId: input.hotelId,
+            otaConnectionId: input.otaConnectionId,
+            otaBookingRef: row.otaBookingRef,
+            guestName: row.guestName,
+            guestPhone: row.guestPhone,
+            roomCategoryId: row.roomCategoryId,
+            checkIn: row.checkIn,
+            checkOut: row.checkOut,
+            nights: row.nights,
+            totalAmount: row.totalAmount,
+            source: input.source,
+            status: row.checkOut < now ? BookingStatus.checked_out : BookingStatus.confirmed,
+          },
+        }),
+      ),
+    );
+    return { imported: created.length };
+  }
+
+  /**
+   * Demo/dev-only stand-in for a real OTA webhook (§7 Phase 1 #11's "instant
+   * booking notification") — no real channel connectivity exists to receive
+   * one from, so this lets a hotel see/test the notification path today.
+   * Swap for a real inbound webhook handler once an adapter is real.
+   */
+  async simulateInboundBooking(input: {
+    hotelId: string;
+    otaConnectionId: string;
+    source: BookingSource;
+    guestName: string;
+    roomCategoryId: string;
+    checkIn: Date;
+    checkOut: Date;
+    nights: number;
+    totalAmount: number;
+  }) {
+    const booking = await this.prisma.booking.create({
+      data: {
+        hotelId: input.hotelId,
+        otaConnectionId: input.otaConnectionId,
+        guestName: input.guestName,
+        roomCategoryId: input.roomCategoryId,
+        checkIn: input.checkIn,
+        checkOut: input.checkOut,
+        nights: input.nights,
+        totalAmount: input.totalAmount,
+        source: input.source,
+        status: BookingStatus.confirmed,
+      },
+    });
+    await this.notifications.create({
+      hotelId: input.hotelId,
+      type: 'booking_created',
+      title: `New booking — ${input.source}`,
+      body: `${input.guestName}, ${dateLabel(input.checkIn)} → ${dateLabel(input.checkOut)}`,
+      link: 'bookings',
+    });
+    await this.rates.adjustAvailabilityForStay({
+      hotelId: input.hotelId,
+      roomCategoryId: input.roomCategoryId,
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      delta: -1,
+    });
+    return booking;
+  }
+
+  /** Cancels a not-yet-arrived reservation (direct or channel-sourced) — checked-in/out stays are a different action entirely. */
+  async cancelBooking(input: { bookingId: string; actorId: string }) {
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    if (booking.status !== BookingStatus.confirmed) {
+      throw new ConflictException('Only a confirmed (not yet arrived) reservation can be cancelled');
+    }
+    const updated = await this.prisma.booking.update({ where: { id: input.bookingId }, data: { status: BookingStatus.cancelled } });
+    await this.notifications.create({
+      hotelId: booking.hotelId,
+      type: 'booking_cancelled',
+      title: `Booking cancelled — ${booking.source}`,
+      body: `${booking.guestName}, ${dateLabel(booking.checkIn)} → ${dateLabel(booking.checkOut)}`,
+      link: 'bookings',
+    });
+    // Releases the room-nights this booking held back into the shared pool (mirror of the -1 applied when it was created).
+    await this.rates.adjustAvailabilityForStay({
+      hotelId: booking.hotelId,
+      roomCategoryId: booking.roomCategoryId,
+      checkIn: booking.checkIn,
+      checkOut: booking.checkOut,
+      delta: 1,
+    });
+    return updated;
   }
 
   /** Confirmed reservations not yet arrived — the "check in an existing booking" search list (§8.3/§8.4). */
@@ -399,11 +744,15 @@ export class BookingsService {
 
   /** Room board — physical rooms with live status + (redacted, per role, at the router layer) current guest. */
   async getRoomBoard(hotelId: string) {
-    return this.prisma.room.findMany({
+    const rooms = await this.prisma.room.findMany({
       where: { hotelId, active: true },
       include: { roomCategory: true, currentStay: { include: { lineItems: true } } },
       orderBy: { roomNumber: 'asc' },
     });
+    return rooms.map((r) => ({
+      ...r,
+      delayed: r.currentStay ? isDelayed(r.currentStay.checkIn, r.currentStay.checkOut, r.currentStay.delayResolvedAt) : false,
+    }));
   }
 
   async getBooking(bookingId: string) {

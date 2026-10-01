@@ -4,7 +4,16 @@ import { useAuth } from '../AuthContext';
 import { Button, Card, CardBody, CardHeader, Field, PageHeader, inputClass } from '../components/ui';
 import type { Hotel, Room, RoomCategory, StaffMember } from '../types';
 
-export function Onboarding({ hotel, onHotelCreated }: { hotel: Hotel | null; onHotelCreated: (h: Hotel) => void }) {
+export function Onboarding({
+  hotel,
+  onHotelCreated,
+  hasPms = true,
+}: {
+  hotel: Hotel | null;
+  onHotelCreated: (h: Hotel) => void;
+  /** Whether this org's plan includes PMS — gates the physical-room/staff-PIN setup steps below, which a Channel-Manager-only org has no use for. */
+  hasPms?: boolean;
+}) {
   const { token } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
@@ -12,6 +21,7 @@ export function Onboarding({ hotel, onHotelCreated }: { hotel: Hotel | null; onH
   const [city, setCity] = useState('Jaipur');
   const [roomCount, setRoomCount] = useState(6);
   const [staffCount, setStaffCount] = useState(2);
+  const [dpdpConsent, setDpdpConsent] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function createHotel(e: React.FormEvent) {
@@ -21,7 +31,7 @@ export function Onboarding({ hotel, onHotelCreated }: { hotel: Hotel | null; onH
     try {
       const h = await mutate<Hotel>(
         'hotels.create',
-        { name, city, expectedRoomCount: roomCount, expectedStaffCount: staffCount, dpdpConsent: true },
+        { name, city, expectedRoomCount: roomCount, expectedStaffCount: staffCount, dpdpConsent },
         token ?? undefined,
       );
       onHotelCreated(h);
@@ -52,8 +62,20 @@ export function Onboarding({ hotel, onHotelCreated }: { hotel: Hotel | null; onH
                 <input className={inputClass} type="number" value={staffCount} onChange={(e) => setStaffCount(Number(e.target.value))} min={1} />
               </Field>
             </div>
+            <label className="flex items-start gap-2.5 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                checked={dpdpConsent}
+                onChange={(e) => setDpdpConsent(e.target.checked)}
+              />
+              <span>
+                I consent to this platform processing this hotel's guest and business data under the Digital Personal Data Protection
+                (DPDP) Act, 2023, as a Data Fiduciary on our behalf.
+              </span>
+            </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || !dpdpConsent}>
               {busy ? 'Creating…' : 'Create hotel'}
             </Button>
           </form>
@@ -73,8 +95,8 @@ export function Onboarding({ hotel, onHotelCreated }: { hotel: Hotel | null; onH
       </Card>
       <div className="space-y-6">
         <RoomCategoriesSection hotelId={hotel.id} token={token} />
-        <RoomsSection hotelId={hotel.id} token={token} />
-        <StaffSection hotelId={hotel.id} token={token} />
+        {hasPms && <RoomsSection hotelId={hotel.id} token={token} />}
+        {hasPms && <StaffSection hotelId={hotel.id} token={token} />}
       </div>
     </div>
   );
@@ -134,7 +156,11 @@ function RoomsSection({ hotelId, token }: { hotelId: string; token: string | nul
   const [rooms, setRooms] = useState<Room[]>([]);
   const [categories, setCategories] = useState<RoomCategory[]>([]);
   const [count, setCount] = useState(6);
+  const [newRoomNumber, setNewRoomNumber] = useState('');
+  const [newRoomCategoryId, setNewRoomCategoryId] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function refresh() {
     const [r, c] = await Promise.all([
@@ -160,46 +186,96 @@ function RoomsSection({ hotelId, token }: { hotelId: string; token: string | nul
     }
   }
 
+  async function addSingleRoom(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await mutate('hotels.addRoom', { hotelId, roomNumber: newRoomNumber, roomCategoryId: newRoomCategoryId || null }, token ?? undefined);
+      setNewRoomNumber('');
+      setNewRoomCategoryId('');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to add room');
+    }
+  }
+
   async function assign(roomId: string, roomCategoryId: string) {
     await mutate('hotels.assignRoomCategory', { roomId, roomCategoryId: roomCategoryId || null }, token ?? undefined);
     await refresh();
   }
 
+  async function rename(roomId: string, roomNumber: string, previous: string) {
+    if (!roomNumber.trim() || roomNumber === previous) return;
+    setRowError(null);
+    try {
+      await mutate('hotels.renameRoom', { roomId, roomNumber: roomNumber.trim() }, token ?? undefined);
+      await refresh();
+    } catch (err) {
+      setRowError(err instanceof ApiError ? err.message : 'Failed to rename room');
+      await refresh(); // revert the input to the persisted value
+    }
+  }
+
+  async function remove(roomId: string, roomNumber: string) {
+    if (!confirm(`Remove ${roomNumber}? This can't be undone if it has never been used.`)) return;
+    setRowError(null);
+    setDeletingId(roomId);
+    try {
+      await mutate('hotels.deleteRoom', { roomId }, token ?? undefined);
+      await refresh();
+    } catch (err) {
+      setRowError(err instanceof ApiError ? err.message : 'Failed to remove room');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <Card>
-      <CardHeader title="Rooms" subtitle="Generate placeholder rooms, then sort them into categories." />
+      <CardHeader title="Rooms" subtitle="Generate placeholder rooms, then sort them into categories — or add/remove/rename rooms individually." />
       <CardBody>
-        <form onSubmit={generate} className="mb-4 flex gap-2">
+        <form onSubmit={generate} className="mb-3 flex gap-2">
           <input className={`${inputClass} w-28`} type="number" value={count} onChange={(e) => setCount(Number(e.target.value))} min={1} />
           <Button type="submit" variant="secondary">
             Generate placeholder rooms
           </Button>
         </form>
+        <form onSubmit={addSingleRoom} className="mb-4 flex gap-2">
+          <input
+            className={`${inputClass} w-40`}
+            placeholder="Room number/name"
+            value={newRoomNumber}
+            onChange={(e) => setNewRoomNumber(e.target.value)}
+            required
+          />
+          <select className={`${inputClass} w-48`} value={newRoomCategoryId} onChange={(e) => setNewRoomCategoryId(e.target.value)}>
+            <option value="">— uncategorized —</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <Button type="submit" variant="secondary">
+            + Add room
+          </Button>
+        </form>
         {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+        {rowError && <p className="mb-2 text-sm text-red-600">{rowError}</p>}
         {rooms.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
                   <th className="py-2 pr-4">Room</th>
-                  <th className="py-2">Category</th>
+                  <th className="py-2 pr-4">Category</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rooms.map((r) => (
-                  <tr key={r.id}>
-                    <td className="py-2 pr-4 font-medium text-slate-900">{r.roomNumber}</td>
-                    <td className="py-2">
-                      <select className={`${inputClass} py-1.5`} value={r.roomCategoryId ?? ''} onChange={(e) => assign(r.id, e.target.value)}>
-                        <option value="">— uncategorized —</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
+                  <RoomRow key={r.id} room={r} categories={categories} onAssign={assign} onRename={rename} onRemove={remove} removing={deletingId === r.id} />
                 ))}
               </tbody>
             </table>
@@ -207,6 +283,64 @@ function RoomsSection({ hotelId, token }: { hotelId: string; token: string | nul
         )}
       </CardBody>
     </Card>
+  );
+}
+
+function RoomRow({
+  room,
+  categories,
+  onAssign,
+  onRename,
+  onRemove,
+  removing,
+}: {
+  room: Room;
+  categories: RoomCategory[];
+  onAssign: (roomId: string, roomCategoryId: string) => void;
+  onRename: (roomId: string, roomNumber: string, previous: string) => void;
+  onRemove: (roomId: string, roomNumber: string) => void;
+  removing: boolean;
+}) {
+  const [roomNumber, setRoomNumber] = useState(room.roomNumber);
+  useEffect(() => setRoomNumber(room.roomNumber), [room.roomNumber]);
+  const canRemove = room.status === 'available';
+
+  return (
+    <tr>
+      <td className="py-2 pr-4">
+        <input
+          className={`${inputClass} w-44 py-1.5 font-medium text-slate-900`}
+          value={roomNumber}
+          onChange={(e) => setRoomNumber(e.target.value)}
+          onBlur={() => onRename(room.id, roomNumber, room.roomNumber)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </td>
+      <td className="py-2 pr-4">
+        <select className={`${inputClass} py-1.5`} value={room.roomCategoryId ?? ''} onChange={(e) => onAssign(room.id, e.target.value)}>
+          <option value="">— uncategorized —</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="py-2 pr-4 text-xs capitalize text-slate-500">{room.status}</td>
+      <td className="py-2 text-right">
+        <button
+          type="button"
+          onClick={() => onRemove(room.id, room.roomNumber)}
+          disabled={!canRemove || removing}
+          title={canRemove ? 'Remove this room' : 'Cannot remove an occupied/housekeeping room'}
+          className="text-xs font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 disabled:no-underline"
+        >
+          {removing ? 'Removing…' : 'Remove'}
+        </button>
+      </td>
+    </tr>
   );
 }
 

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { query } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, StatCard } from '../components/ui';
+import { ChannelManagerDashboard } from './channel-manager/ChannelManagerDashboard';
 import type { Booking, CleaningRecord, Room } from '../types';
+import type { Tab } from '../layout/Sidebar';
 
 function isToday(iso: string) {
   const d = new Date(iso);
@@ -10,13 +12,25 @@ function isToday(iso: string) {
   return d.toDateString() === now.toDateString();
 }
 
-export function Dashboard({ hotelId, onNavigate }: { hotelId: string; onNavigate: (tab: 'rooms' | 'housekeeping') => void }) {
+export function Dashboard({
+  hotelId,
+  onNavigate,
+  hasPms = true,
+  hasChannelManager = false,
+}: {
+  hotelId: string;
+  onNavigate: (tab: Tab) => void;
+  /** This whole dashboard (occupancy/arrivals/departures/collected) is PMS-shaped content — a Channel-Manager-only org has nothing here to show. */
+  hasPms?: boolean;
+  hasChannelManager?: boolean;
+}) {
   const { token } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [cleanings, setCleanings] = useState<CleaningRecord[]>([]);
 
   useEffect(() => {
+    if (!hasPms) return;
     async function load() {
       const [r, b, c] = await Promise.all([
         query<Room[]>('bookings.getRoomBoard', { hotelId }, token ?? undefined),
@@ -30,7 +44,24 @@ export function Dashboard({ hotelId, onNavigate }: { hotelId: string; onNavigate
     void load();
     const id = setInterval(load, 8000);
     return () => clearInterval(id);
-  }, [hotelId, token]);
+  }, [hotelId, token, hasPms]);
+
+  if (!hasPms) {
+    return (
+      <div>
+        <PageHeader title="Dashboard" subtitle="Today at a glance" />
+        {hasChannelManager ? (
+          <ChannelManagerDashboard hotelId={hotelId} onNavigate={onNavigate} />
+        ) : (
+          <Card>
+            <CardBody>
+              <EmptyState title="Welcome" hint="Ask an owner to enable a module for this account." />
+            </CardBody>
+          </Card>
+        )}
+      </div>
+    );
+  }
 
   const occupied = rooms.filter((r) => r.status === 'occupied').length;
   const total = rooms.length;
@@ -45,6 +76,8 @@ export function Dashboard({ hotelId, onNavigate }: { hotelId: string; onNavigate
   return (
     <div>
       <PageHeader title="Dashboard" subtitle="Today at a glance" />
+
+      {hasChannelManager && <ChannelManagerDashboard hotelId={hotelId} onNavigate={onNavigate} />}
 
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Occupancy" value={total ? `${occupied}/${total}` : '—'} hint={total ? `${Math.round((occupied / total) * 100)}% occupied` : 'No rooms yet'} tone="brand" />

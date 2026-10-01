@@ -15,12 +15,17 @@ import { ReportsModule } from './reports/reports.module.js';
 import { GuestsModule } from './guests/guests.module.js';
 import { IdExtractionModule } from './id-extraction/id-extraction.module.js';
 import { UploadsController } from './id-extraction/uploads.controller.js';
+import { PlatformAdminModule } from './platform-admin/platform-admin.module.js';
+import { PlansModule } from './plans/plans.module.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     CommonModule,
+    PlansModule,
+    NotificationsModule,
     AuthModule,
     HotelsModule,
     RatesModule,
@@ -31,6 +36,7 @@ import { UploadsController } from './id-extraction/uploads.controller.js';
     ReportsModule,
     GuestsModule,
     IdExtractionModule,
+    PlatformAdminModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService],

@@ -13,6 +13,7 @@ export function createAuthRouter(auth: AuthService) {
           ownerName: z.string().min(1),
           email: z.string().email(),
           password: z.string().min(8),
+          planKey: z.string().min(1),
         }),
       )
       .mutation(({ input }) => auth.signup(input)),

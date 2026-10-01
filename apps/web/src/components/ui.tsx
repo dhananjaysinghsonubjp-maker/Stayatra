@@ -55,13 +55,16 @@ export function Button({
   variant = 'primary',
   className = '',
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'royal' }) {
   const base = 'inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
   const variants: Record<string, string> = {
     primary: 'bg-brand-600 text-white hover:bg-brand-700',
     secondary: 'bg-white text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50',
     danger: 'bg-red-600 text-white hover:bg-red-700',
     ghost: 'text-slate-600 hover:bg-slate-100',
+    // Check-in wizard's own accent — kept separate from `primary` so this
+    // doesn't recolor buttons anywhere else in the app.
+    royal: 'bg-royal-600 text-white hover:bg-royal-700',
   };
   return (
     <button className={`${base} ${variants[variant]} ${className}`} {...props}>
@@ -79,8 +82,25 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
+export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: string }) {
+  return (
+    <label className="inline-flex cursor-pointer items-center gap-2 select-none">
+      <span className="relative inline-block h-6 w-11 shrink-0">
+        <input type="checkbox" className="peer sr-only" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span className="absolute inset-0 rounded-full bg-slate-300 transition-colors peer-checked:bg-brand-600" />
+        <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+      </span>
+      {label && <span className="text-sm text-slate-600">{label}</span>}
+    </label>
+  );
+}
+
 export const inputClass =
   'rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20';
+
+/** Same as `inputClass` but with a royal-blue focus ring — the check-in wizard's own accent, not used elsewhere. */
+export const royalInputClass =
+  'rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-royal-500 focus:outline-none focus:ring-2 focus:ring-royal-500/20';
 
 export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   return (
