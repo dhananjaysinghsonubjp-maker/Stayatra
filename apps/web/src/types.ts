@@ -8,16 +8,79 @@ export interface ActingUser {
 export interface Hotel {
   id: string;
   name: string;
+  addressLine?: string | null;
+  apartmentOrFloor?: string | null;
   city: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   shortCode: string;
   expectedRoomCount: number | null;
   expectedStaffCount: number | null;
+  starRating?: number | null;
+  builtYear?: number | null;
+  acceptingBookingsSince?: number | null;
+  contactEmail?: string | null;
+  contactMobile?: string | null;
+  contactMobileIsWhatsapp?: boolean;
+  contactLandline?: string | null;
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  cancellationPolicy?: 'free_till_checkin' | 'free_24h' | 'free_48h' | 'free_72h' | 'non_refundable' | null;
+  allowUnmarriedCouples?: boolean | null;
+  amenities?: string[];
+  gstRegistration?: string | null;
+  panNumber?: string | null;
+  bankAccountHolderName?: string | null;
+  bankAccountNumber?: string | null;
+  bankIfsc?: string | null;
+  logoFilePath?: string | null;
+  brandColor?: string | null;
+  bannerText?: string | null;
+  fontFamily?: string | null;
+  licenseNumber?: string | null;
+  upiId?: string | null;
+  invoiceTerms?: string | null;
+  invoiceStampPath?: string | null;
+  showPaymentSummaryOnInvoice?: boolean;
+  showTermsOnInvoice?: boolean;
+}
+
+export interface HotelPhoto {
+  id: string;
+  hotelId: string;
+  filePath: string;
+  sortOrder: number;
+  createdAt: string;
 }
 
 export interface RoomCategory {
   id: string;
   hotelId: string;
   name: string;
+  description: string | null;
+  active: boolean;
+  roomType: string | null;
+  roomView: string | null;
+  roomSizeSqft: number | null;
+  bedType: string | null;
+  maxOccupancy: number | null;
+  bathroomCount: number | null;
+  amenities: string[];
+}
+
+export interface RoomPhoto {
+  id: string;
+  roomCategoryId: string;
+  filePath: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface RoomCategoryDetail extends RoomCategory {
+  roomCount: number;
+  photos: RoomPhoto[];
 }
 
 export interface Room {
@@ -71,6 +134,11 @@ export interface Booking {
   guestName: string;
   guestPhone: string | null;
   guestId: string | null;
+  guestEmail: string | null;
+  specialRequest: string | null;
+  /** Groups several Booking rows (one per room) into one umbrella reservation — null for the
+   * ordinary single-room case. */
+  reservationGroupId: string | null;
   purposeOfStay: string | null;
   idType: IdType | null;
   idNumber: string | null;
@@ -82,6 +150,7 @@ export interface Booking {
   status: 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled';
   source: string;
   paidAmount: string | null;
+  paymentMethod?: string | null;
   totalAmount: string;
   discountAmount: string | null;
   gstExempt: boolean;
@@ -89,9 +158,39 @@ export interface Booking {
   delayResolvedNote: string | null;
   /** Set the moment status becomes checked_in — basis for the 1-hour post-check-in edit window. */
   checkedInAt: string | null;
+  /** Set by the FMO/GM's explicit Check-out Guest action — the room only becomes available after housekeeping cleans it. */
+  checkedOutAt: string | null;
+  checkedOutBy: string | null;
   createdAt: string;
+  otaBookingRef: string | null;
+  otaCancellationPolicy: string | null;
+  /** The channel's own voucher/payout breakdown (commission, taxes, TCS/TDS, net payable…) — shape varies per channel, rendered generically. */
+  channelBreakdown: Record<string, string | number> | null;
   payments?: Payment[];
   lineItems?: InvoiceLineItem[];
+}
+
+export interface Review {
+  id: string;
+  hotelId: string;
+  bookingId: string;
+  source: string;
+  rating: string;
+  maxRating: number;
+  reviewText: string | null;
+  reviewDate: string;
+  createdBy: string;
+  createdAt: string;
+  booking: { guestName: string; guestPhone: string | null; checkIn: string; checkOut: string; nights: number };
+}
+
+export interface ReviewableBooking {
+  id: string;
+  guestName: string;
+  source: string;
+  checkIn: string;
+  checkOut: string;
+  status: string;
 }
 
 export interface DueRow {
@@ -122,6 +221,40 @@ export interface StaffMember {
   name: string;
   role: 'owner' | 'manager' | 'front_desk' | 'housekeeping' | null;
   createdAt: string;
+}
+
+export type StaffApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface StaffProfile {
+  id: string;
+  name: string;
+  role: 'owner' | 'manager' | 'front_desk' | 'housekeeping' | null;
+  /** Job title shown in the UI (e.g. "General Manager" vs "Front Office Manager") — both carry
+   * the same `front_desk` permission level, this is just which title the hotel picked. */
+  designation: string | null;
+  /** Housekeeping only — which shift they work (Morning/Evening/Night). */
+  shift: string | null;
+  phone: string | null;
+  photoPath: string | null;
+  idType: IdType | null;
+  idNumber: string | null;
+  idPhotoPath: string | null;
+  approvalStatus: StaffApprovalStatus;
+  approvalNote: string | null;
+  hasPinSet: boolean;
+  createdAt: string;
+}
+
+/** Self-only subset returned by `staff.myProfile` — what a non-owner can see of their own
+ * record (no approval/Aadhar fields, which stay owner-side only). */
+export interface MyStaffProfile {
+  id: string;
+  name: string;
+  role: 'owner' | 'manager' | 'front_desk' | 'housekeeping' | null;
+  designation: string | null;
+  shift: string | null;
+  phone: string | null;
+  photoPath: string | null;
 }
 
 export interface HousekeeperStat {
@@ -255,6 +388,24 @@ export interface Restriction {
   allocationCount: number | null;
 }
 
+/** `rates.listActiveOverrides`' shape — a value-override cell plus just enough of its
+ * parent rate plan/room category/channel to label it in a list, without a separate lookup. */
+export interface ActiveOverrideRow {
+  id: string;
+  date: string;
+  occupancyTier: number;
+  price: string;
+  availability: number;
+  ratePlan: { id: string; name: string; roomCategory: { id: string; name: string } };
+  otaConnection: { id: string; otaCode: string };
+}
+
+/** `rates.listActiveOverrides`' restriction half — same labeling shape as ActiveOverrideRow. */
+export interface ActiveRestrictionRow extends Restriction {
+  ratePlan: { id: string; name: string; roomCategory: { id: string; name: string } };
+  otaConnection: { id: string; otaCode: string };
+}
+
 export interface OtaRoomMapping {
   id: string;
   otaConnectionId: string;
@@ -275,7 +426,7 @@ export interface OtaRemoteProduct {
 export interface Notification {
   id: string;
   hotelId: string;
-  type: 'sync_failed' | 'booking_created' | 'booking_cancelled';
+  type: 'sync_failed' | 'booking_created' | 'booking_cancelled' | 'staff_pending_approval' | 'room_auto_checked_out' | 'cleaning_discrepancy';
   title: string;
   body: string;
   link: string | null;
@@ -287,9 +438,50 @@ export interface CleaningRecord {
   id: string;
   roomId: string;
   kind: 'checkout' | 'guest_stay';
+  primaryHousekeeperId: string;
+  secondHousekeeperId: string | null;
   photos: string[];
   flagged: boolean;
   resolvedAt: string | null;
   resolvedNote: string | null;
   createdAt: string;
+}
+
+export interface HousekeeperOption {
+  id: string;
+  name: string;
+  shift: string | null;
+}
+
+export interface LedgerCategory {
+  id: string;
+  hotelId: string;
+  name: string;
+  parentId: string | null;
+  createdAt: string;
+}
+
+/** The merged Ledger view — a real `LedgerEntry` row (kind 'ledger', deletable) or a guest
+ * `Payment` surfaced read-only (kind 'payment', category always "Room"). */
+export interface LedgerTransaction {
+  id: string;
+  kind: 'ledger' | 'payment';
+  type: 'cash_in' | 'cash_out';
+  amount: number;
+  paymentMethod: PaymentMethod;
+  category: string | null;
+  remarks: string | null;
+  isPettyCash: boolean;
+  createdAt: string;
+  bookingId: string | null;
+  guestName: string | null;
+}
+
+export interface LedgerSummary {
+  balance: number;
+  cashIn: number;
+  cashOut: number;
+  byMode: Partial<Record<PaymentMethod, number>>;
+  pettyCashBalance: number;
+  opening: number;
 }

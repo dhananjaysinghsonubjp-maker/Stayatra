@@ -3,6 +3,7 @@ import { query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Card, EmptyState, PageHeader, StatCard } from '../components/ui';
 import { AddPaymentModal } from './AddPaymentModal';
+import { formatDateShort } from '../dateFormat';
 import type { DueRow } from '../types';
 
 export function Dues({ hotelId }: { hotelId: string }) {
@@ -43,57 +44,46 @@ export function Dues({ hotelId }: { hotelId: string }) {
 
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 
-      <Card>
-        {rows.length === 0 ? (
+      {rows.length === 0 ? (
+        <Card>
           <div className="p-6">
             <EmptyState title="No outstanding dues" hint="Every booking is either paid in full or has nothing collected yet to owe." />
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
-                  <th className="px-5 py-3">Guest</th>
-                  <th className="px-5 py-3">Room</th>
-                  <th className="px-5 py-3">Check-in → Check-out</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Paid / Total</th>
-                  <th className="px-5 py-3">Due</th>
-                  <th className="px-5 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((r) => {
-                  const urgent = r.booking.status === 'checked_out';
-                  return (
-                    <tr key={r.booking.id} className={urgent ? 'bg-red-50/60' : 'hover:bg-slate-50'}>
-                      <td className="px-5 py-3 font-medium text-slate-900">{r.booking.guestName}</td>
-                      <td className="px-5 py-3 text-slate-500">{r.roomNumber ?? '—'}</td>
-                      <td className="px-5 py-3 text-slate-500">
-                        {r.booking.checkIn.slice(0, 10)} → {r.booking.checkOut.slice(0, 10)}
-                      </td>
-                      <td className="px-5 py-3">
-                        <Badge tone={r.booking.status}>{urgent ? 'checked out — unpaid' : r.booking.status}</Badge>
-                      </td>
-                      <td className="px-5 py-3 text-slate-500">
-                        ₹{r.booking.paidAmount ?? 0} / ₹{r.grandTotal.toFixed(2)}
-                      </td>
-                      <td className="px-5 py-3">
-                        <span className={`font-semibold ${urgent ? 'text-red-600' : 'text-amber-600'}`}>₹{r.due.toFixed(2)}</span>
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <button onClick={() => setPayingRow(r)} className="text-xs font-medium text-brand-600 hover:underline">
-                          Add payment
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+        </Card>
+      ) : (
+        // §user request — "text sab hide ho raha hai, properly readable ho": the old table had
+        // 7 wide columns (each with px-5 padding) crammed onto one row, forcing the "Check-in →
+        // Check-out" header and raw ISO dates ("2026-10-24") to wrap across 3-4 broken lines on a
+        // phone. Card list instead — same pattern already used on Reservations for the same
+        // reason, so it's also now consistent across the app, not just fixed in one place.
+        <div className="space-y-2.5">
+          {rows.map((r) => {
+            const urgent = r.booking.status === 'checked_out';
+            return (
+              <Card key={r.booking.id} className={urgent ? 'border-red-200 bg-red-50/40' : ''}>
+                <div className="flex items-start justify-between gap-3 p-4">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{r.booking.guestName}</p>
+                    <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                      Room {r.roomNumber ?? '—'} · {formatDateShort(r.booking.checkIn)} – {formatDateShort(r.booking.checkOut)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                      Paid ₹{r.booking.paidAmount ?? 0} / ₹{r.grandTotal.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <Badge tone={r.booking.status}>{urgent ? 'checked out — unpaid' : r.booking.status}</Badge>
+                    <span className={`text-sm font-semibold ${urgent ? 'text-red-600' : 'text-amber-600'}`}>₹{r.due.toFixed(2)}</span>
+                    <button onClick={() => setPayingRow(r)} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                      Add payment
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
       {payingRow && <AddPaymentModal booking={payingRow.booking} onClose={() => setPayingRow(null)} onDone={refresh} />}
     </div>

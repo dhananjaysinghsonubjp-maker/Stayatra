@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
-import { Badge, Button, Card, Field, inputClass } from '../components/ui';
+import { Badge, Button, Card, Field, StatCard, inputClass } from '../components/ui';
 
 type ModuleType = 'channel_manager' | 'pms' | 'theft_protection';
 const MODULE_LABEL: Record<ModuleType, string> = {
@@ -124,14 +124,19 @@ export function AdminOrgDetail({
 
   return (
     <div>
-      <button onClick={onBack} className="mb-4 text-sm text-brand-600 hover:underline">
+      <button onClick={onBack} className="mb-4 text-sm font-medium text-brand-600 hover:underline">
         ← Back to all organizations
       </button>
 
-      <div className="mb-6 flex items-center gap-2">
-        <h2 className="text-xl font-semibold text-slate-900">{org.name}</h2>
-        {org.suspended && <Badge tone="flagged">suspended</Badge>}
-        {org.affiliate && <Badge tone="slate">via {org.affiliate.name}</Badge>}
+      <div className="mb-6 flex items-center gap-3 border-b border-slate-200 pb-5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base font-bold text-slate-500">
+          {org.name[0]}
+        </div>
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-semibold text-slate-900">{org.name}</h2>
+          {org.suspended && <Badge tone="flagged">suspended</Badge>}
+          {org.affiliate && <Badge tone="slate">via {org.affiliate.name}</Badge>}
+        </div>
       </div>
 
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
@@ -189,22 +194,10 @@ export function AdminOrgDetail({
 
       {/* Stats */}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Card className="px-4 py-3">
-          <p className="text-xs text-slate-500">Rooms</p>
-          <p className="text-xl font-semibold text-slate-900">{org.roomCount}</p>
-        </Card>
-        <Card className="px-4 py-3">
-          <p className="text-xs text-slate-500">General Managers</p>
-          <p className="text-xl font-semibold text-slate-900">{org.staffCounts.generalManagers}</p>
-        </Card>
-        <Card className="px-4 py-3">
-          <p className="text-xs text-slate-500">Front Desk</p>
-          <p className="text-xl font-semibold text-slate-900">{org.staffCounts.frontDesk}</p>
-        </Card>
-        <Card className="px-4 py-3">
-          <p className="text-xs text-slate-500">Housekeeping</p>
-          <p className="text-xl font-semibold text-slate-900">{org.staffCounts.housekeeping}</p>
-        </Card>
+        <StatCard label="Rooms" value={org.roomCount} tone="brand" />
+        <StatCard label="General Managers" value={org.staffCounts.generalManagers} />
+        <StatCard label="Front Desk" value={org.staffCounts.frontDesk} />
+        <StatCard label="Housekeeping" value={org.staffCounts.housekeeping} />
       </div>
 
       {/* Hotels / address overview */}

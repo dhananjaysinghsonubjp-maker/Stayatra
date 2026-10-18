@@ -9,6 +9,7 @@ const anyPmsRole = requireRole('pms', ['owner', 'manager', 'front_desk', 'housek
 const ownerOrManager = requireRole('pms', ['owner', 'manager']);
 
 const otaCodeSchema = z.enum(['mmt_goibibo', 'booking_com', 'agoda', 'cleartrip', 'expedia', 'airbnb', 'easemytrip', 'yatra']);
+const bookingSourceSchema = z.enum(['mmt_goibibo', 'booking_com', 'agoda', 'cleartrip', 'expedia', 'airbnb', 'easemytrip', 'yatra', 'direct', 'walk_in']);
 
 // Reservations are Channel-Manager content too (§7 Phase 1 #5) — a CM-only
 // org has no PMS roles at all, so gating this on anyPmsRole alone (as it
@@ -97,6 +98,40 @@ export function createBookingsRouter(bookings: BookingsService) {
       )
       .mutation(({ input }) => bookings.createManualBooking(input)),
 
+    /** §user request — the multi-room Create Reservation flow's own room-number picker grid. */
+    listRoomsWithAvailability: frontDeskUp
+      .input(z.object({ hotelId: z.string(), checkIn: z.coerce.date(), checkOut: z.coerce.date() }))
+      .query(({ input }) => bookings.listRoomsWithAvailability(input)),
+
+    createMultiRoomReservation: frontDeskUp
+      .input(
+        z.object({
+          hotelId: z.string(),
+          source: bookingSourceSchema,
+          checkIn: z.coerce.date(),
+          checkOut: z.coerce.date(),
+          guestName: z.string().min(1),
+          guestPhone: z.string().regex(/^\d{10}$/).optional(),
+          guestEmail: z.string().email().optional(),
+          specialRequest: z.string().optional(),
+          rooms: z
+            .array(
+              z.object({
+                roomId: z.string(),
+                totalAmount: z.number().nonnegative(),
+                ratePlanId: z.string().optional(),
+                discountAmount: z.number().nonnegative().optional(),
+                gstExempt: z.boolean().optional(),
+                lineItems: lineItemsAtCheckInSchema,
+              }),
+            )
+            .min(1),
+          advanceAmount: z.number().nonnegative().optional(),
+          paymentMethod: paymentMethodSchema.optional(),
+        }),
+      )
+      .mutation(({ ctx, input }) => bookings.createMultiRoomReservation({ ...input, actorId: ctx.user.userId })),
+
     checkInWalkIn: frontDeskUp
       .input(
         z.object({
@@ -141,6 +176,11 @@ export function createBookingsRouter(bookings: BookingsService) {
         const result = await bookings.addPayment({ bookingId: booking.id, ...payment, collectedBy: ctx.user.userId });
         return { booking: result.booking, payment: result.payment };
       }),
+
+    /** §user request — the explicit FMO/GM "Check-out Guest" step; see bookings.service.ts. */
+    checkOutGuest: frontDeskUp
+      .input(z.object({ hotelId: z.string(), bookingId: z.string() }))
+      .mutation(({ ctx, input }) => bookings.checkOutGuest({ ...input, actorId: ctx.user.userId })),
 
     listUpcomingReservations: frontDeskUp
       .input(z.object({ hotelId: z.string(), roomCategoryId: z.string().optional() }))

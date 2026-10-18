@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { query } from '../api';
 import { useAuth } from '../AuthContext';
-import type { Tab } from '../layout/Sidebar';
 
 interface Status {
   effectiveStatus: 'trialing' | 'active' | 'past_due' | 'locked' | 'cancelled';
@@ -10,7 +9,7 @@ interface Status {
 
 /** §5.4: "every client shows a Renew Subscription banner throughout past_due" — same read every
  * client would show, one place it's implemented. Silent once a plan is comfortably active. */
-export function SubscriptionBanner({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
+export function SubscriptionBanner({ onViewBilling }: { onViewBilling: () => void }) {
   const { token } = useAuth();
   const [status, setStatus] = useState<Status | null>(null);
 
@@ -41,7 +40,11 @@ export function SubscriptionBanner({ onNavigate }: { onNavigate: (tab: Tab) => v
 
   const isTrial = status.effectiveStatus === 'trialing';
   const isLocked = status.effectiveStatus === 'locked' || status.effectiveStatus === 'cancelled';
-  const tone = isLocked ? 'bg-red-50 text-red-700' : isTrial ? 'bg-brand-50 text-brand-700' : 'bg-amber-50 text-amber-700';
+  const tone = isLocked
+    ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+    : isTrial
+      ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-400'
+      : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400';
 
   const message = isLocked
     ? 'Your subscription has lapsed — changes are blocked until you renew.'
@@ -52,7 +55,7 @@ export function SubscriptionBanner({ onNavigate }: { onNavigate: (tab: Tab) => v
   return (
     <div className={`flex items-center justify-between px-8 py-2 text-xs font-medium ${tone}`}>
       <span>{message}</span>
-      <button onClick={() => onNavigate('billing')} className="font-semibold hover:underline">
+      <button onClick={onViewBilling} className="font-semibold hover:underline">
         {isLocked || !isTrial ? 'Renew now →' : 'View plan →'}
       </button>
     </div>

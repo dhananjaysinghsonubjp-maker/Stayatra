@@ -1,13 +1,22 @@
 @import 'tailwindcss';
 
+/* Dark mode (§ user request — "depends on mood of the customer, he wants to choose") — class-based
+ * so the toggle is a deliberate user choice (ThemeContext/localStorage), not just the OS setting.
+ * Rolling out in phases: core shell (Sidebar, top bar, Dashboard) first, per explicit scope. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
 
-  --color-brand-50: #eef2ff;
-  --color-brand-100: #e0e7ff;
-  --color-brand-500: #6366f1;
-  --color-brand-600: #4f46e5;
-  --color-brand-700: #4338ca;
+  /* §user request — StayYatra's own default brand colour (#0c2171, same shade-derivation formula
+     as brandColor.ts's deriveBrandShades, so a hotel's own custom colour and this default use
+     identical math). Background/shell stays white/light — only buttons/headings/links/chart
+     accents read this, same as before. */
+  --color-brand-50: #eef1fc;
+  --color-brand-100: #d8dff8;
+  --color-brand-500: #3d61ea;
+  --color-brand-600: #0c2171;
+  --color-brand-700: #112e9d;
 
   /* Royal blue — Check-In's own accent palette (§ scoped to the check-in
      wizard only, so the rest of the app keeps its indigo `brand` colors). */
@@ -33,10 +42,39 @@
   color-scheme: light;
 }
 
+:root.dark {
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
   background: #f8fafc;
   color: #0f172a;
+}
+
+.dark body {
+  background: #0f172a;
+  color: #f1f5f9;
+}
+
+/* Invoice printing (InvoicePrintView) — isolates that one element on the printed page, so the
+   sidebar/header/backdrop behind it (still in the DOM, just visually covered) don't print too. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .invoice-print-root,
+  .invoice-print-root * {
+    visibility: visible;
+  }
+  .invoice-print-root {
+    position: fixed;
+    inset: 0;
+    background: white;
+  }
+  .no-print {
+    display: none !important;
+  }
 }
 
 /* Plain amount fields, no spinner arrows — every number input in the app. */

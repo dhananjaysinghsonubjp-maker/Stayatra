@@ -44,6 +44,11 @@ export function useCmSelection(hotelId: string) {
   }, [hotelId]);
 
   useEffect(() => {
+    // A rate plan belongs to exactly one room category — carrying the old selection forward
+    // after switching categories let a stale ratePlanId silently get submitted against the
+    // new category (the <select> LOOKS reset because the stale id matches no <option> here,
+    // but the state itself wasn't touched until this line existed).
+    setRatePlanId('');
     void refreshRatePlans();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryId]);

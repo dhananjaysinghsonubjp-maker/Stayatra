@@ -29,13 +29,16 @@ interface Props {
   hotelId: string;
   /** Opened from Room Board — room is fixed, guest can be new or picked from an existing reservation. */
   room?: Room;
-  /** Opened from Reservations — reservation is fixed, a physical room still needs to be assigned. */
+  /** Opened from Reservations — reservation is fixed, a physical room still needs to be assigned
+   * (unless reservation.assignedRoomId is already set — a multi-room reservation picks its rooms
+   * upfront, see createMultiRoomReservation — in which case this is just its display label). */
   reservation?: Booking;
+  assignedRoomNumber?: string;
   onClose: () => void;
   onDone: () => void;
 }
 
-export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Props) {
+export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, onClose, onDone }: Props) {
   const { token } = useAuth();
   const [step, setStep] = useState<1 | 2>(1);
   const [mode, setMode] = useState<'new' | 'existing'>(reservation ? 'existing' : 'new');
@@ -80,7 +83,10 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
   const [upcoming, setUpcoming] = useState<Booking[]>([]);
   const [selectedReservationId, setSelectedReservationId] = useState(reservation?.id ?? '');
   const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
-  const [selectedRoomId, setSelectedRoomId] = useState(room?.id ?? '');
+  // §user request — a multi-room reservation already has its specific room picked at booking
+  // time (bookings.service.ts createMultiRoomReservation), not just a category — check-in
+  // shouldn't re-prompt the front desk to choose one, just use it.
+  const [selectedRoomId, setSelectedRoomId] = useState(reservation?.assignedRoomId ?? room?.id ?? '');
 
   const selectedReservation = reservation ?? upcoming.find((r) => r.id === selectedReservationId) ?? null;
   const roomCategoryId = room?.roomCategoryId ?? selectedReservation?.roomCategoryId;
@@ -94,7 +100,7 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
   }, [mode, hotelId]);
 
   useEffect(() => {
-    if (!reservation) return;
+    if (!reservation || reservation.assignedRoomId) return;
     query<Room[]>('hotels.listRooms', { hotelId }, token ?? undefined).then((rooms) =>
       setAvailableRooms(rooms.filter((r) => r.status === 'available' && r.roomCategoryId === reservation.roomCategoryId)),
     );
@@ -301,7 +307,9 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
   const title_ = room ? `Check in — ${room.roomNumber}` : selectedReservation ? `Check in — ${selectedReservation.guestName}` : 'Check in';
 
   return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center overflow-y-auto bg-slate-900/40 px-4 py-8">
+    // z-[60] — matches RoomPickerModal's precedent for a modal that must paint above another
+    // z-50 modal (ReservationDetailModal nests this one; z-10 used to lose the stacking fight).
+    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-900/40 px-4 py-8">
       {/* No click-outside-to-close here on purpose: this is a long, multi-step
           form (guest details + payment), and a stray click just past the
           card's edge used to silently discard everything typed so far with
@@ -355,17 +363,25 @@ export function CheckInModal({ hotelId, room, reservation, onClose, onDone }: Pr
               )}
 
               {mode === 'existing' && reservation && (
-                <Field label="Room">
-                  <select className={inputClass} value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)} required>
-                    <option value="">— select —</option>
-                    {availableRooms.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.roomNumber}
-                      </option>
-                    ))}
-                  </select>
-                  {availableRooms.length === 0 && <p className="mt-1 text-xs text-slate-400">No available rooms in this category right now.</p>}
-                </Field>
+                reservation.assignedRoomId ? (
+                  <Field label="Room">
+                    <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>
+                      {assignedRoomNumber ?? room?.roomNumber ?? 'Already assigned at booking'}
+                    </div>
+                  </Field>
+                ) : (
+                  <Field label="Room">
+                    <select className={inputClass} value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)} required>
+                      <option value="">— select —</option>
+                      {availableRooms.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.roomNumber}
+                        </option>
+                      ))}
+                    </select>
+                    {availableRooms.length === 0 && <p className="mt-1 text-xs text-slate-400">No available rooms in this category right now.</p>}
+                  </Field>
+                )
               )}
 
               {mode === 'existing' && selectedReservation && (

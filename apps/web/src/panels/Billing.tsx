@@ -12,7 +12,14 @@ interface SubscriptionStatus {
   daysLeftInTrial: number | null;
   trialEndsAt: string | null;
   currentPeriodEnd: string;
+  enabledModules: string[];
 }
+
+const MODULE_LABEL: Record<string, string> = {
+  pms: 'PMS (Front Desk, Room View, Housekeeping)',
+  channel_manager: 'Channel Manager (OTA distribution)',
+  theft_protection: 'Theft Protection',
+};
 
 const STATUS_COPY: Record<SubscriptionStatus['effectiveStatus'], { tone: string; label: string }> = {
   trialing: { tone: 'confirmed', label: 'Free trial' },
@@ -91,6 +98,23 @@ export function Billing() {
             <Button className="mt-4" onClick={renew} disabled={renewing}>
               {renewing ? 'Renewing…' : 'Renew now (demo)'}
             </Button>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="What you've purchased" subtitle="Modules currently enabled for this organization." />
+        <CardBody>
+          {status.enabledModules.length === 0 ? (
+            <p className="text-sm text-slate-400">No modules enabled yet.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {status.enabledModules.map((m) => (
+                <Badge key={m} tone="available">
+                  {MODULE_LABEL[m] ?? m}
+                </Badge>
+              ))}
+            </div>
           )}
         </CardBody>
       </Card>

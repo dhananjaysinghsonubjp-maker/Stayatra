@@ -16,12 +16,18 @@ export function createCleaningRouter(cleaning: CleaningService) {
           hotelId: z.string(),
           roomId: z.string(),
           kind: z.enum(['checkout', 'guest_stay']),
-          primaryHousekeeperId: z.string(),
           secondHousekeeperId: z.string().optional(),
           photos: z.array(z.string()).min(1),
         }),
       )
-      .mutation(({ ctx, input }) => cleaning.submitCleaning({ ...input, actorId: ctx.user.userId })),
+      // primaryHousekeeperId is never client-supplied — the signed-in user IS the primary (§4).
+      .mutation(({ ctx, input }) =>
+        cleaning.submitCleaning({ ...input, primaryHousekeeperId: ctx.user.userId, actorId: ctx.user.userId }),
+      ),
+
+    listHousekeepers: housekeepingUp
+      .input(z.object({ hotelId: z.string() }))
+      .query(({ input }) => cleaning.listHousekeepers(input.hotelId)),
 
     resolveDiscrepancy: ownerOrManager
       .input(z.object({ cleaningRecordId: z.string(), note: z.string().min(1) }))

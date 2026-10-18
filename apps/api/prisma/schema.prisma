@@ -161,13 +161,42 @@ model User {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")
   name           String
-  // owner/manager: email+password login (§3). Front Desk/Housekeeping: PIN login,
-  // scoped to one hotel, no email (§8.1) — exactly one auth path is populated.
+  // email+password (§3) is only for signup and as a fallback to set a PIN in the first
+  // place — day-to-day login for everyone (owner, manager, front desk, housekeeping) is
+  // now the universal Property ID + role + PIN flow (§ user request), so both fields below
+  // can be populated together on the same user — no longer "exactly one path populated".
   email          String?  @unique
   passwordHash   String?  @map("password_hash")
-  hotelId        String?  @map("hotel_id") // set only for PIN-login staff
+  hotelId        String?  @map("hotel_id") // null only until the owner's hotel exists or a PIN is first set (see setMyPin)
   pinHash        String?  @map("pin_hash") // bcrypt; unique only within a hotel, checked at write time (§8.1)
   createdAt      DateTime @default(now()) @map("created_at")
+
+  // §user request — a full staff profile, not just a name+PIN. A GM/FMO (front_desk) can
+  // *propose* one of these for housekeeping/front-desk staff, but only an owner can approve it
+  // and mint the PIN — proposed profiles sit with pinHash still null until then.
+  phone              String?             @map("phone")
+  photoPath          String?             @map("photo_path")
+  idType             IdType?             @map("id_type")
+  idNumber           String?             @map("id_number")
+  idPhotoPath        String?             @map("id_photo_path")
+  // §user request — "General Manager" / "Front Office Manager" as two job-title choices a hotel
+  // can pick between, both carrying the same front_desk permission level underneath (confirmed:
+  // not two different access tiers). Free text so it degrades gracefully for anything older.
+  designation        String?             @map("designation")
+  // §user request — which shift a housekeeping staff member works (Morning/Evening/Night).
+  // Free text, same pattern as designation — only meaningful for housekeeping role staff.
+  shift              String?             @map("shift")
+  // Existing rows (owners, and staff created the old direct way) default to approved — this
+  // status only means something for a profile that actually went through the propose flow.
+  approvalStatus     StaffApprovalStatus @default(approved) @map("approval_status")
+  proposedBy         String?             @map("proposed_by") // the FMO/owner who filled the profile in
+  approvalResolvedBy String?             @map("approval_resolved_by")
+  approvalResolvedAt DateTime?           @map("approval_resolved_at")
+  approvalNote       String?             @map("approval_note") // set on reject, optional on approve
+  // §user request — "Remove" a staff member: soft-delete (cleaning records/audit log entries
+  // still reference them by id) rather than a hard delete. Clears pinHash too, so login is
+  // revoked immediately and the PIN becomes reusable by someone else at the same hotel.
+  active             Boolean             @default(true) @map("is_active")
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   hotel        Hotel?            @relation(fields: [hotelId], references: [id], onDelete: Cascade)
@@ -175,6 +204,12 @@ model User {
   sessions     Session[]
 
   @@map("users")
+}
+
+enum StaffApprovalStatus {
+  pending
+  approved
+  rejected
 }
 
 model UserModuleRole {
@@ -195,14 +230,74 @@ model Hotel {
   organizationId      String   @map("organization_id")
   name                String
   addressLine         String?  @map("address_line") // street address — added beyond MD spec's sketch, for Super Admin's hotel detail view
+  apartmentOrFloor    String?  @map("apartment_or_floor")
   city                String?
   state               String?
   pincode             String?
+  // Captured from the "List Your Property" map-pin step — the exact pin location, not just the
+  // text address, since those can disagree (and real OTA listings/driving-directions want the pin).
+  latitude            Float?
+  longitude           Float?
   shortCode           String   @unique @map("short_code") // Hotel ID for PMS PIN login (§8.1)
   gstRegistration     String?  @map("gst_registration")
   dpdpConsentAt       DateTime? @map("dpdp_consent_at")
   expectedRoomCount   Int?     @map("expected_room_count")
   expectedStaffCount  Int?     @map("expected_staff_count")
+  // "List Your Property" step 2 (Basic Info) — captured beyond MD spec's sketch, mirrors the OTA extranet listing flow.
+  starRating              Int?     @map("star_rating")
+  builtYear               Int?     @map("built_year")
+  acceptingBookingsSince  Int?     @map("accepting_bookings_since")
+  contactEmail            String?  @map("contact_email")
+  contactMobile           String?  @map("contact_mobile")
+  contactMobileIsWhatsapp Boolean  @default(false) @map("contact_mobile_is_whatsapp")
+  contactLandline         String?  @map("contact_landline")
+  // "List Your Property" step 4 (Policies).
+  checkInTime             String?  @map("check_in_time") // "HH:mm" 24-hour
+  checkOutTime            String?  @map("check_out_time")
+  cancellationPolicy      CancellationPolicy? @map("cancellation_policy")
+  allowUnmarriedCouples   Boolean? @map("allow_unmarried_couples")
+  // "List Your Property" step 5 (Amenities) — property-wide facility tags, same fixed-catalog
+  // array convention as RoomCategory.amenities above.
+  amenities               String[] @default([])
+  // "List Your Property" step 7 (Finance & Legal). Payout fields are captured now even though
+  // no OTA payout integration is live yet (deferred per user) — collecting once at onboarding
+  // beats re-interrupting the owner later.
+  panNumber               String?  @map("pan_number")
+  bankAccountHolderName   String?  @map("bank_account_holder_name")
+  bankAccountNumber       String?  @map("bank_account_number")
+  bankIfsc                String?  @map("bank_ifsc")
+  // The sidebar's brand mark (§ user request — "rooms logo", professionalized) — a single
+  // slot, not a gallery like HotelPhoto below, since a logo has exactly one current version.
+  logoFilePath            String?  @map("logo_file_path")
+  // §user request — a brand/property can set their own theme colour (e.g. Skymax's own logo
+  // blue) and have it apply app-wide (headings, buttons, chart lines), instead of the app's
+  // default indigo. A hex string; null means "use the default app colour". The frontend derives
+  // the full 50/100/500/600/700 shade ramp from this one value at runtime via CSS custom
+  // properties, so nothing server-side needs the derived shades.
+  brandColor              String?  @map("brand_color")
+  // §user request — simplified from an image upload to just text: the top header strip uses the
+  // hotel's own brandColor as its background (no separate colour needed) with this text shown
+  // boldly on it, e.g. "Skymax Hotel & BnB's". Null/empty means the header stays the plain bar.
+  bannerText              String?  @map("banner_text")
+  // §user request — "Font Setup (Adv feature)... by default jo font hai vahi rahega": one of a
+  // fixed curated list of web-safe font stacks (brandFont.ts owns the list), applied app-wide the
+  // same way brandColor is. Null means "use the app's current default font" — never a free-text
+  // font name, so there's no risk of loading an arbitrary/unvetted font.
+  fontFamily              String?  @map("font_family")
+  // §user request — Invoice Settings: printed on the guest-facing tax invoice alongside the
+  // existing gstRegistration/panNumber/bank* fields above. All optional — an invoice prints fine
+  // with none of these set, it just omits that line.
+  licenseNumber                String?  @map("license_number") // trade/FHRAI licence no., if the hotel has one
+  upiId                        String?  @map("upi_id") // for a payment UPI ID line/QR on the invoice
+  invoiceTerms                 String?  @map("invoice_terms")
+  invoiceStampPath             String?  @map("invoice_stamp_path")
+  showPaymentSummaryOnInvoice  Boolean  @default(false) @map("show_payment_summary_on_invoice")
+  showTermsOnInvoice           Boolean  @default(false) @map("show_terms_on_invoice")
+  // §user request — Ledger: a single lump-sum starting point, not per payment-mode (keeps this
+  // simple — the per-mode breakdown the Ledger page shows is computed purely from transactions
+  // dated after this, same as DigiStay's but without needing N separate opening values).
+  ledgerOpeningBalance Decimal?  @map("ledger_opening_balance") @db.Decimal(10, 2)
+  ledgerOpeningDate    DateTime? @map("ledger_opening_date") @db.Date
   createdAt           DateTime @default(now()) @map("created_at")
 
   organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -210,27 +305,117 @@ model Hotel {
   otaConnections  OtaConnection[]
   rooms           Room[]
   bookings        Booking[]
+  ledgerCategories LedgerCategory[]
+  ledgerEntries    LedgerEntry[]
   cleaningRecords CleaningRecord[]
   auditLogs       AuditLog[]
   loginAttempts   LoginAttempt[]
   pinStaff        User[]
   guests          Guest[]
   notifications   Notification[]
+  guestMessages   GuestMessage[]
+  roomBlocks      RoomBlock[]
+  dayNotes        DayNote[]
+  photos          HotelPhoto[]
+  reviews         Review[]
 
   @@map("hotels")
 }
 
+model HotelPhoto {
+  id        String   @id @default(cuid())
+  hotelId   String   @map("hotel_id")
+  filePath  String   @map("file_path")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@map("hotel_photos")
+}
+
 model RoomCategory {
-  id      String @id @default(cuid())
-  hotelId String @map("hotel_id")
-  name    String
+  id          String   @id @default(cuid())
+  hotelId     String   @map("hotel_id")
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  // Full room-detail page (§ user request, matching a reference OTA extranet's "Room Details" view).
+  roomType      String?  @map("room_type") // e.g. Standard, Deluxe, Luxury, Suite
+  roomView      String?  @map("room_view") // e.g. No View, City View, Pool View
+  roomSizeSqft  Int?     @map("room_size_sqft")
+  bedType       String?  @map("bed_type") // e.g. "1 King Bed", "2 Twin Beds"
+  maxOccupancy  Int?     @map("max_occupancy")
+  bathroomCount Int?     @map("bathroom_count")
+  // A fixed-catalog multi-select tag set (not per-item metadata, unlike photos below) —
+  // a native Postgres array column fits this better than a join table would.
+  amenities     String[] @default([])
 
   hotel     Hotel      @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   ratePlans RatePlan[]
   rooms     Room[]
   otaRoomMappings OtaRoomMapping[]
+  roomBlocks RoomBlock[]
+  dayNotes  DayNote[]
+  photos    RoomPhoto[]
 
   @@map("room_categories")
+}
+
+model RoomPhoto {
+  id             String   @id @default(cuid())
+  roomCategoryId String   @map("room_category_id")
+  filePath       String   @map("file_path")
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  roomCategory RoomCategory @relation(fields: [roomCategoryId], references: [id], onDelete: Cascade)
+
+  @@map("room_photos")
+}
+
+// Walk-in inventory holdback (§ user request) — a walk-in guest taken straight at the
+// front desk has no OTA/CM reservation and deliberately gets no booking record with guest
+// details here; this just pulls N rooms out of the shared pooled-availability count (same
+// pool `RatesService.adjustAvailabilityForStay` already uses for real bookings) so other
+// connected channels can't oversell rooms that are physically occupied.
+model RoomBlock {
+  id             String    @id @default(cuid())
+  hotelId        String    @map("hotel_id")
+  roomCategoryId String    @map("room_category_id")
+  startDate      DateTime  @db.Date @map("start_date")
+  endDate        DateTime  @db.Date @map("end_date") // exclusive, like booking checkOut
+  roomsBlocked   Int       @map("rooms_blocked")
+  reason         String?
+  createdBy      String    @map("created_by")
+  releasedAt     DateTime? @map("released_at")
+  releasedBy     String?   @map("released_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  hotel        Hotel        @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomCategory RoomCategory @relation(fields: [roomCategoryId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, roomCategoryId, startDate])
+  @@map("room_blocks")
+}
+
+// A private staff-only note on one room category's one day (§ user request, matching a
+// reference Calendar cell-editor) — guests never see this; it's scoped to the category+date,
+// not any one channel, since it's about the physical day, not a specific OTA sync target.
+model DayNote {
+  id             String   @id @default(cuid())
+  hotelId        String   @map("hotel_id")
+  roomCategoryId String   @map("room_category_id")
+  date           DateTime @db.Date
+  note           String
+  updatedBy      String   @map("updated_by")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  hotel        Hotel        @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomCategory RoomCategory @relation(fields: [roomCategoryId], references: [id], onDelete: Cascade)
+
+  @@unique([roomCategoryId, date])
+  @@map("day_notes")
 }
 
 model RatePlan {
@@ -494,6 +679,13 @@ model Booking {
   // OTA-sourced bookings, and bookings made before Guest existed, have none)
   guestId          String?       @map("guest_id")
   purposeOfStay    String?       @map("purpose_of_stay")
+  // §user request — a reference app's multi-room Create Reservation flow: one umbrella
+  // reservation (shared guest/dates) can book several specific rooms at once, each its own
+  // Booking row (own status, own check-in, own payments) sharing this id. Null for the
+  // ordinary single-room case — nothing about the existing flow changes for those.
+  reservationGroupId String?     @map("reservation_group_id")
+  guestEmail       String?       @map("guest_email")
+  specialRequest   String?       @map("special_request")
   roomCategoryId   String        @map("room_category_id")
   ratePlanId       String?       @map("rate_plan_id")
   // set at check-in (§8.3); unlike rooms.current_stay_id (cleared on checkout), this
@@ -518,7 +710,18 @@ model Booking {
   // beyond MD spec, at user request). Distinct from `createdAt`: for a
   // reservation checked in days after it was created, createdAt is stale.
   checkedInAt      DateTime?     @map("checked_in_at")
+  // §user request — a real "Check-out Guest" step the FMO/GM must take; the room only
+  // becomes Housekeeping-pending from this, never implicitly from a cleaning submission.
+  checkedOutAt     DateTime?     @map("checked_out_at")
+  checkedOutBy     String?       @map("checked_out_by")
   createdAt        DateTime      @default(now()) @map("created_at")
+  // The channel's own voucher/payout breakdown — shape varies per channel (MMT shows
+  // commission+GST+TCS+TDS, Airbnb shows host service fee, Booking.com shows estimated
+  // commission, direct/walk-in have none) so this is stored as-is rather than forced into
+  // rigid columns, and rendered generically in the booking detail view (§ user request:
+  // "saari cheezein voucher se extract karke dikhao").
+  otaCancellationPolicy String? @map("ota_cancellation_policy")
+  channelBreakdown       Json?  @map("channel_breakdown")
 
   hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   otaConnection OtaConnection? @relation(fields: [otaConnectionId], references: [id])
@@ -529,10 +732,65 @@ model Booking {
   guests        BookingGuest[]
   room          Room?          @relation("CurrentStay")
   assignedRoom  Room?          @relation("AssignedRoom", fields: [assignedRoomId], references: [id])
+  guestMessages GuestMessage[]
+  reviews       Review[]
 
   @@index([hotelId, checkIn])
   @@index([hotelId, status])
+  @@index([hotelId, reservationGroupId])
   @@map("bookings")
+}
+
+// Guest Messaging — a unified inbox across OTA channels (§ user request, added
+// beyond the MD spec's sketch). No real OTA messaging-API integration exists yet
+// (same "simulate first, wire up the real channel later" posture as the rest of
+// this build), so a message is either typed by staff or logged by staff on the
+// guest's behalf (e.g. a call/WhatsApp message relayed manually) — `sender`
+// records which side of the conversation it represents either way.
+enum MessageSender {
+  guest
+  staff
+}
+
+model GuestMessage {
+  id          String        @id @default(cuid())
+  hotelId     String        @map("hotel_id")
+  bookingId   String        @map("booking_id")
+  sender      MessageSender
+  body        String
+  readByStaff Boolean       @default(false) @map("read_by_staff")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  hotel   Hotel   @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, bookingId])
+  @@index([hotelId, createdAt])
+  @@map("guest_messages")
+}
+
+// OTA Reviews (§ user request) — same "simulate first, wire up the real channel later"
+// posture as Guest Messaging above: no live OTA review-pull API exists yet, so an
+// owner/manager logs what they saw on that OTA's own extranet. Deliberately tied to a real
+// Booking (not a free-text guest name) so every review can always jump straight into that
+// guest's Guest Messaging thread — the whole point of the "Message" action on this screen.
+model Review {
+  id         String   @id @default(cuid())
+  hotelId    String   @map("hotel_id")
+  bookingId  String   @map("booking_id")
+  source     BookingSource
+  rating     Decimal  @db.Decimal(3, 1) // the raw score as shown on that OTA, e.g. 8.5
+  maxRating  Int      @default(10) @map("max_rating") // OTAs differ: Booking.com/Agoda are /10, Airbnb/MMT are usually /5
+  reviewText String?  @map("review_text")
+  reviewDate DateTime @map("review_date") @db.Date // when the OTA posted it, not when it was logged here
+  createdBy  String   @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  hotel   Hotel   @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, reviewDate])
+  @@map("reviews")
 }
 
 // expanded beyond the MD spec's cash/online/card sketch — real methods this
@@ -564,6 +822,50 @@ model Payment {
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@map("payments")
+}
+
+// §user request — "Ledger / Chart of Accounts": the hotel's own cash movements (utility bills,
+// payroll, supplies) that aren't guest payments — those already live in Payment above and are
+// merged into the Ledger page's transaction list at read time (tagged "Room"), not duplicated
+// into rows here. Petty cash is just a tag (isPettyCash), not a separate fund/table — a Cash In
+// still raises the main balance, it also counts toward the petty-cash sub-total the UI shows.
+enum LedgerEntryType {
+  cash_in
+  cash_out
+}
+
+model LedgerCategory {
+  id        String   @id @default(cuid())
+  hotelId   String   @map("hotel_id")
+  name      String
+  parentId  String?  @map("parent_id") // null = top-level category, set = a subcategory under it
+  createdAt DateTime @default(now()) @map("created_at")
+
+  hotel    Hotel            @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  parent   LedgerCategory?  @relation("LedgerCategoryChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children LedgerCategory[] @relation("LedgerCategoryChildren")
+  entries  LedgerEntry[]
+
+  @@map("ledger_categories")
+}
+
+model LedgerEntry {
+  id            String          @id @default(cuid())
+  hotelId       String          @map("hotel_id")
+  type          LedgerEntryType
+  amount        Decimal         @db.Decimal(10, 2)
+  paymentMethod PaymentMethod   @map("payment_method")
+  categoryId    String?         @map("category_id")
+  remarks       String?
+  isPettyCash   Boolean         @default(false) @map("is_petty_cash")
+  createdBy     String          @map("created_by")
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  hotel    Hotel           @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  category LedgerCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([hotelId, createdAt])
+  @@map("ledger_entries")
 }
 
 // "Add Extra Charges" on the invoice (extra bed, food, laundry, damage, etc.) —
@@ -608,6 +910,14 @@ enum RoomStatus {
   available
   occupied
   housekeeping
+}
+
+enum CancellationPolicy {
+  free_till_checkin
+  free_24h
+  free_48h
+  free_72h
+  non_refundable
 }
 
 model Room {
@@ -682,6 +992,15 @@ enum AuditEventType {
   ROOM_MAPPING_UPDATED
   CREDENTIALS_UPDATED
   CHANNEL_CONNECTED
+  // §user request — staff profile + approval workflow (a GM/FMO proposes, only an owner
+  // approves/rejects and mints the PIN).
+  STAFF_PROPOSED
+  STAFF_APPROVED
+  STAFF_REJECTED
+  STAFF_PIN_SET
+  STAFF_REMOVED
+  CHECK_OUT // §user request — FMO/GM explicit "Check-out Guest" step, distinct from housekeeping's cleaning submission
+  RESERVATION_CREATED // §user request — a multi-room reservation created with specific rooms picked upfront
 }
 
 model AuditLog {
@@ -705,6 +1024,9 @@ enum NotificationType {
   sync_failed
   booking_created
   booking_cancelled
+  staff_pending_approval // §user request — a GM/FMO proposed a staff profile; owner needs to review it
+  room_auto_checked_out // legacy — pre-dates the explicit FMO Check-out Guest step, kept for historical rows; no longer fired
+  cleaning_discrepancy // §user request — housekeeping cleaned a room with no matching FMO check-out on record; owner needs to review it
 }
 
 model Notification {

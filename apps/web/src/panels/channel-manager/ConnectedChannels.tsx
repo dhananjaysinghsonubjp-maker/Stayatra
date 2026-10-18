@@ -3,6 +3,7 @@ import { mutate, query } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Badge, Button, Card, PageHeader } from '../../components/ui';
 import { ChannelMappingWizard } from '../ChannelMappingWizard';
+import { ChannelIcon } from './ChannelBadge';
 import { useCmSelection } from './useCmSelection';
 import { OTA_CODES, OTA_LABEL } from './ota-labels';
 import { OtaConnectGuide } from './OtaConnectGuide';
@@ -28,8 +29,8 @@ export function ConnectedChannels({ hotelId }: { hotelId: string }) {
         title="Connected Channels"
         subtitle="Connect Booking.com, Airbnb, MakeMyTrip, Agoda, and other OTAs. Setup progress updates as you fill in each one's details."
         action={
-          <div className="flex items-center gap-4">
-            <button onClick={() => setShowGuide(true)} className="text-xs font-medium text-brand-600 hover:underline">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+            <button onClick={() => setShowGuide(true)} className="whitespace-nowrap text-xs font-medium text-brand-600 hover:underline">
               How do I connect an OTA? →
             </button>
             {unconnected.length > 0 && <Button onClick={() => setShowCreate(true)}>+ Create channel</Button>}
@@ -150,20 +151,25 @@ function ChannelCard({
   const steps = [true, hasCredentials === true, (mappedCount ?? 0) > 0 && categoriesCount > 0 && mappedCount === categoriesCount];
   const progress = Math.round((steps.filter(Boolean).length / 3) * 100);
 
+  const progressColor = progress === 100 ? 'bg-emerald-500' : progress >= 50 ? 'bg-amber-500' : 'bg-red-400';
+
   return (
-    <Card className="p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-900">{OTA_LABEL[connection.otaCode] ?? connection.otaCode}</h3>
+    <Card className="p-4 transition-shadow hover:shadow-md">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <ChannelIcon source={connection.otaCode} className="h-8 w-8" />
+          <h3 className="text-sm font-semibold text-slate-900">{OTA_LABEL[connection.otaCode] ?? connection.otaCode}</h3>
+        </div>
         <Badge tone={statusTone}>{connection.status}</Badge>
       </div>
 
       <div className="mb-3">
         <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
           <span>Setup progress</span>
-          <span>{progress}%</span>
+          <span className="font-medium text-slate-700">{progress}%</span>
         </div>
         <div className="h-1.5 w-full rounded-full bg-slate-100">
-          <div className="h-1.5 rounded-full bg-brand-600 transition-all" style={{ width: `${progress}%` }} />
+          <div className={`h-1.5 rounded-full transition-all ${progressColor}`} style={{ width: `${progress}%` }} />
         </div>
       </div>
 

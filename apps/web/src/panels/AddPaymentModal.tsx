@@ -33,7 +33,9 @@ export function AddPaymentModal({ booking, onClose, onDone }: { booking: Booking
   }
 
   return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-4">
+    // z-[60] — matches RoomPickerModal's precedent for a modal that must paint above another
+    // z-50 modal (ReservationDetailModal nests this one; z-10 used to lose the stacking fight).
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 px-4">
       <Card className="w-full max-w-md p-5">
         <h4 className="mb-1 text-sm font-semibold text-slate-900">Add payment — {booking.guestName}</h4>
         <p className="mb-4 text-xs text-slate-500">Outstanding: ₹{outstanding.toFixed(2)}</p>

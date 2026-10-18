@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
-import { Badge, Button, Card, EmptyState, Field, inputClass } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Field, StatCard, inputClass } from '../components/ui';
 import { AdminOrgDetail } from './AdminOrgDetail';
 import type { PlatformAdmin } from './AdminApp';
 
@@ -110,9 +110,17 @@ export function AdminDashboard({ admin, token, onLogout }: { admin: PlatformAdmi
     <div className="min-h-screen bg-slate-50">
       <div className="border-b border-slate-200 bg-white px-8 py-4">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold text-slate-900">Platform Admin</h1>
-            <p className="text-xs text-slate-500">{admin.name} · {admin.email}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-base font-bold text-white">
+              H
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm font-semibold text-slate-900">StayYatra</h1>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Admin</span>
+              </div>
+              <p className="text-xs text-slate-500">{admin.name} · {admin.email}</p>
+            </div>
           </div>
           <button onClick={onLogout} className="text-sm text-slate-500 hover:text-slate-700">
             Log out
@@ -131,23 +139,11 @@ export function AdminDashboard({ admin, token, onLogout }: { admin: PlatformAdmi
           />
         ) : (
           <>
-        <div className="mb-6 flex gap-3">
-          <Card className="px-5 py-3">
-            <p className="text-xs text-slate-500">Organizations</p>
-            <p className="text-xl font-semibold text-slate-900">{totals.organizations}</p>
-          </Card>
-          <Card className="px-5 py-3">
-            <p className="text-xs text-slate-500">Hotels</p>
-            <p className="text-xl font-semibold text-slate-900">{totals.hotels}</p>
-          </Card>
-          <Card className="px-5 py-3">
-            <p className="text-xs text-slate-500">Suspended</p>
-            <p className={`text-xl font-semibold ${totals.suspended > 0 ? 'text-red-600' : 'text-slate-900'}`}>{totals.suspended}</p>
-          </Card>
-          <Card className="px-5 py-3">
-            <p className="text-xs text-slate-500">Affiliates</p>
-            <p className="text-xl font-semibold text-slate-900">{affiliates.length}</p>
-          </Card>
+        <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <StatCard label="Organizations" value={totals.organizations} tone="brand" />
+          <StatCard label="Hotels" value={totals.hotels} />
+          <StatCard label="Suspended" value={totals.suspended} tone={totals.suspended > 0 ? 'red' : 'slate'} />
+          <StatCard label="Affiliates" value={affiliates.length} />
         </div>
 
         <div className="mb-5 flex rounded-lg bg-slate-100 p-1 sm:w-80">

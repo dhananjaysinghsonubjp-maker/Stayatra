@@ -133,6 +133,161 @@ export class BookingsService {
     return booking;
   }
 
+  /** Every physical room, each flagged with whether it's free for the given date range — the
+   * room-number picker grid in the multi-room reservation flow needs the whole inventory (so it
+   * can show "already booked" rooms as disabled, not just omit them). */
+  async listRoomsWithAvailability(input: { hotelId: string; checkIn: Date; checkOut: Date }) {
+    const [rooms, overlapping] = await Promise.all([
+      this.prisma.room.findMany({ where: { hotelId: input.hotelId, active: true }, include: { roomCategory: true }, orderBy: { roomNumber: 'asc' } }),
+      this.prisma.booking.findMany({
+        where: {
+          hotelId: input.hotelId,
+          status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+          assignedRoomId: { not: null },
+          checkIn: { lt: input.checkOut },
+          checkOut: { gt: input.checkIn },
+        },
+        select: { assignedRoomId: true },
+      }),
+    ]);
+    const bookedRoomIds = new Set(overlapping.map((b) => b.assignedRoomId));
+    return rooms.map((r) => ({ ...r, available: !bookedRoomIds.has(r.id) }));
+  }
+
+  /**
+   * §user request, with a reference app's multi-room Create Reservation flow as the target —
+   * one reservation can book several SPECIFIC rooms at once (not just a category, picked later
+   * at check-in like the single-room flow). Each room becomes its own Booking row (so it keeps
+   * its own status, its own check-in, its own payments — "partial check-in" is just checking in
+   * some of these rows and not others) sharing one `reservationGroupId` so the UI can show them
+   * as one umbrella reservation. An optional advance payment is split across the rooms by each
+   * room's share of the total, same proportion the front desk sees in the create form.
+   */
+  async createMultiRoomReservation(input: {
+    hotelId: string;
+    source: BookingSource;
+    checkIn: Date;
+    checkOut: Date;
+    guestName: string;
+    guestPhone?: string;
+    guestEmail?: string;
+    specialRequest?: string;
+    rooms: {
+      roomId: string;
+      totalAmount: number;
+      ratePlanId?: string;
+      discountAmount?: number;
+      gstExempt?: boolean;
+      lineItems?: { description: string; quantity: number; unitPrice: number }[];
+    }[];
+    advanceAmount?: number;
+    paymentMethod?: PaymentMethod;
+    actorId: string;
+  }) {
+    if (input.rooms.length === 0) throw new BadRequestException('Select at least one room');
+    const nights = Math.round((input.checkOut.getTime() - input.checkIn.getTime()) / 86400000);
+    if (nights < 1) throw new BadRequestException('Check-out must be after check-in');
+
+    const roomIds = input.rooms.map((r) => r.roomId);
+    const rooms = await this.prisma.room.findMany({ where: { id: { in: roomIds }, hotelId: input.hotelId } });
+    if (rooms.length !== roomIds.length) throw new NotFoundException('One or more selected rooms were not found');
+
+    const overlapping = await this.prisma.booking.findMany({
+      where: {
+        hotelId: input.hotelId,
+        assignedRoomId: { in: roomIds },
+        status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+        checkIn: { lt: input.checkOut },
+        checkOut: { gt: input.checkIn },
+      },
+      include: { assignedRoom: true },
+    });
+    if (overlapping.length > 0) {
+      const names = overlapping.map((b) => b.assignedRoom?.roomNumber).filter(Boolean).join(', ');
+      throw new ConflictException(`Room ${names} already has a reservation for these dates`);
+    }
+
+    const reservationGroupId = crypto.randomUUID();
+    const grandTotal = input.rooms.reduce((sum, r) => sum + r.totalAmount, 0);
+
+    const bookings = await this.prisma.$transaction(async (tx) => {
+      const created = [];
+      for (const r of input.rooms) {
+        const room = rooms.find((room) => room.id === r.roomId)!;
+        const share = input.advanceAmount ? (r.totalAmount / grandTotal) * input.advanceAmount : 0;
+        const booking = await tx.booking.create({
+          data: {
+            hotelId: input.hotelId,
+            reservationGroupId,
+            guestName: input.guestName,
+            guestPhone: input.guestPhone,
+            guestEmail: input.guestEmail,
+            specialRequest: input.specialRequest,
+            roomCategoryId: room.roomCategoryId!,
+            assignedRoomId: room.id,
+            ratePlanId: r.ratePlanId,
+            checkIn: input.checkIn,
+            checkOut: input.checkOut,
+            nights,
+            totalAmount: r.totalAmount,
+            discountAmount: r.discountAmount,
+            gstExempt: r.gstExempt ?? false,
+            status: BookingStatus.confirmed,
+            source: input.source,
+            paidAmount: share > 0 ? share : undefined,
+            paymentMethod: share > 0 ? input.paymentMethod : undefined,
+          },
+        });
+        // §user request — the same "+ Add Extra Charges" line items check-in already supports
+        // (extra mattress, food, damage, etc.), now also settable upfront when the reservation
+        // itself is created, not just later at check-in.
+        if (r.lineItems?.length) {
+          await tx.invoiceLineItem.createMany({
+            data: r.lineItems.map((li) => ({
+              bookingId: booking.id,
+              description: li.description,
+              quantity: li.quantity,
+              unitPrice: li.unitPrice,
+              amount: li.quantity * li.unitPrice,
+            })),
+          });
+        }
+        if (share > 0 && input.paymentMethod) {
+          await tx.payment.create({
+            data: { bookingId: booking.id, amount: share, method: input.paymentMethod, collectedBy: input.actorId },
+          });
+        }
+        created.push(booking);
+      }
+      return created;
+    });
+
+    // §user request — "rooms get automatically blocked on all OTA": every other booking-creation
+    // path (createManualBooking, checkInWalkIn, ...) already calls this; this one was missing it,
+    // so a multi-room reservation never actually held its rooms against OTA sale. One call per
+    // category (grouped, since adjustAvailabilityForStay affects a whole category's pooled count).
+    const deltaByCategory = new Map<string, number>();
+    for (const r of rooms) {
+      if (!r.roomCategoryId) continue;
+      deltaByCategory.set(r.roomCategoryId, (deltaByCategory.get(r.roomCategoryId) ?? 0) - 1);
+    }
+    await Promise.all(
+      [...deltaByCategory.entries()].map(([roomCategoryId, delta]) =>
+        this.rates.adjustAvailabilityForStay({ hotelId: input.hotelId, roomCategoryId, checkIn: input.checkIn, checkOut: input.checkOut, delta }),
+      ),
+    );
+
+    await this.audit.log({
+      hotelId: input.hotelId,
+      eventType: 'RESERVATION_CREATED',
+      actorId: input.actorId,
+      subjectId: reservationGroupId,
+      detail: { guestName: input.guestName, rooms: rooms.map((r) => r.roomNumber) },
+    });
+
+    return bookings;
+  }
+
   /**
    * §8.3 — guest standing at the desk right now, no prior reservation.
    * Idempotent against double-submit. lineItems/discountAmount/gstExempt
@@ -176,7 +331,10 @@ export class BookingsService {
     if (recentDuplicate) return recentDuplicate; // same request landed already — don't double-book
 
     const room = await this.prisma.room.findUniqueOrThrow({ where: { id: input.roomId } });
-    if (room.status !== 'available') throw new ConflictException('Room is not available');
+    if (room.status === 'housekeeping') {
+      throw new ConflictException(`Room ${room.roomNumber} is not available right now because cleaning has not been completed.`);
+    }
+    if (room.status !== 'available') throw new ConflictException(`Room ${room.roomNumber} is not available`);
     if (!room.roomCategoryId) throw new ConflictException('Room has no category assigned yet — sort it during onboarding first');
 
     const guestId = await this.linkGuestProfile(input.hotelId, input);
@@ -235,6 +393,38 @@ export class BookingsService {
   }
 
   /**
+   * §user request — the FMO/GM's own explicit "Check-out Guest" action. This is the ONLY
+   * place a booking becomes checked_out; it hands the room to housekeeping as Dirty/Cleaning
+   * Required (room.status = 'housekeeping') — the room does NOT become Available until a
+   * Checkout Cleaning closes it out (cleaning.service.ts). currentStayId is deliberately left
+   * set (not cleared) through this pending-cleanup window so the room board and cleaning flow
+   * can still see which stay this cleanup belongs to; it's cleared when cleaning completes.
+   */
+  async checkOutGuest(input: { hotelId: string; bookingId: string; actorId: string }) {
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    if (booking.hotelId !== input.hotelId) throw new NotFoundException('Booking not found');
+    if (booking.status === BookingStatus.checked_out) return booking; // idempotent
+    if (booking.status !== BookingStatus.checked_in) throw new ConflictException(`Booking is ${booking.status}, cannot check out`);
+    if (!booking.assignedRoomId) throw new ConflictException('Booking has no assigned room');
+
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.booking.update({
+        where: { id: booking.id },
+        data: { status: BookingStatus.checked_out, checkedOutAt: now, checkedOutBy: input.actorId },
+      });
+      await tx.room.update({
+        where: { id: booking.assignedRoomId! },
+        data: { status: 'housekeeping', statusChangedAt: now },
+      });
+      return result;
+    });
+
+    await this.audit.log({ hotelId: input.hotelId, eventType: 'CHECK_OUT', actorId: input.actorId, subjectId: booking.id });
+    return updated;
+  }
+
+  /**
    * §8.3 — an existing confirmed reservation (direct or OTA) arrives and is
    * assigned a physical room. A manual booking (§8.4) doesn't collect full
    * guest details at creation time (that's a phone/advance booking), so
@@ -258,7 +448,10 @@ export class BookingsService {
     if (booking.status === BookingStatus.checked_in) return booking; // idempotent
     if (booking.status !== BookingStatus.confirmed) throw new ConflictException(`Booking is ${booking.status}, cannot check in`);
     if (!input.idNumber.trim()) throw new BadRequestException('Guest ID number is required at check-in');
-    if (room.status !== 'available') throw new ConflictException('Room is not available');
+    if (room.status === 'housekeeping') {
+      throw new ConflictException(`Room ${room.roomNumber} is not available right now because cleaning has not been completed.`);
+    }
+    if (room.status !== 'available') throw new ConflictException(`Room ${room.roomNumber} is not available`);
     if (room.roomCategoryId !== booking.roomCategoryId) throw new ConflictException('Room category does not match the reservation');
 
     const guestId = await this.linkGuestProfile(booking.hotelId, input);
@@ -658,6 +851,17 @@ export class BookingsService {
         }),
       ),
     );
+    // Pooled inventory applies here too — a bulk-imported OTA booking blocks the same
+    // room-night pool as any other booking source, same as createManualBooking/simulateInboundBooking.
+    for (const row of input.rows) {
+      await this.rates.adjustAvailabilityForStay({
+        hotelId: input.hotelId,
+        roomCategoryId: row.roomCategoryId,
+        checkIn: row.checkIn,
+        checkOut: row.checkOut,
+        delta: -1,
+      });
+    }
     return { imported: created.length };
   }
 
@@ -751,7 +955,10 @@ export class BookingsService {
     });
     return rooms.map((r) => ({
       ...r,
-      delayed: r.currentStay ? isDelayed(r.currentStay.checkIn, r.currentStay.checkOut, r.currentStay.delayResolvedAt) : false,
+      // Only a still-occupied room can be "delayed" (past its checkout deadline with the guest
+      // still in it) — once the FMO has checked the guest out, the room's currentStay is already
+      // closed and this no longer applies, even though currentStayId stays set during cleanup.
+      delayed: r.status === 'occupied' && r.currentStay ? isDelayed(r.currentStay.checkIn, r.currentStay.checkOut, r.currentStay.delayResolvedAt) : false,
     }));
   }
 

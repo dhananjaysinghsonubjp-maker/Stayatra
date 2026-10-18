@@ -110,10 +110,18 @@ export class AuthService {
     return { session, userId: user.id, organizationId: user.organizationId };
   }
 
-  /** Front Desk / Housekeeping login: Hotel ID (short_code) + PIN, no email (§8.1). */
+  /**
+   * Universal login for everyone at a property — Owner, General Manager, Front Office
+   * Manager, and Housekeeping Staff all sign in the same way now: Property ID (hotel
+   * short_code) + a 4-digit PIN, nothing else (§ user request — an earlier version also
+   * asked the person to pick their role, but that was just one more tap before a PIN
+   * already uniquely identifies them within the hotel, so it was dropped). Whoever's PIN
+   * matches IS the login — their role comes along for free via their moduleRoles, same as
+   * it always did for email+password.
+   */
   async pinLogin(input: { shortCode: string; pin: string; deviceId: string }) {
     const hotel = await this.prisma.hotel.findUnique({ where: { shortCode: input.shortCode }, include: { organization: true } });
-    if (!hotel) throw new UnauthorizedException('Invalid Hotel ID or PIN');
+    if (!hotel) throw new UnauthorizedException('Invalid Property ID or PIN');
     if (hotel.organization.suspended) throw new ForbiddenException('This account has been suspended. Contact support.');
 
     const windowStart = new Date(Date.now() - PIN_LOCKOUT_WINDOW_MS);
@@ -125,7 +133,7 @@ export class AuthService {
     }
 
     const candidates = await this.prisma.user.findMany({
-      where: { hotelId: hotel.id, pinHash: { not: null } },
+      where: { hotelId: hotel.id, pinHash: { not: null }, active: true },
     });
 
     let matched: (typeof candidates)[number] | undefined;
@@ -140,18 +148,54 @@ export class AuthService {
       data: { hotelId: hotel.id, deviceId: input.deviceId, succeeded: Boolean(matched) },
     });
 
-    if (!matched) throw new UnauthorizedException('Invalid Hotel ID or PIN');
+    if (!matched) throw new UnauthorizedException('Invalid Property ID or PIN');
 
     const session = await this.createSession(matched.id);
     return { session, userId: matched.id, organizationId: matched.organizationId, hotelId: hotel.id };
   }
 
-  /** Owner/manager only — staff never self-register (§8.2). */
-  async createStaffPin(input: { hotelId: string; name: string; role: 'front_desk' | 'housekeeping'; pin: string }) {
-    if (!/^\d{4,6}$/.test(input.pin)) throw new ConflictException('PIN must be 4-6 digits');
+  /**
+   * Lets a user who already has some way in (today: email+password from signup) set or
+   * change their own 4-digit PIN, so they can switch to the universal Property ID + PIN
+   * login above. Lazily backfills `hotelId` the first time — owner/manager accounts didn't
+   * carry one before PIN login applied to them too (§8.1 originally scoped hotelId to
+   * PIN-only staff).
+   */
+  async setMyPin(input: { userId: string; pin: string }) {
+    if (!/^\d{4}$/.test(input.pin)) throw new ConflictException('PIN must be exactly 4 digits');
+
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: input.userId } });
+    const hotelId = user.hotelId ?? (await this.prisma.hotel.findFirstOrThrow({ where: { organizationId: user.organizationId } })).id;
 
     const existingPins = await this.prisma.user.findMany({
-      where: { hotelId: input.hotelId, pinHash: { not: null } },
+      where: { hotelId, pinHash: { not: null }, active: true, id: { not: input.userId } },
+      select: { pinHash: true },
+    });
+    for (const { pinHash } of existingPins) {
+      if (pinHash && (await bcrypt.compare(input.pin, pinHash))) {
+        throw new ConflictException('That PIN is already in use at this hotel — PINs must be unique per hotel');
+      }
+    }
+
+    const pinHash = await bcrypt.hash(input.pin, 10);
+    await this.prisma.user.update({ where: { id: input.userId }, data: { pinHash, hotelId } });
+    return { ok: true };
+  }
+
+  /**
+   * Owner/manager only — staff never self-register (§8.2). 'front_desk' is the General
+   * Manager/front-desk-operations login (§ user request, matching the Skymax reference app's
+   * narrow "reception" role — rooms/guests/dues/housekeeping-view, deliberately NOT
+   * Reports/Settings/Channel Manager/Billing, which stay owner-only). A broader near-owner
+   * "manager" role exists elsewhere in this codebase's permission checks but is intentionally
+   * not offered here — don't reintroduce it as a staff-creatable option without explicit
+   * direction, the user corrected this exact mistake once already (2026-10-14).
+   */
+  async createStaffPin(input: { hotelId: string; name: string; role: 'front_desk' | 'housekeeping'; pin: string }) {
+    if (!/^\d{4}$/.test(input.pin)) throw new ConflictException('PIN must be exactly 4 digits');
+
+    const existingPins = await this.prisma.user.findMany({
+      where: { hotelId: input.hotelId, pinHash: { not: null }, active: true },
       select: { pinHash: true },
     });
     for (const { pinHash } of existingPins) {
@@ -186,6 +230,7 @@ export class AuthService {
     });
     if (!session || !session.user || session.expiresAt < new Date()) return null;
     if (session.user.organization.suspended) return null; // suspended mid-session — signed out on the next request, not just the next login
+    if (!session.user.active) return null; // removed mid-session (§user request) — signed out on the next request, same as a suspended org
 
     const sub = session.user.organization.subscription;
     // No subscription row is a data gap (shouldn't happen via signup — every real org gets one),

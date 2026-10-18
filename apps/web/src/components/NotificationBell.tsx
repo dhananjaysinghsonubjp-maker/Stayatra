@@ -20,9 +20,18 @@ const TYPE_TONE: Record<Notification['type'], string> = {
   sync_failed: 'bg-red-500',
   booking_created: 'bg-emerald-500',
   booking_cancelled: 'bg-amber-500',
+  staff_pending_approval: 'bg-amber-500',
+  room_auto_checked_out: 'bg-emerald-500',
+  cleaning_discrepancy: 'bg-red-500',
 };
 
-export function NotificationBell({ hotelId, onNavigate }: { hotelId: string; onNavigate: (tab: Tab) => void }) {
+// §user request — see ThemeToggle.tsx's TONE_CLASS: same banner-only colour override, no circle.
+const ICON_TONE_CLASS: Record<'light' | 'dark', string> = {
+  light: 'text-white hover:bg-white/15 hover:text-white',
+  dark: 'text-slate-900 hover:bg-black/10 hover:text-slate-900',
+};
+
+export function NotificationBell({ hotelId, onNavigate, tone }: { hotelId: string; onNavigate: (tab: Tab) => void; tone?: 'light' | 'dark' }) {
   const { token } = useAuth();
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -62,7 +71,7 @@ export function NotificationBell({ hotelId, onNavigate }: { hotelId: string; onN
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+        className={`relative flex h-9 w-9 items-center justify-center rounded-full ${tone ? ICON_TONE_CLASS[tone] : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'}`}
         aria-label="Notifications"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -78,28 +87,28 @@ export function NotificationBell({ hotelId, onNavigate }: { hotelId: string; onN
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-slate-200 bg-white shadow-lg">
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-              <p className="text-sm font-semibold text-slate-900">Notifications</p>
+          <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5 dark:border-slate-700">
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">Notifications</p>
               {unread > 0 && (
-                <button onClick={markAllRead} className="text-xs font-medium text-brand-600 hover:underline">
+                <button onClick={markAllRead} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
                   Mark all read
                 </button>
               )}
             </div>
             <div className="max-h-96 overflow-y-auto">
-              {items.length === 0 && <p className="px-4 py-6 text-center text-sm text-slate-400">Nothing yet</p>}
+              {items.length === 0 && <p className="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Nothing yet</p>}
               {items.map((n) => (
                 <button
                   key={n.id}
                   onClick={() => openNotification(n)}
-                  className={`flex w-full gap-2.5 border-b border-slate-50 px-4 py-3 text-left hover:bg-slate-50 ${n.read ? '' : 'bg-brand-50/40'}`}
+                  className={`flex w-full gap-2.5 border-b border-slate-50 px-4 py-3 text-left hover:bg-slate-50 dark:border-slate-700/60 dark:hover:bg-slate-700/40 ${n.read ? '' : 'bg-brand-50/40 dark:bg-brand-500/10'}`}
                 >
                   <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${TYPE_TONE[n.type]}`} />
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-900">{n.title}</p>
-                    <p className="truncate text-xs text-slate-500">{n.body}</p>
-                    <p className="mt-0.5 text-[11px] text-slate-400">{timeAgo(n.createdAt)}</p>
+                    <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{n.title}</p>
+                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">{n.body}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">{timeAgo(n.createdAt)}</p>
                   </div>
                 </button>
               ))}

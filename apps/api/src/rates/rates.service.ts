@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { Prisma, RateSource, type InventoryRate, type AuditEventType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { computeGstSlab } from '../common/gst.js';
@@ -49,6 +49,38 @@ export class RatesService {
     formula?: string;
   }) {
     return this.prisma.ratePlan.create({ data: input });
+  }
+
+  /** §user request — rate plans could only ever be created, never renamed/re-configured afterward. */
+  async updateRatePlan(input: {
+    ratePlanId: string;
+    name?: string;
+    mealPlan?: string | null;
+    isDerived?: boolean;
+    baseRatePlanId?: string | null;
+    formula?: string | null;
+  }) {
+    const { ratePlanId, ...data } = input;
+    return this.prisma.ratePlan.update({ where: { id: ratePlanId }, data });
+  }
+
+  /**
+   * Safe to call on a plan nothing real depends on yet (e.g. the "Standard Rate" every room
+   * category auto-gets on creation, before a real plan replaces it) — InventoryRate/Restriction
+   * rows cascade-delete with it, but a real Booking referencing this plan blocks the delete
+   * outright (no onDelete on that FK), surfaced here as a clear message instead of a raw 500.
+   */
+  async deleteRatePlan(ratePlanId: string) {
+    try {
+      await this.prisma.ratePlan.delete({ where: { id: ratePlanId } });
+      return { ok: true };
+    } catch (err: unknown) {
+      const isFkViolation = typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2003';
+      if (isFkViolation) {
+        throw new ConflictException("This rate plan has real bookings against it and can't be deleted — rename it instead, or move those bookings to another plan first.");
+      }
+      throw err;
+    }
   }
 
   async listRatePlans(roomCategoryId: string) {
@@ -115,14 +147,236 @@ export class RatesService {
 
     // Each date param needs an explicit ::date cast — Prisma otherwise binds a JS Date as
     // `timestamp`, which silently matches nothing against this column's `date` type.
+    // Every occupancy tier for the same room-night shares one physical-room pool (InventoryUpdate's
+    // own rule: "a room is either free or not, regardless of how many guests occupy it") — this used
+    // to filter to `occupancy_tier = 1` only, which left tier 2+ rows stale after every real booking,
+    // cancellation, or walk-in block, and that staleness then got pushed straight to the OTA (ota-sync
+    // pushes every tier's cell). Updating every tier here keeps them all in lockstep with reality.
     await this.prisma.$executeRaw(Prisma.sql`
       UPDATE inventory_rates
       SET availability = GREATEST(availability + ${input.delta}, 0)
       WHERE rate_plan_id IN (${Prisma.join(ratePlans.map((r) => r.id))})
         AND ota_connection_id IN (${Prisma.join(connections.map((c) => c.id))})
         AND date IN (${Prisma.join(nights.map((n) => Prisma.sql`${n}::date`))})
-        AND occupancy_tier = 1
     `);
+  }
+
+  /**
+   * Walk-in inventory holdback (§ user request) — no booking record, no guest details,
+   * just pulls N rooms out of the same pooled-availability count real bookings use, so a
+   * walk-in physically occupying a room can't also be sold to another OTA. Capacity-checked
+   * the same simple overlap-count way createManualBooking checks itself against double-booking.
+   */
+  async createRoomBlock(input: {
+    hotelId: string;
+    roomCategoryId: string;
+    startDate: Date;
+    endDate: Date;
+    roomsBlocked: number;
+    reason?: string;
+    actorId: string;
+  }) {
+    if (input.roomsBlocked < 1) throw new ConflictException('Rooms blocked must be at least 1');
+
+    const [totalRooms, overlappingBookings, overlappingBlocks] = await Promise.all([
+      this.prisma.room.count({ where: { hotelId: input.hotelId, roomCategoryId: input.roomCategoryId, active: true } }),
+      this.prisma.booking.count({
+        where: {
+          hotelId: input.hotelId,
+          roomCategoryId: input.roomCategoryId,
+          status: { in: ['confirmed', 'checked_in'] },
+          checkIn: { lt: input.endDate },
+          checkOut: { gt: input.startDate },
+        },
+      }),
+      this.prisma.roomBlock.aggregate({
+        _sum: { roomsBlocked: true },
+        where: {
+          hotelId: input.hotelId,
+          roomCategoryId: input.roomCategoryId,
+          releasedAt: null,
+          startDate: { lt: input.endDate },
+          endDate: { gt: input.startDate },
+        },
+      }),
+    ]);
+    const alreadyBlocked = overlappingBlocks._sum.roomsBlocked ?? 0;
+    const available = totalRooms - overlappingBookings - alreadyBlocked;
+    if (input.roomsBlocked > available) {
+      throw new ConflictException(`Only ${Math.max(available, 0)} room(s) available in this category for the selected dates`);
+    }
+
+    const block = await this.prisma.roomBlock.create({
+      data: {
+        hotelId: input.hotelId,
+        roomCategoryId: input.roomCategoryId,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        roomsBlocked: input.roomsBlocked,
+        reason: input.reason,
+        createdBy: input.actorId,
+      },
+    });
+    await this.adjustAvailabilityForStay({
+      hotelId: input.hotelId,
+      roomCategoryId: input.roomCategoryId,
+      checkIn: input.startDate,
+      checkOut: input.endDate,
+      delta: -input.roomsBlocked,
+    });
+    return block;
+  }
+
+  async releaseRoomBlock(input: { roomBlockId: string; actorId: string }) {
+    const block = await this.prisma.roomBlock.findUniqueOrThrow({ where: { id: input.roomBlockId } });
+    if (block.releasedAt) return block; // already released — no-op, not an error
+
+    const released = await this.prisma.roomBlock.update({
+      where: { id: input.roomBlockId },
+      data: { releasedAt: new Date(), releasedBy: input.actorId },
+    });
+    await this.adjustAvailabilityForStay({
+      hotelId: block.hotelId,
+      roomCategoryId: block.roomCategoryId,
+      checkIn: block.startDate,
+      checkOut: block.endDate,
+      delta: block.roomsBlocked,
+    });
+    return released;
+  }
+
+  /** For the router's post-write OTA-push fan-out (same connections `adjustAvailabilityForStay` already pools across). */
+  async listOtaConnectionIds(hotelId: string) {
+    return this.prisma.otaConnection.findMany({ where: { hotelId }, select: { id: true } });
+  }
+
+  /** Active (not yet released) blocks only — a hotel-wide list for the "release this" UI. */
+  async listRoomBlocks(hotelId: string) {
+    return this.prisma.roomBlock.findMany({
+      where: { hotelId, releasedAt: null },
+      include: { roomCategory: { select: { name: true } } },
+      orderBy: { startDate: 'asc' },
+    });
+  }
+
+  /** The Calendar cell editor's own private staff note — scoped to category+date, not any one channel. */
+  async getDayNote(roomCategoryId: string, date: Date) {
+    return this.prisma.dayNote.findUnique({ where: { roomCategoryId_date: { roomCategoryId, date } } });
+  }
+
+  /**
+   * Every connection's individual stop-sell state for one room-night (§ user request) —
+   * the Calendar cell editor's "Will push to" list used to show every connected channel
+   * with no indication that one of them might already be individually blocked via Advance
+   * Bulk Update, so hitting "Save & push" with the Open/Blocked toggle left wherever it
+   * happened to land silently overwrote that channel's deliberate, separate block state too.
+   */
+  async getChannelBlockStatus(ratePlanId: string, date: Date) {
+    const rows = await this.prisma.restriction.findMany({
+      where: { ratePlanId, date },
+      select: { otaConnectionId: true, channelBlocked: true },
+    });
+    return Object.fromEntries(rows.map((r) => [r.otaConnectionId, r.channelBlocked]));
+  }
+
+  async upsertDayNote(input: { hotelId: string; roomCategoryId: string; date: Date; note: string; actorId: string }) {
+    if (!input.note.trim()) {
+      await this.prisma.dayNote.deleteMany({ where: { roomCategoryId: input.roomCategoryId, date: input.date } });
+      return null;
+    }
+    return this.prisma.dayNote.upsert({
+      where: { roomCategoryId_date: { roomCategoryId: input.roomCategoryId, date: input.date } },
+      create: { hotelId: input.hotelId, roomCategoryId: input.roomCategoryId, date: input.date, note: input.note, updatedBy: input.actorId },
+      update: { note: input.note, updatedBy: input.actorId },
+    });
+  }
+
+  /**
+   * The Calendar's drag-to-select Bulk Edit panel — same single-room-night write as
+   * `saveCellEditor`, just fanned out across a date range (optionally filtered to
+   * weekdays/weekends), every selected room category's primary rate plan, and every
+   * connected channel. `overrideValueOverrides: true` because the dates here were
+   * deliberately drag-selected by hand, not swept up by an unrelated date-range edit —
+   * silently skipping some would be more surprising than honoring the visible selection.
+   */
+  async bulkEditCells(input: {
+    hotelId: string;
+    roomCategoryIds: string[];
+    startDate: Date;
+    endDate: Date;
+    daysOfWeek?: number[];
+    price: number;
+    availability: number;
+    actorId: string;
+  }) {
+    const [connections, ratePlans] = await Promise.all([
+      this.prisma.otaConnection.findMany({ where: { hotelId: input.hotelId }, select: { id: true } }),
+      this.prisma.ratePlan.findMany({ where: { roomCategoryId: { in: input.roomCategoryIds } }, select: { id: true, roomCategoryId: true } }),
+    ]);
+    // One primary rate plan per selected category — mirrors Calendar's own primaryPlanByCategory (every room in a category shares one price).
+    const primaryByCategory = new Map<string, string>();
+    for (const rp of ratePlans) if (!primaryByCategory.has(rp.roomCategoryId)) primaryByCategory.set(rp.roomCategoryId, rp.id);
+    const ratePlanIds = [...primaryByCategory.values()];
+
+    for (const ratePlanId of ratePlanIds) {
+      for (const conn of connections) {
+        await this.bulkUpdate({
+          ratePlanId,
+          otaConnectionId: conn.id,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          daysOfWeek: input.daysOfWeek,
+          explicitTiers: [{ occupancyTier: 1, price: input.price, availability: input.availability }],
+          overrideValueOverrides: true,
+          changedBy: input.actorId,
+        });
+      }
+    }
+    return { connectionIds: connections.map((c) => c.id), ratePlanIds };
+  }
+
+  /**
+   * The Calendar cell editor's single "Save & push" action — pooled inventory (same
+   * non-negotiable as `adjustAvailabilityForStay`) means one edit to a room-night applies
+   * to every connected channel at once, not just whichever channel happened to be selected
+   * in the grid's filter dropdown, so this loops every OTA connection the hotel has.
+   */
+  async saveCellEditor(input: {
+    hotelId: string;
+    roomCategoryId: string;
+    ratePlanId: string;
+    date: Date;
+    price: number;
+    availability: number;
+    blocked: boolean;
+    dayNote: string;
+    actorId: string;
+  }) {
+    const connections = await this.prisma.otaConnection.findMany({ where: { hotelId: input.hotelId }, select: { id: true } });
+    for (const conn of connections) {
+      await this.setValueOverride({
+        ratePlanId: input.ratePlanId,
+        otaConnectionId: conn.id,
+        date: input.date,
+        tiers: [{ occupancyTier: 1, price: input.price, availability: input.availability }],
+        changedBy: input.actorId,
+      });
+      await this.upsertRestriction({
+        ratePlanId: input.ratePlanId,
+        otaConnectionId: conn.id,
+        date: input.date,
+        channelBlocked: input.blocked,
+        actorId: input.actorId,
+      });
+    }
+    await this.upsertDayNote({
+      hotelId: input.hotelId,
+      roomCategoryId: input.roomCategoryId,
+      date: input.date,
+      note: input.dayNote,
+      actorId: input.actorId,
+    });
+    return { connectionIds: connections.map((c) => c.id) };
   }
 
   /**
@@ -173,8 +427,137 @@ export class RatesService {
         }),
       ),
     );
-    await this.logCmEvent(input.otaConnectionId, 'RATE_VALUE_OVERRIDE', input.changedBy, { ratePlanId: input.ratePlanId, date: input.date.toISOString().slice(0, 10) });
+    await this.logCmEvent(input.otaConnectionId, 'RATE_VALUE_OVERRIDE', input.changedBy, {
+      ratePlanId: input.ratePlanId,
+      otaConnectionId: input.otaConnectionId,
+      date: input.date.toISOString().slice(0, 10),
+      price: input.tiers[0]?.price ?? null,
+      availability: input.tiers[0]?.availability ?? null,
+    });
     return result;
+  }
+
+  /**
+   * Undoes a one-time value override (§ user request — "open karne ka procedure") by
+   * deleting that cell's row outright, rather than guessing at what the bulk-update price
+   * "should" revert to (nothing tracks that). The cell goes back to its plain unset state
+   * — same as a date nobody has ever touched — until the next bulk update or override sets
+   * it again. Only deletes rows this override actually created (`source: value_override`),
+   * so it can never accidentally delete a bulk-update-sourced cell.
+   */
+  async clearValueOverride(input: { ratePlanId: string; otaConnectionId: string; date: Date; occupancyTier: number; actorId: string }) {
+    const { count } = await this.prisma.inventoryRate.deleteMany({
+      where: {
+        ratePlanId: input.ratePlanId,
+        otaConnectionId: input.otaConnectionId,
+        date: input.date,
+        occupancyTier: input.occupancyTier,
+        source: RateSource.value_override,
+      },
+    });
+    if (count > 0) {
+      await this.logCmEvent(input.otaConnectionId, 'RATE_VALUE_OVERRIDE', input.actorId, {
+        ratePlanId: input.ratePlanId,
+        otaConnectionId: input.otaConnectionId,
+        date: input.date.toISOString().slice(0, 10),
+        cleared: true,
+      });
+    }
+    return { cleared: count > 0 };
+  }
+
+  /**
+   * Every still-relevant value override and active restriction for the hotel, from today
+   * onward (§ user request — "ek log mein dikhna chahiye, future dates ke liye, otherwise
+   * bhool jaunga"). Past dates are excluded on purpose: an override on a date that's already
+   * gone isn't something anyone needs reminding about.
+   */
+  async listActiveOverrides(hotelId: string) {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    const [overrides, restrictions] = await Promise.all([
+      this.prisma.inventoryRate.findMany({
+        where: { source: RateSource.value_override, date: { gte: today }, ratePlan: { roomCategory: { hotelId } } },
+        include: { ratePlan: { include: { roomCategory: true } }, otaConnection: true },
+        orderBy: { date: 'asc' },
+      }),
+      this.prisma.restriction.findMany({
+        where: {
+          date: { gte: today },
+          ratePlan: { roomCategory: { hotelId } },
+          OR: [
+            { channelBlocked: true },
+            { ratePlanClosed: true },
+            { closedToArrival: true },
+            { closedToDeparture: true },
+            { minLos: { not: null } },
+            { maxLos: { not: null } },
+            { bookableNights: { not: null } },
+            { minAdvanceDays: { not: null } },
+            { maxAdvanceDays: { not: null } },
+            { minLosArrival: { not: null } },
+            { maxLosArrival: { not: null } },
+            { exactLosArrival: { not: null } },
+            { cap: { not: null } },
+            { cutoffHours: { not: null } },
+            { allocationCount: { not: null } },
+          ],
+        },
+        include: { ratePlan: { include: { roomCategory: true } }, otaConnection: true },
+        orderBy: { date: 'asc' },
+      }),
+    ]);
+    return { overrides, restrictions };
+  }
+
+  /**
+   * § user request — "agar by any chance ye action hua hai to yahan show hoga": a visible
+   * history of every value-override and restriction change (set AND cleared) over the last
+   * `days`, not just what's currently active — clearing something used to make it vanish
+   * without a trace from "Upcoming", which read as the action itself being undone rather
+   * than just its live effect. Reuses the same audit trail every CM write already logs via
+   * `logCmEvent`, just read back and labeled.
+   */
+  async listRecentActivity(hotelId: string, days: number) {
+    const since = new Date(Date.now() - days * 86400000);
+    const logs = await this.prisma.auditLog.findMany({
+      where: { hotelId, eventType: { in: ['RATE_VALUE_OVERRIDE', 'RESTRICTION_UPDATED'] }, createdAt: { gte: since } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (logs.length === 0) return [];
+
+    const asRecord = (d: unknown) => (d && typeof d === 'object' ? (d as Record<string, unknown>) : {});
+    const asString = (v: unknown) => (typeof v === 'string' ? v : undefined);
+
+    const ratePlanIds = [...new Set(logs.map((l) => asString(asRecord(l.detail).ratePlanId)).filter((v): v is string => Boolean(v)))];
+    const otaConnectionIds = [...new Set(logs.map((l) => asString(asRecord(l.detail).otaConnectionId)).filter((v): v is string => Boolean(v)))];
+
+    const [ratePlans, connections] = await Promise.all([
+      this.prisma.ratePlan.findMany({ where: { id: { in: ratePlanIds } }, include: { roomCategory: true } }),
+      this.prisma.otaConnection.findMany({ where: { id: { in: otaConnectionIds } } }),
+    ]);
+    const ratePlanById = new Map(ratePlans.map((rp) => [rp.id, rp]));
+    const connectionById = new Map(connections.map((c) => [c.id, c]));
+
+    return logs.map((l) => {
+      const detail = asRecord(l.detail);
+      const ratePlan = asString(detail.ratePlanId) ? ratePlanById.get(asString(detail.ratePlanId)!) : undefined;
+      const connection = asString(detail.otaConnectionId) ? connectionById.get(asString(detail.otaConnectionId)!) : undefined;
+      return {
+        id: l.id,
+        createdAt: l.createdAt,
+        eventType: l.eventType,
+        date: asString(detail.date) ?? null,
+        roomCategoryName: ratePlan?.roomCategory.name ?? null,
+        ratePlanName: ratePlan?.name ?? null,
+        otaCode: connection?.otaCode ?? null,
+        cleared: detail.cleared === true,
+        price: typeof detail.price === 'number' ? detail.price : null,
+        availability: typeof detail.availability === 'number' ? detail.availability : null,
+        channelBlocked: typeof detail.channelBlocked === 'boolean' ? detail.channelBlocked : null,
+      };
+    });
   }
 
   /**
@@ -344,7 +727,12 @@ export class RatesService {
       create: { ratePlanId, otaConnectionId, date, ...fields },
       update: fields,
     });
-    await this.logCmEvent(otaConnectionId, 'RESTRICTION_UPDATED', actorId, { ratePlanId, date: date.toISOString().slice(0, 10) });
+    await this.logCmEvent(otaConnectionId, 'RESTRICTION_UPDATED', actorId, {
+      ratePlanId,
+      otaConnectionId,
+      date: date.toISOString().slice(0, 10),
+      channelBlocked: fields.channelBlocked ?? null,
+    });
     return result;
   }
 }

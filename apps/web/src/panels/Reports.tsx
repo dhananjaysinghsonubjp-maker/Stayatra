@@ -44,7 +44,7 @@ export function Reports({ hotelId }: { hotelId: string }) {
 
   return (
     <div>
-      <PageHeader title="Reports" subtitle="§8.8 — Rooms Report and Sale Report" />
+      <PageHeader title="Reports" subtitle="Rooms Report and Sale Report" />
       <div className="mb-6 flex gap-2">
         <Button variant={tab === 'rooms' ? 'primary' : 'secondary'} onClick={() => setTab('rooms')}>
           Rooms Report

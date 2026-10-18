@@ -3,6 +3,8 @@ import { createAuthRouter } from '../auth/auth.router.js';
 import { createHotelsRouter } from '../hotels/hotels.router.js';
 import { createRatesRouter } from '../rates/rates.router.js';
 import { createBookingsRouter } from '../bookings/bookings.router.js';
+import { createGuestMessagingRouter } from '../guest-messaging/guest-messaging.router.js';
+import { createReviewsRouter } from '../reviews/reviews.router.js';
 import { createCleaningRouter } from '../cleaning/cleaning.router.js';
 import { createOtaRouter } from '../ota/ota.router.js';
 import { createReportsRouter } from '../reports/reports.router.js';
@@ -13,10 +15,14 @@ import { createPlansRouter } from '../plans/plans.router.js';
 import { createBillingRouter } from '../plans/billing.router.js';
 import { createNotificationsRouter } from '../notifications/notifications.router.js';
 import { createAuditRouter } from '../common/audit.router.js';
+import { createLedgerRouter } from '../ledger/ledger.router.js';
+import { createStaffRouter } from '../staff/staff.router.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { HotelsService } from '../hotels/hotels.service.js';
 import type { RatesService } from '../rates/rates.service.js';
 import type { BookingsService } from '../bookings/bookings.service.js';
+import type { GuestMessagingService } from '../guest-messaging/guest-messaging.service.js';
+import type { ReviewsService } from '../reviews/reviews.service.js';
 import type { CleaningService } from '../cleaning/cleaning.service.js';
 import type { OtaService } from '../ota/ota.service.js';
 import type { OtaSyncService } from '../sync/ota-sync.service.js';
@@ -27,12 +33,16 @@ import type { AffiliateService } from '../platform-admin/affiliate.service.js';
 import type { PlansService } from '../plans/plans.service.js';
 import type { NotificationsService } from '../notifications/notifications.service.js';
 import type { AuditService } from '../common/audit.service.js';
+import type { LedgerService } from '../ledger/ledger.service.js';
+import type { StaffService } from '../staff/staff.service.js';
 
 export function createAppRouter(services: {
   auth: AuthService;
   hotels: HotelsService;
   rates: RatesService;
   bookings: BookingsService;
+  guestMessaging: GuestMessagingService;
+  reviews: ReviewsService;
   cleaning: CleaningService;
   ota: OtaService;
   sync: OtaSyncService;
@@ -43,6 +53,8 @@ export function createAppRouter(services: {
   plans: PlansService;
   notifications: NotificationsService;
   audit: AuditService;
+  ledger: LedgerService;
+  staff: StaffService;
 }) {
   return router({
     health: router({
@@ -55,6 +67,8 @@ export function createAppRouter(services: {
     hotels: createHotelsRouter(services.hotels),
     rates: createRatesRouter(services.rates, services.sync),
     bookings: createBookingsRouter(services.bookings),
+    guestMessaging: createGuestMessagingRouter(services.guestMessaging),
+    reviews: createReviewsRouter(services.reviews),
     cleaning: createCleaningRouter(services.cleaning),
     ota: createOtaRouter(services.ota, services.sync),
     reports: createReportsRouter(services.reports),
@@ -65,6 +79,8 @@ export function createAppRouter(services: {
     billing: createBillingRouter(services.plans),
     notifications: createNotificationsRouter(services.notifications),
     audit: createAuditRouter(services.audit),
+    ledger: createLedgerRouter(services.ledger),
+    staff: createStaffRouter(services.staff),
   });
 }
 

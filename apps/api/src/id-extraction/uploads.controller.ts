@@ -56,4 +56,51 @@ export class UploadsController {
     const filePath = await this.save('receipts', file);
     return { filePath };
   }
+
+  /** Room Details page's photo gallery (§ user request) — storage only, same as receipts. */
+  @Post('room-photo')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  async uploadRoomPhoto(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    await this.requireUser(authHeader);
+    const filePath = await this.save('room-photos', file);
+    return { filePath };
+  }
+
+  /** "List Your Property" Photos And Videos step's property-level gallery — storage only, same as receipts. */
+  @Post('hotel-photo')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  async uploadHotelPhoto(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    await this.requireUser(authHeader);
+    const filePath = await this.save('hotel-photos', file);
+    return { filePath };
+  }
+
+  /** Housekeeping cleaning evidence (§8.6, matching the Skymax reference app) — storage only,
+   * same as receipts. Uploaded one at a time from the client (sequential, not Promise.all — a
+   * batch upload OOM-crashed low-end phones in the Skymax app this is modelled on). */
+  @Post('cleaning-photo')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  async uploadCleaningPhoto(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    await this.requireUser(authHeader);
+    const filePath = await this.save('cleaning-photos', file);
+    return { filePath };
+  }
+
+  /** Staff profile photo (§ user request — a full staff profile, not just name+PIN) — storage only, same as receipts. */
+  @Post('staff-photo')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  async uploadStaffPhoto(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    await this.requireUser(authHeader);
+    const filePath = await this.save('staff-photos', file);
+    return { filePath };
+  }
+
+  /** Staff ID document (Aadhar card) — storage only, same as receipts. */
+  @Post('staff-id')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  async uploadStaffId(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    await this.requireUser(authHeader);
+    const filePath = await this.save('staff-ids', file);
+    return { filePath };
+  }
 }

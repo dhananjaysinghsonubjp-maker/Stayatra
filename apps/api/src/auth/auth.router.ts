@@ -23,8 +23,18 @@ export function createAuthRouter(auth: AuthService) {
       .mutation(({ input }) => auth.login(input)),
 
     pinLogin: publicProcedure
-      .input(z.object({ shortCode: z.string().min(1), pin: z.string().min(4).max(6), deviceId: z.string().min(1) }))
+      .input(
+        z.object({
+          shortCode: z.string().min(1),
+          pin: z.string().length(4),
+          deviceId: z.string().min(1),
+        }),
+      )
       .mutation(({ input }) => auth.pinLogin(input)),
+
+    setMyPin: authedProcedure
+      .input(z.object({ pin: z.string().length(4) }))
+      .mutation(({ ctx, input }) => auth.setMyPin({ userId: ctx.user.userId, pin: input.pin })),
 
     createStaffPin: requireRole('pms', ['owner', 'manager'])
       .input(
@@ -32,7 +42,7 @@ export function createAuthRouter(auth: AuthService) {
           hotelId: z.string(),
           name: z.string().min(1),
           role: z.enum(['front_desk', 'housekeeping']),
-          pin: z.string().min(4).max(6),
+          pin: z.string().length(4),
         }),
       )
       .mutation(({ input }) => auth.createStaffPin(input)),

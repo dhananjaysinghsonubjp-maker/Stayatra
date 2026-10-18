@@ -14,6 +14,18 @@ export const OTA_LABEL: Record<string, string> = {
 /** Every booking source, OTA or not — the one shared label map for anywhere a booking's source is shown. */
 export const SOURCE_LABEL: Record<string, string> = { direct: 'Direct', walk_in: 'Walk-in', ...OTA_LABEL };
 
+/** Default review scale per OTA — Booking.com/Agoda score out of 10, the rest typically out of 5. Just a sensible starting value on the Log Review form; editable per entry since this varies. */
+export const OTA_RATING_SCALE: Record<string, number> = {
+  booking_com: 10,
+  agoda: 10,
+  mmt_goibibo: 5,
+  cleartrip: 5,
+  expedia: 5,
+  airbnb: 5,
+  easemytrip: 5,
+  yatra: 5,
+};
+
 /**
  * No official OTA logo files are bundled with the app (and we don't fetch brand marks from
  * arbitrary URLs), so every channel gets a small monogram badge instead — its own color, a short
