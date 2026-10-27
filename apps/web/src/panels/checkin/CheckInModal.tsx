@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { mutate, query, uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
-import { Badge, Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
+import { Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
 import { formatDateTimeShort } from '../../dateFormat';
 import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
@@ -102,8 +102,8 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   const [busy, setBusy] = useState(false);
 
   // §user request, with a reference app's own slide-over as the target, matching Create
-  // Reservation's own treatment — opens as a right-side panel on desktop (bottom sheet on
-  // phone) instead of a centered dialog, sliding in smoothly instead of just appearing.
+  // Reservation's own treatment — right-side panel on desktop (bottom sheet on phone), sliding
+  // in smoothly instead of just appearing.
   const [entered, setEntered] = useState(false);
   const [closing, setClosing] = useState(false);
   useEffect(() => {
@@ -435,6 +435,12 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   }
 
   const title_ = room ? `Check in — ${room.roomNumber}` : selectedReservation ? `Check in — ${selectedReservation.guestName}` : 'Check in';
+  const roomLabel =
+    mode === 'new'
+      ? room
+        ? `${room.roomNumber}${room.roomCategory ? ` · ${room.roomCategory.name}` : ''}`
+        : '—'
+      : (assignedRoomNumber ?? room?.roomNumber ?? availableRooms.find((r) => r.id === selectedRoomId)?.roomNumber ?? 'Not assigned yet');
 
   return (
     // z-[60] — matches RoomPickerModal's precedent for a modal that must paint above another
@@ -453,20 +459,14 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
         }`}
       >
         {step !== 3 && (
-          <>
-            <div className="mb-4 flex items-center justify-between">
-              <h4 className="text-sm font-semibold text-slate-900">{title_}</h4>
-              {room?.roomCategory && <Badge tone="slate">{room.roomCategory.name}</Badge>}
-            </div>
-
-            <div className="mb-5 flex items-center justify-center gap-3">
-              <StepDot n={1} active={step === 1} done={step > 1} />
-              <div className={`h-px w-10 ${step > 1 ? 'bg-royal-500' : 'bg-slate-200'}`} />
-              <StepDot n={2} active={step === 2} done={false} />
-            </div>
-          </>
+          <div className="mb-4 flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-slate-900">{title_}</h4>
+            {room?.roomCategory && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{room.roomCategory.name}</span>}
+          </div>
         )}
 
+        {/* §user request — "steps by room type ek particular box ho, properly section-wise":
+            1. Room  2. AI Check-in  3. Guest details, each its own card, in that order. */}
         {step === 1 && (
           <>
             {room && !reservation && (
@@ -489,306 +489,324 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
             )}
 
             <form onSubmit={goToStepTwo} noValidate className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
-              {mode === 'existing' && !reservation && (
-                <Field label="Reservation">
-                  <select className={inputClass} value={selectedReservationId} onChange={(e) => setSelectedReservationId(e.target.value)} required>
-                    <option value="">— select —</option>
-                    {upcoming.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.guestName} · {r.checkIn.slice(0, 10)} → {r.checkOut.slice(0, 10)}
-                      </option>
-                    ))}
-                  </select>
-                  {upcoming.length === 0 && <p className="mt-1 text-xs text-slate-400">No upcoming reservations for this room category.</p>}
-                </Field>
-              )}
+              {/* 1. Room — no picker here: the room is already fixed by which Room Board tile's
+                  "Check in" was clicked (or already assigned at booking time); this just shows it
+                  plus the price inputs, same fields a pick-a-room flow would ask for minus the
+                  actual picking. */}
+              <Card className="border-slate-200 p-4">
+                <SectionHeader icon="🛏️" title="Room" />
 
-              {mode === 'existing' && reservation && (
-                reservation.assignedRoomId ? (
-                  <Field label="Room">
-                    <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>
-                      {assignedRoomNumber ?? room?.roomNumber ?? 'Already assigned at booking'}
-                    </div>
-                  </Field>
-                ) : (
-                  <Field label="Room">
-                    <select className={inputClass} value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)} required>
+                {mode === 'existing' && !reservation && (
+                  <Field label="Reservation">
+                    <select className={inputClass} value={selectedReservationId} onChange={(e) => setSelectedReservationId(e.target.value)} required>
                       <option value="">— select —</option>
-                      {availableRooms.map((r) => (
+                      {upcoming.map((r) => (
                         <option key={r.id} value={r.id}>
-                          {r.roomNumber}
+                          {r.guestName} · {r.checkIn.slice(0, 10)} → {r.checkOut.slice(0, 10)}
                         </option>
                       ))}
                     </select>
-                    {availableRooms.length === 0 && <p className="mt-1 text-xs text-slate-400">No available rooms in this category right now.</p>}
+                    {upcoming.length === 0 && <p className="mt-1 text-xs text-slate-400">No upcoming reservations for this room category.</p>}
                   </Field>
-                )
-              )}
+                )}
 
-              {mode === 'existing' && selectedReservation && (
-                <>
-                  {/* §user request — "Neeraj ji ne booking karvayi hai, 102 mein koi aur guest aa
-                      raha hai — unka check-in form bhare": the booker stays visible as context
-                      while the name/details fields below start blank for this specific room. */}
-                  {selectedReservation.bookedByName && (
-                    <div className="rounded-lg bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
-                      Booked by {selectedReservation.bookedByName} — fill this room's actual guest below.
+                {(mode === 'new' || (mode === 'existing' && (reservation || selectedReservation))) && (
+                  <div className="mb-3 mt-1 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-base shadow-sm">🛏️</span>
+                    <div className="min-w-0">
+                      {mode === 'existing' && !reservation?.assignedRoomId ? (
+                        <select className={`${inputClass} w-full`} value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)} required>
+                          <option value="">— select a room —</option>
+                          {availableRooms.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.roomNumber}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <p className="truncate text-sm font-bold text-slate-900">{roomLabel}</p>
+                      )}
                     </div>
-                  )}
-                  {/* §user request — "guest ek din pehle aa jaata hai, usi reservation me check-in
-                      ke time hi dates adjust karne de": reserved for 24→26, guest actually walks
-                      in on the 23rd and needs to leave the 25th — editable right here instead of
-                      locked to the original booking until a separate post-check-in Edit Stay. */}
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <Field label="Check-in">
-                      <input className={inputClass} type="date" value={stayCheckIn} onChange={(e) => setStayCheckIn(e.target.value)} required />
-                    </Field>
-                    <Field label="Check-out">
-                      <input className={inputClass} type="date" value={stayCheckOut} onChange={(e) => setStayCheckOut(e.target.value)} required />
-                    </Field>
-                    <Field label="Amount / night (₹)">
-                      <input className={inputClass} type="number" value={amountPerNight} onChange={(e) => setAmountPerNight(Number(e.target.value))} min={0} />
-                    </Field>
-                    <Field label="Total">
-                      <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>₹{totalAmount}</div>
-                    </Field>
                   </div>
-                  {datesChanged && (
-                    <p className="text-xs text-amber-600">
-                      Reserved for {selectedReservation.checkIn.slice(0, 10)} → {selectedReservation.checkOut.slice(0, 10)} — adjusting to {stayCheckIn} →{' '}
-                      {stayCheckOut} ({existingNights} night{existingNights === 1 ? '' : 's'}) on check-in.
-                    </p>
-                  )}
-                  <p className="-mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
-                </>
-              )}
+                )}
 
-              {mode === 'new' && (
-                <>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <Field label="Meal plan">
-                      <select className={inputClass} value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)}>
-                        <option value="">— none —</option>
-                        {ratePlans.map((rp) => (
-                          <option key={rp.id} value={rp.id}>
-                            {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Amount / night (₹)">
-                      <input className={inputClass} type="number" value={amountPerNight} onChange={(e) => setAmountPerNight(Number(e.target.value))} min={0} />
-                    </Field>
-                    <Field label="Nights">
-                      <input className={inputClass} type="number" value={nights} onChange={(e) => setNights(Number(e.target.value))} min={1} max={365} />
-                    </Field>
-                    <Field label="Total">
-                      <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>₹{totalAmount}</div>
-                    </Field>
+                {mode === 'existing' && selectedReservation?.bookedByName && (
+                  // §user request — "Neeraj ji ne booking karvayi hai, 102 mein koi aur guest aa
+                  // raha hai — unka check-in form bhare": the booker stays visible as context
+                  // while the name/details fields below start blank for this specific room.
+                  <div className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700">
+                    Booked by {selectedReservation.bookedByName} — fill this room's actual guest below.
                   </div>
-                  <p className="-mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
-                </>
-              )}
+                )}
+
+                {mode === 'existing' && selectedReservation && (
+                  <>
+                    {/* §user request — "guest ek din pehle aa jaata hai, usi reservation me
+                        check-in ke time hi dates adjust karne de": reserved for 24→26, guest
+                        actually walks in on the 23rd and needs to leave the 25th — editable right
+                        here instead of locked until a separate post-check-in Edit Stay. */}
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <Field label="Check-in">
+                        <input className={inputClass} type="date" value={stayCheckIn} onChange={(e) => setStayCheckIn(e.target.value)} required />
+                      </Field>
+                      <Field label="Check-out">
+                        <input className={inputClass} type="date" value={stayCheckOut} onChange={(e) => setStayCheckOut(e.target.value)} required />
+                      </Field>
+                      <Field label="Amount / night (₹)">
+                        <input className={inputClass} type="number" value={amountPerNight} onChange={(e) => setAmountPerNight(Number(e.target.value))} min={0} />
+                      </Field>
+                      <Field label="Total">
+                        <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>₹{totalAmount}</div>
+                      </Field>
+                    </div>
+                    {datesChanged && (
+                      <p className="mt-2 text-xs text-amber-600">
+                        Reserved for {selectedReservation.checkIn.slice(0, 10)} → {selectedReservation.checkOut.slice(0, 10)} — adjusting to {stayCheckIn} →{' '}
+                        {stayCheckOut} ({existingNights} night{existingNights === 1 ? '' : 's'}) on check-in.
+                      </p>
+                    )}
+                    <p className="mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
+                  </>
+                )}
+
+                {mode === 'new' && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <Field label="Meal plan">
+                        <select className={inputClass} value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)}>
+                          <option value="">— none —</option>
+                          {ratePlans.map((rp) => (
+                            <option key={rp.id} value={rp.id}>
+                              {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="Amount / night (₹)">
+                        <input className={inputClass} type="number" value={amountPerNight} onChange={(e) => setAmountPerNight(Number(e.target.value))} min={0} />
+                      </Field>
+                      <Field label="Nights">
+                        <input className={inputClass} type="number" value={nights} onChange={(e) => setNights(Number(e.target.value))} min={1} max={365} />
+                      </Field>
+                      <Field label="Total">
+                        <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>₹{totalAmount}</div>
+                      </Field>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
+                  </>
+                )}
+              </Card>
 
               {/* §user request — "reservation page ke through check-in karta hu toh poori guest
                   details nahi maangta, jaise walk-in ke maangta hai": this whole guest-capture
-                  block (ID scan, phone/saved-guest lookup, name, contact, address, purpose) used
-                  to be 'new'-mode only — an existing-reservation check-in skipped straight from
-                  "which reservation" to ID type/number, with no way to actually capture who's
-                  checking in. Every check-in needs the same real guest record now, regardless of
-                  how the stay was booked. */}
+                  block used to be 'new'-mode only — every check-in needs the same real guest
+                  record now, regardless of how the stay was booked. */}
               {(mode === 'new' || (mode === 'existing' && selectedReservation)) && (
                 <>
-                  <div className="flex items-center gap-3 rounded-lg border border-dashed border-slate-300 p-3">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      className="hidden"
-                      onChange={(e) => e.target.files?.[0] && handleAiCheckIn(e.target.files[0])}
-                    />
-                    <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={scanning}>
-                      {scanning ? 'Scanning…' : '✨ AI Check-in — scan ID'}
-                    </Button>
-                    {scanNotice && <p className="text-xs text-amber-600">{scanNotice}</p>}
-                  </div>
-
-                  <div>
-                    <Field label="Mobile number">
-                      <div className="relative">
-                        <input
-                          className={`${inputClass} w-full`}
-                          value={guestPhone}
-                          onChange={(e) => {
-                            setGuestPhone(e.target.value);
-                            setGuestId(undefined);
-                          }}
-                          pattern="\d{10}"
-                          placeholder="10-digit number"
-                        />
-                        {matches.length > 0 && (
-                          <div className="absolute z-10 mt-1.5 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-md">
-                            {matches.map((g) => (
-                              <button
-                                key={g.id}
-                                type="button"
-                                onClick={() => applyGuest(g)}
-                                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                              >
-                                <span className="font-medium text-slate-800">{g.name}</span>{' '}
-                                <span className="text-slate-400">{g.phone}{g.city ? ` · ${g.city}` : ''}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </Field>
-                    <p className="mt-1.5 text-xs text-slate-400">
-                      {searching ? 'Searching…' : 'Enter 10 digits; if a saved guest appears, select them to load details.'}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-3">
-                    <Field label="Title">
-                      <select className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)}>
-                        {TITLES.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <div className="col-span-3">
-                      <Field label={mode === 'existing' && selectedReservation?.bookedByName ? "This room's guest name" : 'Full name'}>
-                        <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required autoFocus />
-                      </Field>
+                  {/* 2. AI Check-in — its own box, separate from the guest-detail fields below. */}
+                  <Card className="border-slate-200 p-4">
+                    <SectionHeader icon="✨" title="AI Check-in" />
+                    <div className="flex items-center gap-3 rounded-lg border border-dashed border-slate-300 p-3">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && handleAiCheckIn(e.target.files[0])}
+                      />
+                      <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={scanning}>
+                        {scanning ? 'Scanning…' : '✨ Scan guest ID'}
+                      </Button>
+                      {scanNotice && <p className="text-xs text-amber-600">{scanNotice}</p>}
                     </div>
-                  </div>
+                  </Card>
 
-                  <div className="grid grid-cols-3 gap-3">
-                    <Field label="Email">
-                      <input className={inputClass} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                    </Field>
-                    <Field label="Gender">
-                      <select className={inputClass} value={gender} onChange={(e) => setGender(e.target.value as Gender)}>
-                        <option value="">— select —</option>
-                        <option value="male">Male</option>
-                        <option value="female">Female</option>
-                        <option value="other">Other</option>
-                        <option value="prefer_not_to_say">Prefer not to say</option>
-                      </select>
-                    </Field>
-                    <Field label="Date of birth">
-                      <input className={inputClass} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
-                    </Field>
-                  </div>
-                  {dateOfBirth && !isAdult(dateOfBirth) && <p className="-mt-2 text-xs text-red-600">Must be at least 18 years old</p>}
+                  {/* 3. Guest details */}
+                  <Card className="border-slate-200 p-4">
+                    <SectionHeader icon="🧑" title="Guest details" />
 
-                  <Field label="Guest address">
-                    <textarea className={`${inputClass} min-h-16`} value={address} onChange={(e) => setAddress(e.target.value)} />
-                  </Field>
+                    <div className="space-y-4">
+                      <div>
+                        <Field label="Mobile number">
+                          <div className="relative">
+                            <input
+                              className={`${inputClass} w-full`}
+                              value={guestPhone}
+                              onChange={(e) => {
+                                setGuestPhone(e.target.value);
+                                setGuestId(undefined);
+                              }}
+                              pattern="\d{10}"
+                              placeholder="10-digit number"
+                            />
+                            {matches.length > 0 && (
+                              <div className="absolute z-10 mt-1.5 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-md">
+                                {matches.map((g) => (
+                                  <button key={g.id} type="button" onClick={() => applyGuest(g)} className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50">
+                                    <span className="font-medium text-slate-800">{g.name}</span>{' '}
+                                    <span className="text-slate-400">
+                                      {g.phone}
+                                      {g.city ? ` · ${g.city}` : ''}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </Field>
+                        <p className="mt-1.5 text-xs text-slate-400">
+                          {searching ? 'Searching…' : 'Enter 10 digits; if a saved guest appears, select them to load details.'}
+                        </p>
+                      </div>
 
-                  <div className="grid grid-cols-4 gap-3">
-                    <Field label="Country">
-                      <input className={inputClass} value={country} onChange={(e) => setCountry(e.target.value)} />
-                    </Field>
-                    <Field label="State">
-                      <input className={inputClass} value={state} onChange={(e) => setState(e.target.value)} />
-                    </Field>
-                    <Field label="City">
-                      <input className={inputClass} value={city} onChange={(e) => setCity(e.target.value)} />
-                    </Field>
-                    <Field label="Pincode">
-                      <input className={inputClass} value={pincode} onChange={(e) => setPincode(e.target.value)} />
-                    </Field>
-                  </div>
-
-                  <Field label="Purpose of stay *">
-                    <select className={inputClass} value={purposeOfStay} onChange={(e) => setPurposeOfStay(e.target.value)} required>
-                      <option value="">— select —</option>
-                      {PURPOSES.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-
-                  {/* §user request — "corporate booking vala nahi dala hai", then a reference
-                      app's own Individual/Company toggle as the target: Company reveals the full
-                      company-billing form below and bills the stay to it (for their GST input
-                      credit) right at check-in. */}
-                  <div className="flex rounded-lg bg-slate-100 p-1">
-                    {(['individual', 'company'] as const).map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setGuestType(t)}
-                        className={`flex-1 rounded-md py-1.5 text-xs font-semibold capitalize transition-colors ${guestType === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-                      >
-                        {t === 'company' ? '🏢 Company' : '👤 Individual'}
-                      </button>
-                    ))}
-                  </div>
-                  {isCorporate && (
-                    <div className="space-y-3 rounded-lg bg-slate-50 p-3">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <Field label="Tax ID Type">
-                          <select className={inputClass} value={companyTaxIdType} onChange={(e) => setCompanyTaxIdType(e.target.value)}>
-                            <option value="GSTIN">GSTIN</option>
-                            <option value="PAN">PAN</option>
-                            <option value="Other">Other</option>
+                      <div className="grid grid-cols-4 gap-3">
+                        <Field label="Title">
+                          <select className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)}>
+                            {TITLES.map((t) => (
+                              <option key={t} value={t}>
+                                {t}
+                              </option>
+                            ))}
                           </select>
                         </Field>
-                        <Field label="Tax ID Number">
-                          <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="Enter Tax Identification Number" />
+                        <div className="col-span-3">
+                          <Field label={mode === 'existing' && selectedReservation?.bookedByName ? "This room's guest name" : 'Full name'}>
+                            <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required autoFocus />
+                          </Field>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        <Field label="Email">
+                          <input className={inputClass} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
                         </Field>
-                        <Field label="Company Name">
-                          <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" required />
+                        <Field label="Gender">
+                          <select className={inputClass} value={gender} onChange={(e) => setGender(e.target.value as Gender)}>
+                            <option value="">— select —</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                            <option value="other">Other</option>
+                            <option value="prefer_not_to_say">Prefer not to say</option>
+                          </select>
                         </Field>
-                        <Field label="Company Phone">
-                          <input className={inputClass} value={companyPhone} onChange={(e) => setCompanyPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit mobile" />
+                        <Field label="Date of birth">
+                          <input className={inputClass} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
                         </Field>
                       </div>
-                      <Field label="Company Email">
-                        <input className={inputClass} type="email" value={companyEmail} onChange={(e) => setCompanyEmail(e.target.value)} />
+                      {dateOfBirth && !isAdult(dateOfBirth) && <p className="-mt-2 text-xs text-red-600">Must be at least 18 years old</p>}
+
+                      <Field label="Guest address">
+                        <textarea className={`${inputClass} min-h-16`} value={address} onChange={(e) => setAddress(e.target.value)} />
                       </Field>
-                      <Field label="Address">
-                        <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
-                      </Field>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+                      <div className="grid grid-cols-4 gap-3">
                         <Field label="Country">
-                          <input className={inputClass} value={companyCountry} onChange={(e) => setCompanyCountry(e.target.value)} />
+                          <input className={inputClass} value={country} onChange={(e) => setCountry(e.target.value)} />
                         </Field>
                         <Field label="State">
-                          <input className={inputClass} value={companyState} onChange={(e) => setCompanyState(e.target.value)} />
+                          <input className={inputClass} value={state} onChange={(e) => setState(e.target.value)} />
                         </Field>
                         <Field label="City">
-                          <input className={inputClass} value={companyCity} onChange={(e) => setCompanyCity(e.target.value)} />
+                          <input className={inputClass} value={city} onChange={(e) => setCity(e.target.value)} />
                         </Field>
                         <Field label="Pincode">
-                          <input className={inputClass} value={companyPincode} onChange={(e) => setCompanyPincode(e.target.value)} />
+                          <input className={inputClass} value={pincode} onChange={(e) => setPincode(e.target.value)} />
                         </Field>
                       </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="ID type">
+                          <select className={inputClass} value={idType} onChange={(e) => setIdType(e.target.value as IdType)}>
+                            {ID_TYPES.map((t) => (
+                              <option key={t.value} value={t.value}>
+                                {t.label}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="ID number">
+                          <input className={inputClass} value={idNumber} onChange={(e) => setIdNumber(e.target.value)} required />
+                        </Field>
+                      </div>
+
+                      <Field label="Purpose of stay *">
+                        <select className={inputClass} value={purposeOfStay} onChange={(e) => setPurposeOfStay(e.target.value)} required>
+                          <option value="">— select —</option>
+                          {PURPOSES.map((p) => (
+                            <option key={p} value={p}>
+                              {p}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+
+                      {/* §user request — "corporate booking vala nahi dala hai", then a reference
+                          app's own Individual/Company toggle as the target: Company reveals the
+                          full company-billing form below and bills the stay to it (for their GST
+                          input credit) right at check-in. */}
+                      <div className="flex rounded-lg bg-slate-100 p-1">
+                        {(['individual', 'company'] as const).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setGuestType(t)}
+                            className={`flex-1 rounded-md py-1.5 text-xs font-semibold capitalize transition-colors ${guestType === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                          >
+                            {t === 'company' ? '🏢 Company' : '👤 Individual'}
+                          </button>
+                        ))}
+                      </div>
+                      {isCorporate && (
+                        <div className="space-y-3 rounded-lg bg-slate-50 p-3">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <Field label="Tax ID Type">
+                              <select className={inputClass} value={companyTaxIdType} onChange={(e) => setCompanyTaxIdType(e.target.value)}>
+                                <option value="GSTIN">GSTIN</option>
+                                <option value="PAN">PAN</option>
+                                <option value="Other">Other</option>
+                              </select>
+                            </Field>
+                            <Field label="Tax ID Number">
+                              <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="Enter Tax Identification Number" />
+                            </Field>
+                            <Field label="Company Name">
+                              <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" required />
+                            </Field>
+                            <Field label="Company Phone">
+                              <input
+                                className={inputClass}
+                                value={companyPhone}
+                                onChange={(e) => setCompanyPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                placeholder="10-digit mobile"
+                              />
+                            </Field>
+                          </div>
+                          <Field label="Company Email">
+                            <input className={inputClass} type="email" value={companyEmail} onChange={(e) => setCompanyEmail(e.target.value)} />
+                          </Field>
+                          <Field label="Address">
+                            <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
+                          </Field>
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <Field label="Country">
+                              <input className={inputClass} value={companyCountry} onChange={(e) => setCompanyCountry(e.target.value)} />
+                            </Field>
+                            <Field label="State">
+                              <input className={inputClass} value={companyState} onChange={(e) => setCompanyState(e.target.value)} />
+                            </Field>
+                            <Field label="City">
+                              <input className={inputClass} value={companyCity} onChange={(e) => setCompanyCity(e.target.value)} />
+                            </Field>
+                            <Field label="Pincode">
+                              <input className={inputClass} value={companyPincode} onChange={(e) => setCompanyPincode(e.target.value)} />
+                            </Field>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </Card>
                 </>
               )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="ID type">
-                  <select className={inputClass} value={idType} onChange={(e) => setIdType(e.target.value as IdType)}>
-                    {ID_TYPES.map((t) => (
-                      <option key={t.value} value={t.value}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="ID number">
-                  <input className={inputClass} value={idNumber} onChange={(e) => setIdNumber(e.target.value)} required />
-                </Field>
-              </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -848,14 +866,11 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   );
 }
 
-function StepDot({ n, active, done }: { n: number; active: boolean; done: boolean }) {
+function SectionHeader({ icon, title }: { icon: string; title: string }) {
   return (
-    <div
-      className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-semibold ${
-        done ? 'border-royal-500 bg-royal-500 text-white' : active ? 'border-royal-500 text-royal-600' : 'border-slate-200 text-slate-400'
-      }`}
-    >
-      {done ? '✓' : n}
+    <div className="mb-3 flex items-center gap-2.5">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-royal-50 text-sm">{icon}</span>
+      <h5 className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</h5>
     </div>
   );
 }
