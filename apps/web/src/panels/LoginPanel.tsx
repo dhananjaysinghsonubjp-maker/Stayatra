@@ -199,19 +199,19 @@ export function LoginPanel() {
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-5 flex rounded-lg bg-slate-100 p-1">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setMode(t.id)}
-                className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${
-                  mode === t.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          {/* §user request — "ye 3 ek me hi aa jaye": the 3-way segmented button row collapsed
+              into one dropdown, so the login card doesn't carry 3 always-visible tab buttons for
+              a choice most people only make once. */}
+          <div className="mb-5">
+            <Field label="Login as">
+              <select className={inputClass} value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+                {tabs.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
           </div>
 
           {mode === 'signup' && selectedPlan && (
@@ -290,7 +290,12 @@ export function LoginPanel() {
                   <input
                     className={inputClass}
                     value={shortCode}
-                    onChange={(e) => setShortCode(e.target.value.toUpperCase())}
+                    // §bugfix — "kabhi kabhar invalid login": shortCode is matched exactly
+                    // server-side, so a pasted Property ID (WhatsApp, Notes) or a mobile keyboard's
+                    // autocomplete can carry an invisible leading/trailing space that silently
+                    // breaks the match. Trimming here (PIN below is already digit-only) kills that
+                    // class of bug at the source.
+                    onChange={(e) => setShortCode(e.target.value.toUpperCase().trim())}
                     placeholder="e.g. N2XQLJ"
                     required
                   />

@@ -10,7 +10,8 @@ import { InHouse } from './panels/InHouse';
 import { Bookings } from './panels/Bookings';
 import { Dues } from './panels/Dues';
 import { Ledger } from './panels/Ledger';
-import { Housekeeping } from './panels/Housekeeping';
+import { Contacts } from './panels/Contacts';
+import { HotelTeamStaffPage } from './panels/staff/HotelTeamStaffPage';
 import { HousekeepingApp } from './panels/housekeeping/HousekeepingApp';
 import { Reports } from './panels/Reports';
 import { Calendar } from './panels/channel-manager/Calendar';
@@ -145,13 +146,18 @@ function Shell() {
     'cm_rate_update',
     'cm_inventory_update',
     'cm_advance_bulk_update',
-    'cm_calendar',
     'cm_guest_messaging',
     'cm_reviews',
     'cm_reports',
     'cm_channels',
     'cm_inventory',
   ];
+  // §user request — "CM me ek hi baar me multiple dates select karke edit kar sakte hain, PMS
+  // me nahi": Calendar used to live only inside cmTabs, so a PMS-only org never saw it at all —
+  // even though its Stays grid (and the same multi-date range picker) has nothing to do with
+  // OTA connections. Split out of cmTabs so either module unlocks it (same gate as
+  // canSeeReservations above); Calendar itself hides the rate/inventory-only controls when
+  // hasChannelManager is false.
 
   const visibleTabs: Tab[] = [
     // §user request — matching the Skymax reference app: housekeeping never sees the
@@ -162,15 +168,20 @@ function Shell() {
     ...((canSeeReservations ? ['bookings'] : []) as Tab[]),
     ...((hasPms && !isHousekeeping ? ['dues'] : []) as Tab[]),
     ...((hasPms && !isHousekeeping ? ['ledger'] : []) as Tab[]),
+    ...((hasPms && !isHousekeeping ? ['contacts'] : []) as Tab[]),
+    ...((canSeeReservations ? ['cm_calendar'] : []) as Tab[]),
     ...((hasChannelManager && !isHousekeeping ? cmTabs : []) as Tab[]),
-    ...((hasPms ? ['housekeeping'] : []) as Tab[]),
+    // §user request — "Housekeeping section ko replace karke Staff karo": this Tab id now
+    // renders the combined Staff+Housekeeping-Records page (HotelTeamStaffPage), which includes
+    // Staff & PINs' old content — same owner/manager bar that page already required.
+    ...((canManagePms ? ['housekeeping'] : []) as Tab[]),
     // Reports is entirely PMS-shaped content (rooms/sales/housekeeping) and
     // its endpoints are PMS-role-gated server-side — a Channel-Manager-only
     // owner would just hit FORBIDDEN on every query, so this stays on the
     // narrower PMS check while Setup (which also covers shared Room
     // Categories) stays on the broader either-module check.
     ...(canManagePms ? (['reports'] as Tab[]) : []),
-    ...(canManage ? (['settings_details', 'settings_brand', 'settings_rooms', 'settings_staff', 'settings_invoice', 'settings_ledger'] as Tab[]) : []),
+    ...(canManage ? (['settings_details', 'settings_brand', 'settings_rooms', 'settings_invoice', 'settings_ledger'] as Tab[]) : []),
     ...(canManage && hasChannelManager ? (['settings_credentials'] as Tab[]) : []),
     ...(canManage && isOwner ? (['settings_billing'] as Tab[]) : []),
     ...(canManage ? (['audit_log'] as Tab[]) : []),
@@ -225,9 +236,10 @@ function Shell() {
           {tab === 'bookings' && canSeeReservations && <Bookings hotelId={hotel.id} hasPms={hasPms} />}
           {tab === 'dues' && hasPms && !isHousekeeping && <Dues hotelId={hotel.id} />}
           {tab === 'ledger' && hasPms && !isHousekeeping && <Ledger hotelId={hotel.id} />}
-          {tab === 'housekeeping' && hasPms && <Housekeeping hotelId={hotel.id} />}
+          {tab === 'contacts' && hasPms && !isHousekeeping && <Contacts hotelId={hotel.id} isOwner={pmsRole === 'owner'} />}
+          {tab === 'housekeeping' && canManagePms && <HotelTeamStaffPage hotelId={hotel.id} token={token} isOwner={isOwner} />}
           {tab === 'reports' && canManagePms && <Reports hotelId={hotel.id} />}
-          {(tab === 'settings_details' || tab === 'settings_brand' || tab === 'settings_rooms' || tab === 'settings_staff' || tab === 'settings_invoice' || tab === 'settings_ledger' || tab === 'settings_credentials' || tab === 'settings_billing') &&
+          {(tab === 'settings_details' || tab === 'settings_brand' || tab === 'settings_rooms' || tab === 'settings_invoice' || tab === 'settings_ledger' || tab === 'settings_credentials' || tab === 'settings_billing') &&
             canManage && (
               <Onboarding
                 hotel={hotel}
@@ -242,22 +254,22 @@ function Shell() {
                       ? 'brand'
                       : tab === 'settings_rooms'
                         ? 'rooms'
-                        : tab === 'settings_staff'
-                          ? 'staff'
-                          : tab === 'settings_invoice'
-                            ? 'invoice'
-                            : tab === 'settings_ledger'
-                              ? 'ledger'
-                              : tab === 'settings_credentials'
-                                ? 'credentials'
-                                : 'billing'
+                        : tab === 'settings_invoice'
+                          ? 'invoice'
+                          : tab === 'settings_ledger'
+                            ? 'ledger'
+                            : tab === 'settings_credentials'
+                              ? 'credentials'
+                              : 'billing'
                 }
               />
             )}
           {tab === 'audit_log' && canManage && <AuditLog hotelId={hotel.id} />}
+          {tab === 'cm_calendar' && canSeeReservations && (
+            <Calendar hotelId={hotel.id} onNavigate={setTab} hasChannelManager={hasChannelManager} />
+          )}
           {hasChannelManager && !isHousekeeping && (
             <>
-              {tab === 'cm_calendar' && <Calendar hotelId={hotel.id} onNavigate={setTab} />}
               {tab === 'cm_guest_messaging' && (
                 <GuestMessaging
                   hotelId={hotel.id}

@@ -1,8 +1,9 @@
-import { Injectable, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, ConflictException, ForbiddenException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { MESSAGING_GATEWAY, type MessagingGateway } from './messaging-gateway.interface.js';
 
 /**
  * §user request — a full staff profile (photo, phone, Aadhar) with an approval step, not just a
@@ -24,7 +25,29 @@ export class StaffService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    @Inject(MESSAGING_GATEWAY) private readonly messaging: MessagingGateway,
   ) {}
+
+  /** Shared by approve()'s auto-generated PIN and setPin()'s manual one — a PIN only has to be
+   * unique among this hotel's other active staff, same rule either way. */
+  private async generateUniquePin(hotelId: string, excludeUserId: string): Promise<string> {
+    const existingPins = await this.prisma.user.findMany({
+      where: { hotelId, pinHash: { not: null }, active: true, id: { not: excludeUserId } },
+      select: { pinHash: true },
+    });
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const candidate = String(Math.floor(1000 + Math.random() * 9000));
+      let clashes = false;
+      for (const { pinHash } of existingPins) {
+        if (pinHash && (await bcrypt.compare(candidate, pinHash))) {
+          clashes = true;
+          break;
+        }
+      }
+      if (!clashes) return candidate;
+    }
+    throw new ConflictException('Could not generate a unique PIN — try again');
+  }
 
   /** A manager also needs the channel_manager role (same 'manager' tier) to actually use the CM
    * tabs their pms role now unlocks in the sidebar — only if the hotel has that module at all. */
@@ -49,7 +72,8 @@ export class StaffService {
     phone?: string;
     photoPath?: string;
     idNumber?: string;
-    idPhotoPath?: string;
+    idPhotoFrontPath?: string;
+    idPhotoBackPath?: string;
     proposedBy: string;
     proposerIsOwner: boolean;
   }) {
@@ -65,7 +89,8 @@ export class StaffService {
         photoPath: input.photoPath,
         idType: input.idNumber ? 'aadhaar' : undefined,
         idNumber: input.idNumber,
-        idPhotoPath: input.idPhotoPath,
+        idPhotoFrontPath: input.idPhotoFrontPath,
+        idPhotoBackPath: input.idPhotoBackPath,
         designation,
         shift: input.role === 'housekeeping' ? input.shift : undefined,
         approvalStatus: input.proposerIsOwner ? 'approved' : 'pending',
@@ -94,7 +119,9 @@ export class StaffService {
         type: 'staff_pending_approval',
         title: 'New staff profile needs approval',
         body: `${input.name} (${designation}) was submitted for review.`,
-        link: 'settings_staff',
+        // §user request — Staff & PINs is gone as its own page; the roster now lives under
+        // Hotel Team → Staff, same Tab id ('housekeeping') as that merged page.
+        link: 'housekeeping',
       });
     }
 
@@ -140,7 +167,8 @@ export class StaffService {
         photoPath: u.photoPath,
         idType: u.idType,
         idNumber: u.idNumber,
-        idPhotoPath: u.idPhotoPath,
+        idPhotoFrontPath: u.idPhotoFrontPath,
+        idPhotoBackPath: u.idPhotoBackPath,
         approvalStatus: u.approvalStatus,
         approvalNote: u.approvalNote,
         hasPinSet: Boolean(u.pinHash),
@@ -148,13 +176,41 @@ export class StaffService {
       }));
   }
 
+  /**
+   * §user request — "FMO kabhi bhi PIN generate nahi karega, owner approve karte hi automatically
+   * 4-digit PIN ban jaaye, WhatsApp pe chala jaaye nahi toh SMS pe": approval itself now mints the
+   * PIN — there's no separate manual step for a brand-new profile. No real WhatsApp/SMS gateway
+   * exists yet (MessagingGateway is a stub — see its interface), so `delivered` comes back false
+   * and the PIN is also returned in plaintext here, once, so the owner who just clicked Approve
+   * can relay it themselves in the meantime. It's never persisted or logged anywhere in plaintext
+   * — only this return value carries it, and only to the owner who triggered this exact call.
+   */
   async approve(input: { userId: string; resolvedBy: string }) {
+    const existing = await this.prisma.user.findUniqueOrThrow({ where: { id: input.userId } });
+    const pin = await this.generateUniquePin(existing.hotelId!, input.userId);
+    const pinHash = await bcrypt.hash(pin, 10);
+
     const user = await this.prisma.user.update({
       where: { id: input.userId },
-      data: { approvalStatus: 'approved', approvalResolvedBy: input.resolvedBy, approvalResolvedAt: new Date(), approvalNote: null },
+      data: {
+        approvalStatus: 'approved',
+        approvalResolvedBy: input.resolvedBy,
+        approvalResolvedAt: new Date(),
+        approvalNote: null,
+        pinHash,
+      },
     });
     await this.audit.log({ hotelId: user.hotelId!, eventType: 'STAFF_APPROVED', actorId: input.resolvedBy, subjectId: user.id });
-    return user;
+    await this.audit.log({ hotelId: user.hotelId!, eventType: 'STAFF_PIN_SET', actorId: input.resolvedBy, subjectId: user.id, detail: { auto: true } });
+
+    // The staff member logs in with the Property ID (hotel.shortCode), not the internal hotel id
+    // — that's what any real WhatsApp/SMS message would need to actually say.
+    const hotel = await this.prisma.hotel.findUniqueOrThrow({ where: { id: user.hotelId! }, select: { shortCode: true } });
+    const delivery = user.phone
+      ? await this.messaging.sendPin({ phone: user.phone, pin, staffName: user.name, propertyId: hotel.shortCode })
+      : { delivered: false, channel: 'none' as const };
+
+    return { user, pin, delivered: delivery.delivered, channel: delivery.channel };
   }
 
   async reject(input: { userId: string; note: string; resolvedBy: string }) {
@@ -172,7 +228,8 @@ export class StaffService {
     phone?: string;
     photoPath?: string;
     idNumber?: string;
-    idPhotoPath?: string;
+    idPhotoFrontPath?: string;
+    idPhotoBackPath?: string;
     designation?: string;
     shift?: string;
     role?: 'manager' | 'housekeeping';

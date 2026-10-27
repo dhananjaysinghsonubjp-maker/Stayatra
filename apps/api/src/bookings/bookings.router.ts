@@ -61,6 +61,33 @@ const lineItemsAtCheckInSchema = z
   .array(z.object({ description: z.string().min(1), quantity: z.number().int().positive(), unitPrice: z.number().nonnegative() }))
   .optional();
 
+// §user request — "corporate booking vala nahi dala hai": bill the stay to a company (for their
+// GST input credit) right from reservation/check-in creation, instead of only after the fact via
+// the invoice view's own "Bill to company" (bookings.setCompanyBilling) — same three fields.
+const companyBillingSchema = {
+  companyName: z.string().optional(),
+  companyGstin: z.string().optional(),
+  companyAddress: z.string().optional(),
+};
+
+// Shared by createMultiRoomReservation and updateReservationGroup — one room per Booking row,
+// each optionally on its own dates (a bulk/wedding reservation's rooms don't always share the
+// same stay), falling back to the reservation-level checkIn/checkOut when omitted.
+const multiRoomSchema = z
+  .array(
+    z.object({
+      roomId: z.string(),
+      totalAmount: z.number().nonnegative(),
+      ratePlanId: z.string().optional(),
+      discountAmount: z.number().nonnegative().optional(),
+      gstExempt: z.boolean().optional(),
+      lineItems: lineItemsAtCheckInSchema,
+      checkIn: z.coerce.date().optional(),
+      checkOut: z.coerce.date().optional(),
+    }),
+  )
+  .min(1);
+
 const guestDetailsSchema = {
   guestId: z.string().optional(),
   title: z.string().optional(),
@@ -114,23 +141,35 @@ export function createBookingsRouter(bookings: BookingsService) {
           guestPhone: z.string().regex(/^\d{10}$/).optional(),
           guestEmail: z.string().email().optional(),
           specialRequest: z.string().optional(),
-          rooms: z
-            .array(
-              z.object({
-                roomId: z.string(),
-                totalAmount: z.number().nonnegative(),
-                ratePlanId: z.string().optional(),
-                discountAmount: z.number().nonnegative().optional(),
-                gstExempt: z.boolean().optional(),
-                lineItems: lineItemsAtCheckInSchema,
-              }),
-            )
-            .min(1),
+          rooms: multiRoomSchema,
           advanceAmount: z.number().nonnegative().optional(),
           paymentMethod: paymentMethodSchema.optional(),
+          ...companyBillingSchema,
         }),
       )
       .mutation(({ ctx, input }) => bookings.createMultiRoomReservation({ ...input, actorId: ctx.user.userId })),
+
+    // §user request, with a reference app's own calendar-bar "Edit reservation" as the target —
+    // change an upcoming (not yet checked-in) reservation's guest details, dates, rooms, or
+    // pricing after it's already been created. See bookings.service.ts updateReservationGroup for
+    // how rooms are matched/added/removed.
+    updateReservationGroup: frontDeskUp
+      .input(
+        z.object({
+          reservationGroupId: z.string(),
+          hotelId: z.string(),
+          source: bookingSourceSchema,
+          checkIn: z.coerce.date(),
+          checkOut: z.coerce.date(),
+          guestName: z.string().min(1),
+          guestPhone: z.string().regex(/^\d{10}$/).optional(),
+          guestEmail: z.string().email().optional(),
+          specialRequest: z.string().optional(),
+          rooms: multiRoomSchema,
+          ...companyBillingSchema,
+        }),
+      )
+      .mutation(({ ctx, input }) => bookings.updateReservationGroup({ ...input, actorId: ctx.user.userId })),
 
     checkInWalkIn: frontDeskUp
       .input(
@@ -147,6 +186,7 @@ export function createBookingsRouter(bookings: BookingsService) {
           discountAmount: z.number().nonnegative().optional(),
           gstExempt: z.boolean().optional(),
           payment: paymentAtCheckInSchema,
+          ...companyBillingSchema,
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -166,7 +206,13 @@ export function createBookingsRouter(bookings: BookingsService) {
           lineItems: lineItemsAtCheckInSchema,
           discountAmount: z.number().nonnegative().optional(),
           gstExempt: z.boolean().optional(),
+          // §user request — early/late-arrival date adjustment, right in the check-in step.
+          checkIn: z.coerce.date().optional(),
+          checkOut: z.coerce.date().optional(),
+          nights: z.number().int().positive().optional(),
+          totalAmount: z.number().nonnegative().optional(),
           payment: paymentAtCheckInSchema,
+          ...companyBillingSchema,
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -186,9 +232,32 @@ export function createBookingsRouter(bookings: BookingsService) {
       .input(z.object({ hotelId: z.string(), roomCategoryId: z.string().optional() }))
       .query(({ input }) => bookings.listUpcomingReservations(input)),
 
+    /** §user request — swap a still-confirmed reservation's room before check-in. */
+    reassignReservationRoom: frontDeskUp
+      .input(z.object({ bookingId: z.string(), roomId: z.string() }))
+      .mutation(({ ctx, input }) => bookings.reassignReservationRoom({ ...input, actorId: ctx.user.userId })),
+
+    /** §user request — "+ Add Room" on an existing group reservation. */
+    addRoomToReservation: frontDeskUp
+      .input(
+        z.object({
+          reservationGroupId: z.string(),
+          roomId: z.string(),
+          ratePlanId: z.string().optional(),
+          totalAmount: z.number().nonnegative(),
+        }),
+      )
+      .mutation(({ ctx, input }) => bookings.addRoomToReservation({ ...input, actorId: ctx.user.userId })),
+
     addPayment: frontDeskUp
       .input(z.object({ bookingId: z.string() }).merge(paymentDetailsSchema))
       .mutation(({ ctx, input }) => bookings.addPayment({ ...input, collectedBy: ctx.user.userId })),
+
+    /** §user request — "Neeraj ji ek hi baar mein poori booking ki payment karte hain, room-wise
+     * nahi": one payment against the whole group reservation, split across its rooms' own dues. */
+    addGroupPayment: frontDeskUp
+      .input(z.object({ reservationGroupId: z.string() }).merge(paymentDetailsSchema.omit({ receiptPhotoPath: true, collectedAt: true })))
+      .mutation(({ ctx, input }) => bookings.addGroupPayment({ ...input, collectedBy: ctx.user.userId })),
 
     addLineItem: frontDeskUp
       .input(z.object({ bookingId: z.string(), description: z.string().min(1), quantity: z.number().int().positive(), unitPrice: z.number().nonnegative() }))
@@ -201,6 +270,20 @@ export function createBookingsRouter(bookings: BookingsService) {
     setInvoiceSettings: ownerOrManager
       .input(z.object({ bookingId: z.string(), discountAmount: z.number().nonnegative().nullable().optional(), gstExempt: z.boolean().optional() }))
       .mutation(({ ctx, input }) => bookings.setInvoiceSettings({ ...input, actorId: ctx.user.userId })),
+
+    /** §user request — "company ki naam se GST invoice banana ho toh company info daal ke bane":
+     * same reach as who can already print an invoice — not owner/manager-only like most of the
+     * booking-edit actions above, since this is just which name the invoice prints. */
+    setCompanyBilling: frontDeskUp
+      .input(
+        z.object({
+          bookingId: z.string(),
+          companyName: z.string().min(1).nullable(),
+          companyGstin: z.string().optional().nullable(),
+          companyAddress: z.string().optional().nullable(),
+        }),
+      )
+      .mutation(({ ctx, input }) => bookings.setCompanyBilling({ ...input, actorId: ctx.user.userId })),
 
     getInvoice: anyPmsRole.input(z.object({ bookingId: z.string() })).query(({ input }) => bookings.getInvoice(input.bookingId)),
 

@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button, Card, PageHeader, StatCard, inputClass } from '../../components/ui';
 import { BookingViewModal } from '../BookingViewModal';
-import { DateFilterPill, MultiDatePicker, dateRangeKeys } from '../../components/DateRangePicker';
+import { CheckInModal } from '../checkin/CheckInModal';
+import { CreateReservationModal } from '../checkin/CreateReservationModal';
+import { DateFilterPill, MultiDatePicker, dateRangeKeys, istDateKey, istDateLabel, addDaysKey } from '../../components/DateRangePicker';
 import { OTA_LABEL, CHANNEL_META } from './ota-labels';
 import { ChannelIcon } from './ChannelBadge';
 import type { Booking, InventoryRate, OtaConnection, RatePlan, Restriction, Room } from '../../types';
@@ -11,13 +13,30 @@ import type { Tab } from '../../layout/Sidebar';
 
 type ViewMode = 'both' | 'rates' | 'stays';
 
+// §bugfix — plain `new Date().toISOString()` slices the UTC calendar day, which is still
+// "yesterday" until 5:30am IST (same reasoning as DateRangePicker's istDateKey). Route through
+// IST first so "today" on this calendar always matches the actual date in India.
 function todayPlus(days: number) {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  return addDaysKey(istDateKey(new Date().toISOString()), days);
 }
 function isSameDay(a: string, b: string) {
   return a.slice(0, 10) === b.slice(0, 10);
+}
+
+// §user request — "existing reservation ka check-in future date ki hai, usko aaj check-in kar
+// diya, calendar me yahi pe aana chahiye taki pta rahe": a reservation's checkIn/checkOut dates
+// stay the billing dates (nights, totalAmount, OTA restrictions never move just because the
+// front desk let the guest in early) — but the calendar bar itself should still reflect where
+// the room is physically occupied *from*, so an early check-in's bar starts today, not on its
+// original reserved date. Late/on-time check-ins are unaffected (checkedInAt falls inside the
+// already-correct checkIn..checkOut range).
+function effectiveStartKey(b: Booking): string {
+  const reserved = b.checkIn.slice(0, 10);
+  if (b.status === 'checked_in' && b.checkedInAt) {
+    const actual = istDateKey(b.checkedInAt);
+    if (actual < reserved) return actual;
+  }
+  return reserved;
 }
 
 /**
@@ -28,7 +47,21 @@ function isSameDay(a: string, b: string) {
  * category shows the same rate cells since they're priced as one unit — only the booking
  * bars are room-specific now.
  */
-export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?: (tab: Tab) => void }) {
+export function Calendar({
+  hotelId,
+  onNavigate,
+  hasChannelManager = true,
+}: {
+  hotelId: string;
+  onNavigate?: (tab: Tab) => void;
+  /** §user request — "CM me multiple dates select karke edit kar sakte hain, PMS me nahi": this
+   * page used to be gated entirely behind the Channel Manager module, so a PMS-only org never
+   * got the date-range picker or the stays grid at all. It's now open to PMS too, but the rate/
+   * inventory side (channel selector, Rates view, Bulk Edit) stays hidden here — those write
+   * InventoryRate rows, which are always priced per OTA connection and can't mean anything
+   * without one. A PMS-only org still gets the full Stays grid and the same multi-date picker. */
+  hasChannelManager?: boolean;
+}) {
   const { token } = useAuth();
   const [connections, setConnections] = useState<OtaConnection[]>([]);
   const [otaConnectionId, setOtaConnectionId] = useState('');
@@ -38,6 +71,12 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
   const [restrictionsByPlan, setRestrictionsByPlan] = useState<Record<string, Restriction[]>>({});
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
+  // §user request, with a reference app's own calendar-bar click (a tooltip on hover, a
+  // View/Edit/Start check-in menu on click) as the target — the bar itself no longer jumps
+  // straight to the read-only detail view.
+  const [menuFor, setMenuFor] = useState<{ booking: Booking; x: number; y: number } | null>(null);
+  const [checkingInBooking, setCheckingInBooking] = useState<Booking | null>(null);
+  const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
   // §user request, with Housekeeping's own date filter as the explicit target — same From/To
   // range picker, single day or a multi-day range in one tap-through, instead of a plain
   // single-date input. The quick Today/7D/14D/... pills below still exist as shortcuts that
@@ -46,7 +85,7 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
   // it at the grid's left edge with nothing before it, so it never read as "today" at a glance.
   // Starting one day earlier gives it visible context on both sides.
   const [selectedDates, setSelectedDates] = useState<string[]>(() => dateRangeKeys(todayPlus(-1), todayPlus(12)));
-  const [viewMode, setViewMode] = useState<ViewMode>('both');
+  const [viewMode, setViewMode] = useState<ViewMode>(hasChannelManager ? 'both' : 'stays');
   const [error, setError] = useState<string | null>(null);
   // instanceKey scopes the modal to the exact row clicked (the rate plan id — one row per category).
   const [editingCell, setEditingCell] = useState<{ instanceKey: string; ratePlanId: string; roomCategoryId: string; date: string } | null>(null);
@@ -138,6 +177,16 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId, otaConnectionId, ratePlans.length, startDate, endDate]);
 
+  /** Re-fetches just the bookings (not the rate grid) — called after Edit reservation or Start
+   * check-in finishes, so the bar the menu was opened from reflects the change immediately. */
+  async function refreshBookings() {
+    try {
+      setBookings(await query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate }, token ?? undefined));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to refresh calendar');
+    }
+  }
+
   // One primary rate plan per room category — every physical room in that category shows this rate (rooms of the same type share pricing).
   const primaryPlanByCategory = new Map<string, string>();
   for (const rp of ratePlans) if (!primaryPlanByCategory.has(rp.roomCategoryId)) primaryPlanByCategory.set(rp.roomCategoryId, rp.id);
@@ -151,6 +200,13 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
   const dues = activeBookings.filter((b) => Number(b.paidAmount ?? 0) < Number(b.totalAmount));
 
   const categoriesInOrder = [...new Map(ratePlans.map((rp) => [rp.roomCategoryId, rp.roomCategoryName])).entries()];
+
+  // Derived live (not a snapshot), same reasoning as Bookings.tsx's own viewingGroup — reflects a
+  // concurrent change immediately instead of showing stale data until reopened.
+  const editingGroup = useMemo(
+    () => (editingGroupKey ? bookings.filter((b) => (b.reservationGroupId ?? b.id) === editingGroupKey) : null),
+    [editingGroupKey, bookings],
+  );
 
   async function refreshRatePlanRates(ratePlanId: string) {
     if (!otaConnectionId) return;
@@ -382,11 +438,12 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
    * scheduling assigns each booking the lowest free "lane" so overlapping ones stack into
    * separate rows instead of hiding one another. */
   function assignLanes(bookingsForRow: Booking[]): { laneOf: Map<string, number>; laneCount: number } {
-    const sorted = [...bookingsForRow].sort((a, b) => a.checkIn.localeCompare(b.checkIn));
+    const sorted = [...bookingsForRow].sort((a, b) => effectiveStartKey(a).localeCompare(effectiveStartKey(b)));
     const laneEndDates: string[] = [];
     const laneOf = new Map<string, number>();
     for (const b of sorted) {
-      let lane = laneEndDates.findIndex((end) => end <= b.checkIn);
+      const start = effectiveStartKey(b);
+      let lane = laneEndDates.findIndex((end) => end <= start);
       if (lane === -1) {
         lane = laneEndDates.length;
         laneEndDates.push(b.checkOut);
@@ -402,26 +459,54 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
     return (
       <>
         {rowBookings.map((b) => {
-          const startIdx = dates.indexOf(b.checkIn.slice(0, 10));
+          const effectiveStart = effectiveStartKey(b);
+          const earlyCheckIn = effectiveStart !== b.checkIn.slice(0, 10);
+          const startIdx = dates.indexOf(effectiveStart);
           const endIdx = dates.indexOf(b.checkOut.slice(0, 10));
           const colStart = startIdx === -1 ? 1 : startIdx + 1;
           const colEnd = (endIdx === -1 ? dates.length : endIdx) + 1;
           if (colEnd <= 1 || colStart > dates.length) return null;
           const meta = CHANNEL_META[b.source] ?? CHANNEL_META.direct;
           const lane = laneOf.get(b.id) ?? 0;
+          const sourceLabel = OTA_LABEL[b.source] ?? (b.source === 'direct' ? 'Direct' : b.source === 'walk_in' ? 'Walk-in' : b.source);
+          const ratePlanName = ratePlans.find((rp) => rp.id === b.ratePlanId)?.name;
           return (
-            <button
+            // §user request, with a reference app's own calendar-bar hover tooltip + click menu
+            // (View/Edit/Start check-in) as the target — a quick summary on hover without opening
+            // anything, and a click no longer jumps straight to the read-only detail view.
+            <div
               key={b.id}
-              type="button"
-              onClick={() => setViewingBooking(b)}
-              title={`${b.guestName} — ₹${b.totalAmount} — ${b.nights} night${b.nights === 1 ? '' : 's'} — click for details`}
-              className={`relative z-10 flex items-center gap-1 truncate rounded-md px-2 py-1 text-left text-xs font-medium shadow-sm hover:opacity-90 ${meta.bg} ${meta.text}`}
+              className="group relative z-10"
               style={{ gridColumn: `${Math.max(1, colStart)} / ${Math.min(dates.length + 1, colEnd)}`, gridRow: lane + 2, marginBottom: 2, marginTop: lane === 0 ? 6 : 2 }}
             >
-              <ChannelIcon source={b.source} className="h-4 w-4 shrink-0" />
-              <span className="truncate">{b.guestName}</span>
-              <span className="ml-auto shrink-0 opacity-80">₹{Number(b.totalAmount).toLocaleString('en-IN')}</span>
-            </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuFor({ booking: b, x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 170) });
+                }}
+                className={`flex w-full items-center gap-1 truncate rounded-md px-2 py-1 text-left text-xs font-medium shadow-sm hover:opacity-90 ${meta.bg} ${meta.text}`}
+              >
+                <ChannelIcon source={b.source} className="h-4 w-4 shrink-0" />
+                {earlyCheckIn && <span className="shrink-0" aria-hidden="true">⏱</span>}
+                <span className="truncate">{b.guestName}</span>
+                <span className="ml-auto shrink-0 opacity-80">₹{Number(b.totalAmount).toLocaleString('en-IN')}</span>
+              </button>
+
+              <div
+                className={`pointer-events-none absolute bottom-full left-0 z-30 mb-1 hidden w-56 rounded-lg bg-slate-900 p-3 text-xs text-white shadow-xl group-hover:block ${
+                  menuFor?.booking.id === b.id ? '!hidden' : ''
+                }`}
+              >
+                <p className="mb-1.5 truncate font-bold">{b.guestName}</p>
+                <p className="text-slate-300">Source: {sourceLabel}</p>
+                <p className="text-slate-300">Check-in: {istDateLabel(b.checkIn.slice(0, 10))}</p>
+                <p className="text-slate-300">Check-out: {istDateLabel(b.checkOut.slice(0, 10))}</p>
+                {earlyCheckIn && <p className="text-amber-300">⏱ Checked in early on {istDateLabel(effectiveStart)}</p>}
+                <p className="text-slate-300">Rate Plan: {ratePlanName ?? '—'}</p>
+                <p className="mt-1 text-slate-400">₹{Number(b.totalAmount).toLocaleString('en-IN')} · {b.nights} night{b.nights === 1 ? '' : 's'}</p>
+              </div>
+            </div>
           );
         })}
       </>
@@ -430,7 +515,14 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
 
   return (
     <div>
-      <PageHeader title="Calendar" subtitle="Rates and every reservation, any channel, on one grid — one row per room." />
+      <PageHeader
+        title="Calendar"
+        subtitle={
+          hasChannelManager
+            ? 'Rates and every reservation, any channel, on one grid — one row per room.'
+            : 'Every reservation — direct, walk-in, any channel — on one grid, one row per room.'
+        }
+      />
 
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Arrivals today" value={arrivalsToday.length} />
@@ -442,14 +534,16 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
       <Card className="mb-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            <select className={`${inputClass} w-52`} value={otaConnectionId} onChange={(e) => setOtaConnectionId(e.target.value)}>
-              <option value="">— rates for channel —</option>
-              {connections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {OTA_LABEL[c.otaCode] ?? c.otaCode}
-                </option>
-              ))}
-            </select>
+            {hasChannelManager && (
+              <select className={`${inputClass} w-52`} value={otaConnectionId} onChange={(e) => setOtaConnectionId(e.target.value)}>
+                <option value="">— rates for channel —</option>
+                {connections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {OTA_LABEL[c.otaCode] ?? c.otaCode}
+                  </option>
+                ))}
+              </select>
+            )}
             <DateFilterPill selected={selectedDates} onChange={setSelectedDates} />
             <div className="flex rounded-lg bg-slate-100 p-1">
               {([
@@ -468,21 +562,25 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
                 </button>
               ))}
             </div>
-            <Button variant="secondary" onClick={() => setBulkDatePickerOpen(true)}>
-              Bulk Edit
-            </Button>
+            {hasChannelManager && (
+              <Button variant="secondary" onClick={() => setBulkDatePickerOpen(true)}>
+                Bulk Edit
+              </Button>
+            )}
           </div>
-          <div className="flex rounded-lg bg-slate-100 p-1">
-            {(['both', 'stays', 'rates'] as ViewMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setViewMode(m)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${viewMode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-              >
-                {m === 'both' ? 'Rates & Stays' : m}
-              </button>
-            ))}
-          </div>
+          {hasChannelManager && (
+            <div className="flex rounded-lg bg-slate-100 p-1">
+              {(['both', 'stays', 'rates'] as ViewMode[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setViewMode(m)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${viewMode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                >
+                  {m === 'both' ? 'Rates & Stays' : m}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
           {Object.keys(CHANNEL_META).map((code) => (
@@ -501,8 +599,9 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
           "no channel connected" wall as the rate grid, even though a direct/walk-in reservation
           has nothing to do with OTA connections. Only the rate grid actually needs a channel —
           RateCells already degrades gracefully with none connected (disabled cells, "Pick a
-          channel first") — so this is now just a dismissible notice, not a block. */}
-      {connections.length === 0 && ratePlans.length > 0 && (
+          channel first") — so this is now just a dismissible notice, not a block. PMS-only orgs
+          (hasChannelManager false) never see this at all — there's no channel for them to connect. */}
+      {hasChannelManager && connections.length === 0 && ratePlans.length > 0 && (
         <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20">
           <p className="text-sm text-amber-800 dark:text-amber-300">
             No channel connected yet — rates stay hidden until you connect one. Stays from every source (Direct, Walk-in, every OTA) still show below.
@@ -901,6 +1000,54 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
         </div>
       )}
 
+      {/* §user request, with a reference app's own calendar-bar click menu as the target — View
+          reservation / Edit reservation / Start check-in, instead of the bar always jumping
+          straight to the read-only detail view. */}
+      {menuFor && (
+        <div className="fixed inset-0 z-40" onClick={() => setMenuFor(null)}>
+          <div
+            className="absolute w-48 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+            style={{ left: menuFor.x, top: menuFor.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setViewingBooking(menuFor.booking);
+                setMenuFor(null);
+              }}
+              className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            >
+              View reservation
+            </button>
+            {menuFor.booking.status === 'confirmed' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingGroupKey(menuFor.booking.reservationGroupId ?? menuFor.booking.id);
+                  setMenuFor(null);
+                }}
+                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Edit reservation
+              </button>
+            )}
+            {menuFor.booking.status === 'confirmed' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCheckingInBooking(menuFor.booking);
+                  setMenuFor(null);
+                }}
+                className="block w-full px-3 py-2 text-left text-sm font-medium text-brand-600 hover:bg-brand-50"
+              >
+                Start check-in
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* §user request — "koi bhi booking pr click karu toh uski detail khul jani chahiye" —
           same read-only billing view the Reservations table's own "View" opens. */}
       {viewingBooking && (
@@ -908,6 +1055,31 @@ export function Calendar({ hotelId, onNavigate }: { hotelId: string; onNavigate?
           booking={viewingBooking}
           roomType={categoriesInOrder.find(([id]) => id === viewingBooking.roomCategoryId)?.[1] ?? '—'}
           onClose={() => setViewingBooking(null)}
+        />
+      )}
+
+      {editingGroup && editingGroup.length > 0 && (
+        <CreateReservationModal
+          hotelId={hotelId}
+          editGroup={editingGroup}
+          onClose={() => setEditingGroupKey(null)}
+          onDone={() => {
+            setEditingGroupKey(null);
+            void refreshBookings();
+          }}
+        />
+      )}
+
+      {checkingInBooking && (
+        <CheckInModal
+          hotelId={hotelId}
+          reservation={checkingInBooking}
+          assignedRoomNumber={rooms.find((r) => r.id === checkingInBooking.assignedRoomId)?.roomNumber}
+          onClose={() => setCheckingInBooking(null)}
+          onDone={() => {
+            setCheckingInBooking(null);
+            void refreshBookings();
+          }}
         />
       )}
     </div>

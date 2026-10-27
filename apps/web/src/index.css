@@ -64,10 +64,13 @@ body {
     visibility: hidden;
   }
   .invoice-print-root,
-  .invoice-print-root * {
+  .invoice-print-root *,
+  .staff-id-print-root,
+  .staff-id-print-root * {
     visibility: visible;
   }
-  .invoice-print-root {
+  .invoice-print-root,
+  .staff-id-print-root {
     position: fixed;
     inset: 0;
     background: white;

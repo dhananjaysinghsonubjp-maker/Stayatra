@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { assetUrl, query } from '../api';
+import { assetUrl, mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
-import { Button } from '../components/ui';
+import { Button, Field, inputClass } from '../components/ui';
 import { computeInvoiceTotals } from '../invoice';
 import { paymentMethodLabel } from '../paymentMethods';
 import { formatDateShort } from '../dateFormat';
@@ -19,14 +19,62 @@ import type { Booking, Hotel, PaymentMethod } from '../types';
  * (sidebar, header, backdrop) don't end up on the printed page. "Save as PDF" in that dialog
  * covers the "download" case without a server-side PDF dependency.
  */
-export function InvoicePrintView({ booking, roomType, onClose }: { booking: Booking; roomType: string; onClose: () => void }) {
+export function InvoicePrintView({ booking: initialBooking, roomType, onClose }: { booking: Booking; roomType: string; onClose: () => void }) {
   const { token } = useAuth();
   const [hotel, setHotel] = useState<Hotel | null>(null);
+  // §user request — "company ki naam se GST invoice banana ho toh company info daal ke bane":
+  // a local copy so saving company-billing updates the printed "Billed to" immediately, without
+  // the caller having to refetch/re-pass the booking just to see it reflected here.
+  const [booking, setBooking] = useState(initialBooking);
+  const [editingCompany, setEditingCompany] = useState(false);
+  const [companyName, setCompanyName] = useState(booking.billToCompanyName ?? '');
+  const [companyGstin, setCompanyGstin] = useState(booking.billToCompanyGstin ?? '');
+  const [companyAddress, setCompanyAddress] = useState(booking.billToCompanyAddress ?? '');
+  const [savingCompany, setSavingCompany] = useState(false);
+  const [companyError, setCompanyError] = useState<string | null>(null);
 
   useEffect(() => {
     query<Hotel>('hotels.get', { hotelId: booking.hotelId }, token ?? undefined).then(setHotel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking.hotelId]);
+
+  async function saveCompanyBilling() {
+    if (!companyName.trim()) {
+      setCompanyError('Company name is required');
+      return;
+    }
+    setSavingCompany(true);
+    setCompanyError(null);
+    try {
+      const updated = await mutate<Booking>(
+        'bookings.setCompanyBilling',
+        { bookingId: booking.id, companyName: companyName.trim(), companyGstin: companyGstin.trim() || null, companyAddress: companyAddress.trim() || null },
+        token ?? undefined,
+      );
+      setBooking((b) => ({ ...b, billToCompanyName: updated.billToCompanyName, billToCompanyGstin: updated.billToCompanyGstin, billToCompanyAddress: updated.billToCompanyAddress }));
+      setEditingCompany(false);
+    } catch (err) {
+      setCompanyError(err instanceof ApiError ? err.message : 'Failed to save company details');
+    } finally {
+      setSavingCompany(false);
+    }
+  }
+
+  async function clearCompanyBilling() {
+    setSavingCompany(true);
+    setCompanyError(null);
+    try {
+      await mutate('bookings.setCompanyBilling', { bookingId: booking.id, companyName: null }, token ?? undefined);
+      setBooking((b) => ({ ...b, billToCompanyName: null, billToCompanyGstin: null, billToCompanyAddress: null }));
+      setCompanyName('');
+      setCompanyGstin('');
+      setCompanyAddress('');
+    } catch (err) {
+      setCompanyError(err instanceof ApiError ? err.message : 'Failed to clear company details');
+    } finally {
+      setSavingCompany(false);
+    }
+  }
 
   const totals = computeInvoiceTotals({
     totalAmount: Number(booking.totalAmount),
@@ -65,8 +113,56 @@ export function InvoicePrintView({ booking, roomType, onClose }: { booking: Book
             <div className="grid grid-cols-2 gap-6 py-4 text-sm">
               <div>
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Billed to</p>
-                <p className="font-medium text-slate-900">{booking.guestName}</p>
-                {booking.guestPhone && <p className="text-xs text-slate-500">{booking.guestPhone}</p>}
+                {booking.billToCompanyName ? (
+                  <>
+                    <p className="font-medium text-slate-900">{booking.billToCompanyName}</p>
+                    {booking.billToCompanyGstin && <p className="text-xs text-slate-500">GSTIN: {booking.billToCompanyGstin}</p>}
+                    {booking.billToCompanyAddress && <p className="max-w-[200px] text-xs text-slate-500">{booking.billToCompanyAddress}</p>}
+                    <p className="mt-1 text-xs text-slate-400">Guest: {booking.guestName}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium text-slate-900">{booking.guestName}</p>
+                    {booking.guestPhone && <p className="text-xs text-slate-500">{booking.guestPhone}</p>}
+                  </>
+                )}
+                {/* §user request, reference: Room Nexa's "Company Info" — bills the stay to a
+                    company (name + GSTIN + address) instead of the individual guest, for their
+                    GST input credit. */}
+                <button
+                  type="button"
+                  onClick={() => setEditingCompany((v) => !v)}
+                  className="no-print mt-1.5 text-xs font-medium text-brand-600 hover:underline"
+                >
+                  {booking.billToCompanyName ? 'Edit company info' : '🏢 Bill to company'}
+                </button>
+                {editingCompany && (
+                  <div className="no-print mt-2 w-full max-w-xs space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <Field label="Company name">
+                      <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" />
+                    </Field>
+                    <Field label="GSTIN">
+                      <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="15-digit GSTIN" />
+                    </Field>
+                    <Field label="Company address">
+                      <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
+                    </Field>
+                    {companyError && <p className="text-xs text-red-600">{companyError}</p>}
+                    <div className="flex gap-2">
+                      <Button type="button" className="!px-2.5 !py-1 text-xs" onClick={saveCompanyBilling} disabled={savingCompany}>
+                        {savingCompany ? 'Saving…' : 'Save'}
+                      </Button>
+                      <Button type="button" variant="secondary" className="!px-2.5 !py-1 text-xs" onClick={() => setEditingCompany(false)}>
+                        Cancel
+                      </Button>
+                      {booking.billToCompanyName && (
+                        <button type="button" onClick={clearCompanyBilling} disabled={savingCompany} className="text-xs text-red-600 hover:underline">
+                          Bill to guest instead
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="text-right">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Stay</p>

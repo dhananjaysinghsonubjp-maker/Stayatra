@@ -3,9 +3,9 @@ import { Badge, Button, Card } from '../components/ui';
 import { ChannelBadge } from './channel-manager/ChannelBadge';
 import { InvoicePrintView } from './InvoicePrintView';
 import { computeInvoiceTotals } from '../invoice';
-import { paymentMethodLabel } from '../paymentMethods';
 import { formatDateShort as formatDateFull, formatDateTimeShort as formatDateTime } from '../dateFormat';
-import type { Booking, PaymentMethod } from '../types';
+import { PaymentHistory } from './PaymentHistory';
+import type { Booking } from '../types';
 
 const BREAKDOWN_LABELS: Record<string, string> = {
   roomCharges: 'Room Charges',
@@ -204,10 +204,6 @@ export function BookingViewModal({
 
           <div className="space-y-1.5 border-t border-slate-100 px-5 py-4 text-sm dark:border-slate-700">
             <div className="flex justify-between text-slate-500 dark:text-slate-400">
-              <span>Payment Method</span>
-              <span className="text-slate-700 dark:text-slate-300">{booking.paymentMethod ? paymentMethodLabel(booking.paymentMethod as PaymentMethod) : '—'}</span>
-            </div>
-            <div className="flex justify-between text-slate-500 dark:text-slate-400">
               <span>Paid</span>
               <span className="text-slate-900 dark:text-white">₹{paid.toFixed(2)}</span>
             </div>
@@ -222,6 +218,22 @@ export function BookingViewModal({
                 )}
               </span>
             </div>
+          </div>
+
+          {/* §user request — "payment ka date/time proper aana chahiye, pata chale 1st
+              installment, 2nd, final payment kab hui": each payment collected against this
+              booking, oldest first, instead of just the first payment's method shown once. */}
+          <div className="border-t border-slate-100 px-5 py-4 dark:border-slate-700">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment History</p>
+            <PaymentHistory
+              entries={(booking.payments ?? []).map((p) => ({
+                key: p.id,
+                amount: Number(p.amount),
+                collectedAt: p.collectedAt,
+                method: p.method,
+                referenceNumber: p.referenceNumber,
+              }))}
+            />
           </div>
 
           {booking.channelBreakdown && <ChannelBreakdown data={booking.channelBreakdown} />}

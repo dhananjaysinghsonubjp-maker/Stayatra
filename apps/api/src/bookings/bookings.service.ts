@@ -179,32 +179,52 @@ export class BookingsService {
       discountAmount?: number;
       gstExempt?: boolean;
       lineItems?: { description: string; quantity: number; unitPrice: number }[];
+      checkIn?: Date;
+      checkOut?: Date;
     }[];
     advanceAmount?: number;
     paymentMethod?: PaymentMethod;
+    // §user request — "corporate booking vala nahi dala hai": set right at creation, applied to
+    // every room in the group (same billToCompany* columns setCompanyBilling already uses).
+    companyName?: string;
+    companyGstin?: string;
+    companyAddress?: string;
     actorId: string;
   }) {
     if (input.rooms.length === 0) throw new BadRequestException('Select at least one room');
-    const nights = Math.round((input.checkOut.getTime() - input.checkIn.getTime()) / 86400000);
-    if (nights < 1) throw new BadRequestException('Check-out must be after check-in');
+    const defaultNights = Math.round((input.checkOut.getTime() - input.checkIn.getTime()) / 86400000);
+    if (defaultNights < 1) throw new BadRequestException('Check-out must be after check-in');
+
+    // §user request — a bulk/wedding reservation's rooms don't always share the same stay (one
+    // room for 1 night, another for 3); each room falls back to the reservation-level dates
+    // above when it doesn't set its own.
+    const roomStays = input.rooms.map((r) => {
+      const effCheckIn = r.checkIn ?? input.checkIn;
+      const effCheckOut = r.checkOut ?? input.checkOut;
+      const effNights = Math.round((effCheckOut.getTime() - effCheckIn.getTime()) / 86400000);
+      if (effNights < 1) throw new BadRequestException('Check-out must be after check-in for every room');
+      return { ...r, checkIn: effCheckIn, checkOut: effCheckOut, nights: effNights };
+    });
 
     const roomIds = input.rooms.map((r) => r.roomId);
     const rooms = await this.prisma.room.findMany({ where: { id: { in: roomIds }, hotelId: input.hotelId } });
     if (rooms.length !== roomIds.length) throw new NotFoundException('One or more selected rooms were not found');
 
-    const overlapping = await this.prisma.booking.findMany({
-      where: {
-        hotelId: input.hotelId,
-        assignedRoomId: { in: roomIds },
-        status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
-        checkIn: { lt: input.checkOut },
-        checkOut: { gt: input.checkIn },
-      },
-      include: { assignedRoom: true },
-    });
-    if (overlapping.length > 0) {
-      const names = overlapping.map((b) => b.assignedRoom?.roomNumber).filter(Boolean).join(', ');
-      throw new ConflictException(`Room ${names} already has a reservation for these dates`);
+    // Checked per room (not one batched query) since each room may now have its own date range.
+    for (const stay of roomStays) {
+      const overlapping = await this.prisma.booking.findFirst({
+        where: {
+          hotelId: input.hotelId,
+          assignedRoomId: stay.roomId,
+          status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+          checkIn: { lt: stay.checkOut },
+          checkOut: { gt: stay.checkIn },
+        },
+        include: { assignedRoom: true },
+      });
+      if (overlapping) {
+        throw new ConflictException(`Room ${overlapping.assignedRoom?.roomNumber} already has a reservation for these dates`);
+      }
     }
 
     const reservationGroupId = crypto.randomUUID();
@@ -212,7 +232,7 @@ export class BookingsService {
 
     const bookings = await this.prisma.$transaction(async (tx) => {
       const created = [];
-      for (const r of input.rooms) {
+      for (const r of roomStays) {
         const room = rooms.find((room) => room.id === r.roomId)!;
         const share = input.advanceAmount ? (r.totalAmount / grandTotal) * input.advanceAmount : 0;
         const booking = await tx.booking.create({
@@ -220,15 +240,19 @@ export class BookingsService {
             hotelId: input.hotelId,
             reservationGroupId,
             guestName: input.guestName,
+            // §user request — only meaningful once there's more than one room to tell apart;
+            // an ordinary 1-room booking through this same flow has no separate "booker".
+            bookedByName: input.rooms.length > 1 ? input.guestName : undefined,
+            bookedByPhone: input.rooms.length > 1 ? input.guestPhone : undefined,
             guestPhone: input.guestPhone,
             guestEmail: input.guestEmail,
             specialRequest: input.specialRequest,
             roomCategoryId: room.roomCategoryId!,
             assignedRoomId: room.id,
             ratePlanId: r.ratePlanId,
-            checkIn: input.checkIn,
-            checkOut: input.checkOut,
-            nights,
+            checkIn: r.checkIn,
+            checkOut: r.checkOut,
+            nights: r.nights,
             totalAmount: r.totalAmount,
             discountAmount: r.discountAmount,
             gstExempt: r.gstExempt ?? false,
@@ -236,6 +260,9 @@ export class BookingsService {
             source: input.source,
             paidAmount: share > 0 ? share : undefined,
             paymentMethod: share > 0 ? input.paymentMethod : undefined,
+            billToCompanyName: input.companyName,
+            billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
+            billToCompanyAddress: input.companyName ? input.companyAddress : undefined,
           },
         });
         // §user request — the same "+ Add Extra Charges" line items check-in already supports
@@ -289,6 +316,172 @@ export class BookingsService {
   }
 
   /**
+   * §user request, with a reference app's own calendar-bar "Edit reservation" (opened from the
+   * same View/Edit/Start check-in menu its tooltip's bar click shows) as the target — change an
+   * upcoming reservation's guest details, dates, rooms, or pricing after it's already been
+   * created. Scoped to status `confirmed` across the whole group; once any room has checked in,
+   * corrections go through updateBooking's own 1-hour post-check-in window instead, which this
+   * intentionally never touches.
+   *
+   * A submitted room is matched to an existing Booking row by roomId and updated in place (keeps
+   * its id, so its own payments/line items/audit trail survive); a room with no existing match is
+   * created fresh under the same reservationGroupId (exactly like createMultiRoomReservation); an
+   * existing room missing from the submitted list is removed — but only if nothing's been paid
+   * against it (Payment cascades on Booking delete), so a part-paid room can't silently vanish
+   * along with its own ledger.
+   */
+  async updateReservationGroup(input: {
+    reservationGroupId: string;
+    hotelId: string;
+    source: BookingSource;
+    checkIn: Date;
+    checkOut: Date;
+    guestName: string;
+    guestPhone?: string;
+    guestEmail?: string;
+    specialRequest?: string;
+    rooms: {
+      roomId: string;
+      totalAmount: number;
+      ratePlanId?: string;
+      discountAmount?: number;
+      gstExempt?: boolean;
+      lineItems?: { description: string; quantity: number; unitPrice: number }[];
+      checkIn?: Date;
+      checkOut?: Date;
+    }[];
+    companyName?: string;
+    companyGstin?: string;
+    companyAddress?: string;
+    actorId: string;
+  }) {
+    if (input.rooms.length === 0) throw new BadRequestException('Select at least one room');
+
+    const existing = await this.prisma.booking.findMany({
+      where: { reservationGroupId: input.reservationGroupId, hotelId: input.hotelId },
+      include: { payments: true, assignedRoom: true },
+    });
+    if (existing.length === 0) throw new NotFoundException('Reservation not found');
+    if (existing.some((b) => b.status !== BookingStatus.confirmed)) {
+      throw new ConflictException('Only an upcoming reservation (not yet checked in) can be edited this way');
+    }
+
+    const defaultNights = Math.round((input.checkOut.getTime() - input.checkIn.getTime()) / 86400000);
+    if (defaultNights < 1) throw new BadRequestException('Check-out must be after check-in');
+
+    const roomStays = input.rooms.map((r) => {
+      const effCheckIn = r.checkIn ?? input.checkIn;
+      const effCheckOut = r.checkOut ?? input.checkOut;
+      const effNights = Math.round((effCheckOut.getTime() - effCheckIn.getTime()) / 86400000);
+      if (effNights < 1) throw new BadRequestException('Check-out must be after check-in for every room');
+      return { ...r, checkIn: effCheckIn, checkOut: effCheckOut, nights: effNights };
+    });
+
+    const roomIds = roomStays.map((r) => r.roomId);
+    const rooms = await this.prisma.room.findMany({ where: { id: { in: roomIds }, hotelId: input.hotelId } });
+    if (rooms.length !== roomIds.length) throw new NotFoundException('One or more selected rooms were not found');
+
+    const existingByRoomId = new Map(existing.filter((b) => b.assignedRoomId).map((b) => [b.assignedRoomId!, b]));
+    const submittedRoomIds = new Set(roomStays.map((r) => r.roomId));
+    const toRemove = existing.filter((b) => b.assignedRoomId && !submittedRoomIds.has(b.assignedRoomId));
+    const blockedRemoval = toRemove.find((b) => b.payments.length > 0);
+    if (blockedRemoval) {
+      throw new ConflictException(
+        `Room ${blockedRemoval.assignedRoom?.roomNumber} has a payment recorded against it — remove the payment first, or keep this room in the reservation`,
+      );
+    }
+
+    // Excludes this same reservation's own current rows — re-saving the same room/dates
+    // shouldn't read as a conflict with itself.
+    const existingIds = existing.map((b) => b.id);
+    for (const stay of roomStays) {
+      const overlapping = await this.prisma.booking.findFirst({
+        where: {
+          hotelId: input.hotelId,
+          assignedRoomId: stay.roomId,
+          id: { notIn: existingIds },
+          status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+          checkIn: { lt: stay.checkOut },
+          checkOut: { gt: stay.checkIn },
+        },
+        include: { assignedRoom: true },
+      });
+      if (overlapping) {
+        throw new ConflictException(`Room ${overlapping.assignedRoom?.roomNumber} already has a reservation for these dates`);
+      }
+    }
+
+    const availabilityDeltas: { roomCategoryId: string; checkIn: Date; checkOut: Date; delta: number }[] = [];
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = [];
+      for (const r of roomStays) {
+        const room = rooms.find((room) => room.id === r.roomId)!;
+        const prior = existingByRoomId.get(r.roomId);
+        const shared = {
+          guestName: input.guestName,
+          bookedByName: input.rooms.length > 1 ? input.guestName : undefined,
+          bookedByPhone: input.rooms.length > 1 ? input.guestPhone : undefined,
+          guestPhone: input.guestPhone,
+          guestEmail: input.guestEmail,
+          specialRequest: input.specialRequest,
+          ratePlanId: r.ratePlanId,
+          checkIn: r.checkIn,
+          checkOut: r.checkOut,
+          nights: r.nights,
+          totalAmount: r.totalAmount,
+          discountAmount: r.discountAmount,
+          gstExempt: r.gstExempt ?? false,
+          source: input.source,
+          billToCompanyName: input.companyName,
+          billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
+          billToCompanyAddress: input.companyName ? input.companyAddress : undefined,
+        };
+        let booking;
+        if (prior) {
+          if (prior.checkIn.getTime() !== r.checkIn.getTime() || prior.checkOut.getTime() !== r.checkOut.getTime() || prior.roomCategoryId !== room.roomCategoryId) {
+            availabilityDeltas.push({ roomCategoryId: prior.roomCategoryId, checkIn: prior.checkIn, checkOut: prior.checkOut, delta: 1 });
+            availabilityDeltas.push({ roomCategoryId: room.roomCategoryId!, checkIn: r.checkIn, checkOut: r.checkOut, delta: -1 });
+          }
+          booking = await tx.booking.update({ where: { id: prior.id }, data: { ...shared, roomCategoryId: room.roomCategoryId!, assignedRoomId: room.id } });
+          await tx.invoiceLineItem.deleteMany({ where: { bookingId: booking.id } });
+        } else {
+          availabilityDeltas.push({ roomCategoryId: room.roomCategoryId!, checkIn: r.checkIn, checkOut: r.checkOut, delta: -1 });
+          booking = await tx.booking.create({
+            data: { ...shared, hotelId: input.hotelId, reservationGroupId: input.reservationGroupId, roomCategoryId: room.roomCategoryId!, assignedRoomId: room.id, status: BookingStatus.confirmed },
+          });
+        }
+        if (r.lineItems?.length) {
+          await tx.invoiceLineItem.createMany({
+            data: r.lineItems.map((li) => ({ bookingId: booking.id, description: li.description, quantity: li.quantity, unitPrice: li.unitPrice, amount: li.quantity * li.unitPrice })),
+          });
+        }
+        result.push(booking);
+      }
+      for (const b of toRemove) {
+        availabilityDeltas.push({ roomCategoryId: b.roomCategoryId, checkIn: b.checkIn, checkOut: b.checkOut, delta: 1 });
+        await tx.invoiceLineItem.deleteMany({ where: { bookingId: b.id } });
+        await tx.booking.delete({ where: { id: b.id } });
+      }
+      return result;
+    });
+
+    await Promise.all(
+      availabilityDeltas.map((d) => this.rates.adjustAvailabilityForStay({ hotelId: input.hotelId, roomCategoryId: d.roomCategoryId, checkIn: d.checkIn, checkOut: d.checkOut, delta: d.delta })),
+    );
+
+    await this.audit.log({
+      hotelId: input.hotelId,
+      eventType: 'STAY_EDITED',
+      actorId: input.actorId,
+      subjectId: input.reservationGroupId,
+      detail: { guestName: input.guestName, rooms: rooms.map((r) => r.roomNumber) },
+    });
+
+    return updated;
+  }
+
+  /**
    * §8.3 — guest standing at the desk right now, no prior reservation.
    * Idempotent against double-submit. lineItems/discountAmount/gstExempt
    * (added beyond MD spec) are created atomically with the booking, so the
@@ -309,6 +502,9 @@ export class BookingsService {
       lineItems?: { description: string; quantity: number; unitPrice: number }[];
       discountAmount?: number;
       gstExempt?: boolean;
+      companyName?: string;
+      companyGstin?: string;
+      companyAddress?: string;
       actorId: string;
     },
   ) {
@@ -361,6 +557,9 @@ export class BookingsService {
           status: BookingStatus.checked_in,
           checkedInAt: new Date(),
           source: 'walk_in',
+          billToCompanyName: input.companyName,
+          billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
+          billToCompanyAddress: input.companyName ? input.companyAddress : undefined,
         },
       });
       if (input.lineItems?.length) {
@@ -438,6 +637,16 @@ export class BookingsService {
       lineItems?: { description: string; quantity: number; unitPrice: number }[];
       discountAmount?: number;
       gstExempt?: boolean;
+      // §user request — "guest ek din pehle aa jaata hai, dates adjust karne de check-in ke time
+      // hi": reserved 24→26, actually walks in on the 23rd and needs to leave the 25th. Optional —
+      // omitted, the booking keeps its originally-reserved dates/amount exactly as before.
+      checkIn?: Date;
+      checkOut?: Date;
+      nights?: number;
+      totalAmount?: number;
+      companyName?: string;
+      companyGstin?: string;
+      companyAddress?: string;
       actorId: string;
     },
   ) {
@@ -453,6 +662,24 @@ export class BookingsService {
     }
     if (room.status !== 'available') throw new ConflictException(`Room ${room.roomNumber} is not available`);
     if (room.roomCategoryId !== booking.roomCategoryId) throw new ConflictException('Room category does not match the reservation');
+
+    const datesChanged = Boolean(
+      input.checkIn && input.checkOut && (input.checkIn.getTime() !== booking.checkIn.getTime() || input.checkOut.getTime() !== booking.checkOut.getTime()),
+    );
+    if (datesChanged && input.checkIn && input.checkOut) {
+      if (input.checkOut <= input.checkIn) throw new BadRequestException('Check-out must be after check-in');
+      const overlap = await this.prisma.booking.findFirst({
+        where: {
+          hotelId: booking.hotelId,
+          assignedRoomId: input.roomId,
+          id: { not: booking.id },
+          status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+          checkIn: { lt: input.checkOut },
+          checkOut: { gt: input.checkIn },
+        },
+      });
+      if (overlap) throw new ConflictException(`Room ${room.roomNumber} already has another reservation overlapping the adjusted dates`);
+    }
 
     const guestId = await this.linkGuestProfile(booking.hotelId, input);
 
@@ -471,6 +698,15 @@ export class BookingsService {
           guestPhone: input.guestPhone ?? booking.guestPhone,
           discountAmount: input.discountAmount,
           gstExempt: input.gstExempt ?? booking.gstExempt,
+          checkIn: input.checkIn ?? booking.checkIn,
+          checkOut: input.checkOut ?? booking.checkOut,
+          nights: input.nights ?? booking.nights,
+          totalAmount: input.totalAmount ?? booking.totalAmount,
+          // Undefined (not passed) leaves whatever was already set at reservation time untouched
+          // — only an explicit companyName here overwrites it, same as every other optional field.
+          billToCompanyName: input.companyName,
+          billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
+          billToCompanyAddress: input.companyName ? input.companyAddress : undefined,
         },
       });
       if (input.lineItems?.length) {
@@ -491,8 +727,147 @@ export class BookingsService {
       return result;
     });
 
-    await this.audit.log({ hotelId: booking.hotelId, eventType: 'CHECK_IN', actorId: input.actorId, subjectId: booking.id });
+    // The reservation's original dates already hold the pooled OTA availability (held at
+    // creation time) — if the front desk just adjusted them above, release what was held for
+    // the old range and consume what's actually needed for the new one, so the pool (and
+    // whatever's pushed to connected channels) matches the room's real occupancy, not the
+    // original booking.
+    if (datesChanged) {
+      await this.rates.adjustAvailabilityForStay({
+        hotelId: booking.hotelId,
+        roomCategoryId: booking.roomCategoryId,
+        checkIn: booking.checkIn,
+        checkOut: booking.checkOut,
+        delta: 1,
+      });
+      await this.rates.adjustAvailabilityForStay({
+        hotelId: booking.hotelId,
+        roomCategoryId: booking.roomCategoryId,
+        checkIn: updated.checkIn,
+        checkOut: updated.checkOut,
+        delta: -1,
+      });
+    }
+
+    await this.audit.log({
+      hotelId: booking.hotelId,
+      eventType: 'CHECK_IN',
+      actorId: input.actorId,
+      subjectId: booking.id,
+      detail: datesChanged ? { datesAdjustedFrom: { checkIn: booking.checkIn, checkOut: booking.checkOut } } : undefined,
+    });
     return updated;
+  }
+
+  /**
+   * §user request — "Neeraj ji ki booking mein rooms ko edit bhi kar sakte hain": swap which
+   * physical room a still-confirmed (not yet checked-in) reservation is assigned to. Unlike
+   * updateBooking (checked_in-only, 1-hour window), this is for *before* check-in — a reservation
+   * sitting on "Upcoming" has no such window to respect, just an ordinary availability check.
+   */
+  async reassignReservationRoom(input: { bookingId: string; roomId: string; actorId: string }) {
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    if (booking.status !== BookingStatus.confirmed) {
+      throw new ConflictException(`Booking is ${booking.status}, not an upcoming reservation — nothing to reassign`);
+    }
+    if (booking.assignedRoomId === input.roomId) return booking; // no-op
+
+    const room = await this.prisma.room.findUniqueOrThrow({ where: { id: input.roomId } });
+    if (room.hotelId !== booking.hotelId) throw new NotFoundException('Room not found at this hotel');
+    if (room.roomCategoryId !== booking.roomCategoryId) throw new ConflictException('The new room is not in the same category as this booking');
+
+    const overlap = await this.prisma.booking.findFirst({
+      where: {
+        hotelId: booking.hotelId,
+        assignedRoomId: input.roomId,
+        id: { not: booking.id },
+        status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+        checkIn: { lt: booking.checkOut },
+        checkOut: { gt: booking.checkIn },
+      },
+    });
+    if (overlap) throw new ConflictException(`Room ${room.roomNumber} already has another reservation overlapping these dates`);
+
+    const updated = await this.prisma.booking.update({ where: { id: input.bookingId }, data: { assignedRoomId: input.roomId } });
+    await this.audit.log({
+      hotelId: booking.hotelId,
+      eventType: 'ROOM_CHANGED',
+      actorId: input.actorId,
+      subjectId: booking.id,
+      detail: { fromRoomId: booking.assignedRoomId, toRoomId: input.roomId },
+    });
+    return updated;
+  }
+
+  /**
+   * §user request, reference app's own check-in flow — "+ Add Room": a group reservation
+   * (Neeraj ji's 5 rooms) grows by one more room, as its own new Booking row sharing the same
+   * reservationGroupId/booker/dates — same shape createMultiRoomReservation produces, just added
+   * after the fact instead of all at once. Scoped to before that new room's own check-in (it's
+   * born `confirmed`); existing rooms in the group are untouched regardless of their own status.
+   */
+  async addRoomToReservation(input: {
+    reservationGroupId: string;
+    roomId: string;
+    ratePlanId?: string;
+    totalAmount: number;
+    actorId: string;
+  }) {
+    const groupBooking = await this.prisma.booking.findFirstOrThrow({
+      where: { reservationGroupId: input.reservationGroupId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const room = await this.prisma.room.findUniqueOrThrow({ where: { id: input.roomId } });
+    if (room.hotelId !== groupBooking.hotelId) throw new NotFoundException('Room not found at this hotel');
+
+    const overlap = await this.prisma.booking.findFirst({
+      where: {
+        hotelId: groupBooking.hotelId,
+        assignedRoomId: input.roomId,
+        status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+        checkIn: { lt: groupBooking.checkOut },
+        checkOut: { gt: groupBooking.checkIn },
+      },
+    });
+    if (overlap) throw new ConflictException(`Room ${room.roomNumber} already has a reservation for these dates`);
+
+    const bookerName = groupBooking.bookedByName ?? groupBooking.guestName;
+    const created = await this.prisma.booking.create({
+      data: {
+        hotelId: groupBooking.hotelId,
+        reservationGroupId: groupBooking.reservationGroupId,
+        guestName: bookerName,
+        bookedByName: bookerName,
+        bookedByPhone: groupBooking.bookedByPhone ?? groupBooking.guestPhone,
+        guestPhone: groupBooking.guestPhone,
+        guestEmail: groupBooking.guestEmail,
+        specialRequest: groupBooking.specialRequest,
+        roomCategoryId: room.roomCategoryId!,
+        assignedRoomId: room.id,
+        ratePlanId: input.ratePlanId,
+        checkIn: groupBooking.checkIn,
+        checkOut: groupBooking.checkOut,
+        nights: groupBooking.nights,
+        totalAmount: input.totalAmount,
+        status: BookingStatus.confirmed,
+        source: groupBooking.source,
+      },
+    });
+    await this.rates.adjustAvailabilityForStay({
+      hotelId: groupBooking.hotelId,
+      roomCategoryId: room.roomCategoryId!,
+      checkIn: groupBooking.checkIn,
+      checkOut: groupBooking.checkOut,
+      delta: -1,
+    });
+    await this.audit.log({
+      hotelId: groupBooking.hotelId,
+      eventType: 'RESERVATION_CREATED',
+      actorId: input.actorId,
+      subjectId: input.reservationGroupId,
+      detail: { roomAdded: room.roomNumber },
+    });
+    return created;
   }
 
   /**
@@ -552,6 +927,79 @@ export class BookingsService {
     });
   }
 
+  /**
+   * §user request — "Neeraj ji room-wise payment nahi karte, ek hi baar mein poori booking ka
+   * karte hain": a group reservation's booker pays against the WHOLE booking (e.g. ₹10,000
+   * advance now, ₹10,000 at checkout), never room-by-room amounts picked by staff. The ledger
+   * underneath still has to stay per-room (Payment is a per-Booking record, and per-room due/
+   * revenue reporting depends on that) — so one entered amount is split across this group's rooms
+   * proportional to each room's own outstanding due, and capped so a group payment can never
+   * overpay the group's total due, same rule addPayment already enforces per room.
+   */
+  async addGroupPayment(input: {
+    reservationGroupId: string;
+    amount: number;
+    method: PaymentMethod;
+    referenceNumber?: string;
+    collectedBy: string;
+  }) {
+    if (input.amount <= 0) throw new BadRequestException('Amount must be positive');
+
+    return this.prisma.$transaction(async (tx) => {
+      const bookings = await tx.booking.findMany({
+        where: { reservationGroupId: input.reservationGroupId, status: { in: [BookingStatus.confirmed, BookingStatus.checked_in, BookingStatus.checked_out] } },
+        include: { lineItems: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (bookings.length === 0) throw new NotFoundException('No active rooms found for this reservation');
+
+      const dues = bookings.map((b) => {
+        const { grandTotal } = computeInvoiceTotals({
+          totalAmount: Number(b.totalAmount),
+          lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+          discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+          gstExempt: b.gstExempt,
+        });
+        return { booking: b, due: Math.max(0, grandTotal - Number(b.paidAmount ?? 0)) };
+      });
+      const totalDue = dues.reduce((sum, d) => sum + d.due, 0);
+      if (input.amount > totalDue + 0.01) {
+        throw new ConflictException(`Cannot collect more than this reservation's outstanding balance (₹${totalDue.toFixed(2)})`);
+      }
+
+      // Proportional split by each room's own due, with the running remainder folded into the
+      // last room that actually owes anything — so the full entered amount always lands exactly,
+      // never short or over by a rounding paisa.
+      const owing = dues.filter((d) => d.due > 0);
+      let remaining = input.amount;
+      const payments = [];
+      for (let i = 0; i < owing.length; i++) {
+        const { booking, due } = owing[i];
+        const isLast = i === owing.length - 1;
+        const share = isLast ? Math.min(remaining, due) : Math.min(due, Math.round((due / totalDue) * input.amount * 100) / 100);
+        if (share <= 0) continue;
+        remaining -= share;
+
+        const payment = await tx.payment.create({
+          data: { bookingId: booking.id, amount: share, method: input.method, referenceNumber: input.referenceNumber, collectedBy: input.collectedBy },
+        });
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { paidAmount: Number(booking.paidAmount ?? 0) + share, paymentMethod: booking.paymentMethod ?? input.method },
+        });
+        await this.audit.log({
+          hotelId: booking.hotelId,
+          eventType: 'PAYMENT_RECEIVED',
+          actorId: input.collectedBy,
+          subjectId: booking.id,
+          detail: { amount: share, method: input.method, groupPayment: true },
+        });
+        payments.push(payment);
+      }
+      return payments;
+    });
+  }
+
   /** "Add Extra Charges" on the invoice (§ added beyond MD spec). */
   async addLineItem(input: { bookingId: string; description: string; quantity: number; unitPrice: number; actorId: string }) {
     const amount = input.quantity * input.unitPrice;
@@ -580,6 +1028,38 @@ export class BookingsService {
       data: { discountAmount: input.discountAmount, gstExempt: input.gstExempt },
     });
     await this.audit.log({ hotelId: booking.hotelId, eventType: 'STAY_EDITED', actorId: input.actorId, subjectId: booking.id, detail: { discountAmount: input.discountAmount, gstExempt: input.gstExempt } });
+    return booking;
+  }
+
+  /**
+   * §user request — "GST ya company ki naam se bill banana ho toh company info daal ke bane":
+   * switches the invoice's "Billed to" from the individual guest to a company (for their GST
+   * input credit) — set right from the invoice print view, any time, any booking status. Passing
+   * `companyName: null` clears it back to billing the guest (not a 1-hour edit-window action like
+   * check-in corrections — this is just which name prints, not the stay/amount itself).
+   */
+  async setCompanyBilling(input: {
+    bookingId: string;
+    companyName: string | null;
+    companyGstin?: string | null;
+    companyAddress?: string | null;
+    actorId: string;
+  }) {
+    const booking = await this.prisma.booking.update({
+      where: { id: input.bookingId },
+      data: {
+        billToCompanyName: input.companyName,
+        billToCompanyGstin: input.companyName ? input.companyGstin : null,
+        billToCompanyAddress: input.companyName ? input.companyAddress : null,
+      },
+    });
+    await this.audit.log({
+      hotelId: booking.hotelId,
+      eventType: 'STAY_EDITED',
+      actorId: input.actorId,
+      subjectId: booking.id,
+      detail: { billToCompanyName: input.companyName },
+    });
     return booking;
   }
 
@@ -803,7 +1283,7 @@ export class BookingsService {
           : {}),
         ...(input.otaConnectionId ? { otaConnectionId: input.otaConnectionId } : {}),
       },
-      include: { payments: true, lineItems: true },
+      include: { payments: true, lineItems: true, guests: true },
       orderBy: { checkIn: 'asc' },
     });
   }

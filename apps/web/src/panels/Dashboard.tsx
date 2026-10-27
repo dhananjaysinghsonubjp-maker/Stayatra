@@ -405,7 +405,7 @@ export function Dashboard({
           {hotelName} · TOTAL ROOMS: {total}
         </p>
 
-        <StaffApprovalAlert count={pendingStaffCount} onPress={() => onNavigate('settings_staff')} />
+        <StaffApprovalAlert count={pendingStaffCount} onPress={() => onNavigate('housekeeping')} />
         <DiscrepancyAlert count={discrepancyCount} noGuestCount={unflaggedCleanings.length} onPress={() => onNavigate('housekeeping')} />
         <OccupancyCounters occupied={occupied} available={available} housekeeping={housekeepingRooms} delayed={delayedCount} />
       </div>

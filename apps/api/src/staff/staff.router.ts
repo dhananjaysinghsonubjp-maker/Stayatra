@@ -20,7 +20,8 @@ export function createStaffRouter(staff: StaffService) {
           phone: z.string().optional(),
           photoPath: z.string().optional(),
           idNumber: z.string().optional(),
-          idPhotoPath: z.string().optional(),
+          idPhotoFrontPath: z.string().optional(),
+          idPhotoBackPath: z.string().optional(),
         }),
       )
       .mutation(({ ctx, input }) =>
@@ -47,7 +48,8 @@ export function createStaffRouter(staff: StaffService) {
           phone: z.string().optional(),
           photoPath: z.string().optional(),
           idNumber: z.string().optional(),
-          idPhotoPath: z.string().optional(),
+          idPhotoFrontPath: z.string().optional(),
+          idPhotoBackPath: z.string().optional(),
           designation: z.string().optional(),
           shift: z.string().optional(),
           role: z.enum(['manager', 'housekeeping']).optional(),

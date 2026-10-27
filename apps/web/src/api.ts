@@ -45,8 +45,35 @@ function authHeader(token?: string): Record<string, string> {
 
 async function unwrap<T>(res: Response): Promise<T> {
   const json = await res.json();
-  if (json.error) throw new ApiError(json.error.message ?? 'Request failed');
+  if (json.error) throw new ApiError(friendlyErrorMessage(json.error.message ?? 'Request failed'));
   return json.result.data as T;
+}
+
+// tRPC surfaces a Zod validation failure as `error.message` being the
+// stringified issues array (e.g. `[{"path":["guestPhone"],"message":"..."}]`)
+// rather than prose. Shown as-is that's unreadable, so turn it into
+// "Field: problem" text; anything else (a plain thrown message) passes through.
+function friendlyErrorMessage(raw: string): string {
+  try {
+    const issues = JSON.parse(raw);
+    if (Array.isArray(issues) && issues.length > 0 && issues[0]?.path) {
+      return issues
+        .map((issue: { path?: unknown[]; message?: string; pattern?: string }) => {
+          const field = Array.isArray(issue.path) && issue.path.length ? fieldLabel(String(issue.path[issue.path.length - 1])) : null;
+          const isTenDigitPhone = typeof issue.pattern === 'string' && issue.pattern.includes('d{10}');
+          const detail = isTenDigitPhone ? 'must be exactly 10 digits' : issue.message ?? 'invalid value';
+          return field ? `${field}: ${detail}` : detail;
+        })
+        .join('; ');
+    }
+  } catch {
+    // Not JSON — a normal thrown message, use as-is.
+  }
+  return raw;
+}
+
+function fieldLabel(key: string): string {
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()).trim();
 }
 
 // Outside tRPC (multipart) — see apps/api/src/id-extraction/id-scan.controller.ts.

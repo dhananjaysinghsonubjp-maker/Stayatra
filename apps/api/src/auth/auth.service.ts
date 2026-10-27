@@ -120,7 +120,12 @@ export class AuthService {
    * it always did for email+password.
    */
   async pinLogin(input: { shortCode: string; pin: string; deviceId: string }) {
-    const hotel = await this.prisma.hotel.findUnique({ where: { shortCode: input.shortCode }, include: { organization: true } });
+    // §bugfix — "kabhi kabhar invalid login": shortCode is an exact match below, so a Property ID
+    // carrying a stray leading/trailing space (pasted from WhatsApp/Notes, or added by a mobile
+    // keyboard's autocomplete) silently failed to match. The web client already trims/uppercases
+    // on input; normalizing here too means any client that doesn't can't reintroduce this bug.
+    const shortCode = input.shortCode.trim().toUpperCase();
+    const hotel = await this.prisma.hotel.findUnique({ where: { shortCode }, include: { organization: true } });
     if (!hotel) throw new UnauthorizedException('Invalid Property ID or PIN');
     if (hotel.organization.suspended) throw new ForbiddenException('This account has been suspended. Contact support.');
 

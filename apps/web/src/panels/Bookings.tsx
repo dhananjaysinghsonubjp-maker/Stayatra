@@ -34,6 +34,7 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
   const [showCreate, setShowCreate] = useState(false);
   const [sourceFilter, setSourceFilter] = useState('all');
   const [listTab, setListTab] = useState<ListTab>('upcoming');
+  const [search, setSearch] = useState('');
 
   async function refresh() {
     try {
@@ -93,6 +94,24 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
     return order.map((key) => groups.get(key)!);
   }, [hasPms, tabFiltered, filtered]);
 
+  // §user request — DigiStay's Reservations list searches "Booking ID, Guest Name, Contact";
+  // matters most once a group booking makes scrolling to find one wedding guest impractical.
+  const searchedRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return groupedRows;
+    return groupedRows.filter((group) =>
+      group.some(
+        (b) =>
+          b.guestName.toLowerCase().includes(term) ||
+          (b.guestPhone ?? '').includes(term) ||
+          (b.bookedByName ?? '').toLowerCase().includes(term) ||
+          (b.bookedByPhone ?? '').includes(term) ||
+          (b.billToCompanyName ?? '').toLowerCase().includes(term) ||
+          b.id.slice(-6).toLowerCase().includes(term),
+      ),
+    );
+  }, [groupedRows, search]);
+
   // Derived live (not a snapshot) so the open detail modal reflects a check-in/payment right
   // after it happens, instead of showing stale data until the modal is closed and reopened.
   const viewingGroup = useMemo(
@@ -150,11 +169,19 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
             ))}
           </select>
         </Field>
+        <Field label="Search">
+          <input
+            className={inputClass}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Booking ID, guest name, contact"
+          />
+        </Field>
       </div>
 
       {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {groupedRows.length === 0 ? (
+      {searchedRows.length === 0 ? (
         <Card>
           <CardBody>
             <EmptyState title="No reservations match" />
@@ -162,7 +189,7 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
         </Card>
       ) : (
         <div className="space-y-2.5">
-          {groupedRows.map((group) => {
+          {searchedRows.map((group) => {
             const b = group[0];
             const grandTotal = group.reduce((sum, row) => {
               const totals = computeInvoiceTotals({
@@ -187,7 +214,14 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
                 <div className="flex min-w-0 items-start gap-3">
                   <ChannelIcon source={b.source} className="mt-0.5 h-8 w-8" />
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{b.guestName}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{b.guestName}</p>
+                      {b.billToCompanyName && (
+                        <span className="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+                          🏢 Corporate
+                        </span>
+                      )}
+                    </div>
                     <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
                       {group.length > 1 ? `${group.length} Rooms` : roomType} · {formatDateShort(b.checkIn)} – {formatDateShort(b.checkOut)}
                     </p>
@@ -198,6 +232,7 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
                   <Badge tone={statuses.size === 1 ? b.status : 'checked_in'}>{groupLabel}</Badge>
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-slate-700 dark:text-slate-400">{b.nights}N</span>
+                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">#{b.id.slice(-6).toUpperCase()}</span>
                 </div>
               </button>
             );

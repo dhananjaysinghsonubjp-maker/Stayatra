@@ -3,7 +3,9 @@ import { query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
 import { PAYMENT_METHODS, paymentMethodLabel } from '../paymentMethods';
-import type { MethodBreakdown, RoomsReport, SaleReportDay } from '../types';
+import { istDateKey, istDateLabel } from '../components/DateRangePicker';
+import { formatDateTimeShort } from '../dateFormat';
+import type { LedgerTransaction, MethodBreakdown, RoomsReport, SaleReportDay } from '../types';
 
 function todayPlus(days: number) {
   return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -40,11 +42,11 @@ function MethodsCell({ methods }: { methods: MethodBreakdown }) {
 }
 
 export function Reports({ hotelId }: { hotelId: string }) {
-  const [tab, setTab] = useState<'rooms' | 'sale'>('rooms');
+  const [tab, setTab] = useState<'rooms' | 'sale' | 'expenses'>('rooms');
 
   return (
     <div>
-      <PageHeader title="Reports" subtitle="Rooms Report and Sale Report" />
+      <PageHeader title="Reports" subtitle="Rooms Report, Sale Report, and Daily Expenses" />
       <div className="mb-6 flex gap-2">
         <Button variant={tab === 'rooms' ? 'primary' : 'secondary'} onClick={() => setTab('rooms')}>
           Rooms Report
@@ -52,8 +54,146 @@ export function Reports({ hotelId }: { hotelId: string }) {
         <Button variant={tab === 'sale' ? 'primary' : 'secondary'} onClick={() => setTab('sale')}>
           Sale Report
         </Button>
+        {/* §user request — "ek daily expense ka column add karna hai, Day Book ki tarah... poora
+            expense calculate hota chala jayega aur reports section mein properly dikhega": the
+            data entry already exists (Ledger's Cash Out, with its own date/time, remarks as the
+            "what was bought" field, and amount) — this just surfaces it here as a proper day-by-
+            day expense report instead of leaving it buried in Ledger's single flat table. */}
+        <Button variant={tab === 'expenses' ? 'primary' : 'secondary'} onClick={() => setTab('expenses')}>
+          Daily Expenses
+        </Button>
       </div>
-      {tab === 'rooms' ? <RoomsReportView hotelId={hotelId} /> : <SaleReportView hotelId={hotelId} />}
+      {tab === 'rooms' ? <RoomsReportView hotelId={hotelId} /> : tab === 'sale' ? <SaleReportView hotelId={hotelId} /> : <ExpensesReportView hotelId={hotelId} />}
+    </div>
+  );
+}
+
+function ExpensesReportView({ hotelId }: { hotelId: string }) {
+  const { token } = useAuth();
+  const [from, setFrom] = useState(todayPlus(-30));
+  const [to, setTo] = useState(todayPlus(0));
+  const [transactions, setTransactions] = useState<LedgerTransaction[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function run() {
+    setLoading(true);
+    setError(null);
+    try {
+      const rows = await query<LedgerTransaction[]>(
+        'ledger.listTransactions',
+        { hotelId, from: `${from}T00:00:00`, to: `${to}T23:59:59` },
+        token ?? undefined,
+      );
+      setTransactions(rows.filter((t) => t.type === 'cash_out'));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load expenses');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Grouped oldest-day-first — a Day Book reads top-to-bottom as the days actually happened,
+  // each one its own dated section with its own items and its own subtotal.
+  const byDay = (() => {
+    if (!transactions) return [];
+    const groups = new Map<string, LedgerTransaction[]>();
+    for (const t of transactions) {
+      const key = istDateKey(t.createdAt);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(t);
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, items]) => ({
+        date,
+        items: items.sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+        total: items.reduce((sum, t) => sum + t.amount, 0),
+      }));
+  })();
+  const grandTotal = byDay.reduce((sum, d) => sum + d.total, 0);
+
+  function exportCsv() {
+    if (!transactions) return;
+    const rows: (string | number)[][] = [
+      ['Date', 'Time', 'Item / Expense', 'Category', 'Method', 'Amount'],
+      ...byDay.flatMap((d) =>
+        d.items.map((t) => [
+          istDateLabel(d.date),
+          formatDateTimeShort(t.createdAt).split(', ')[1] ?? '',
+          t.remarks || t.category || 'Expense',
+          t.category ?? '—',
+          paymentMethodLabel(t.paymentMethod),
+          t.amount,
+        ]),
+      ),
+    ];
+    downloadCsv(`daily-expenses-${from}-to-${to}.csv`, rows);
+  }
+
+  return (
+    <div>
+      <Card className="mb-6">
+        <CardBody>
+          <div className="flex flex-wrap items-end gap-4">
+            <Field label="From">
+              <input className={inputClass} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            </Field>
+            <Field label="To">
+              <input className={inputClass} type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            </Field>
+            <Button onClick={run} disabled={loading}>
+              {loading ? 'Loading…' : 'Run report'}
+            </Button>
+            {transactions && transactions.length > 0 && (
+              <Button variant="secondary" onClick={exportCsv}>
+                Download CSV
+              </Button>
+            )}
+          </div>
+        </CardBody>
+      </Card>
+
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+
+      {transactions && (
+        <>
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <SummaryTile label="Total Expenses" value={`₹${grandTotal.toLocaleString('en-IN')}`} tone="red" />
+            <SummaryTile label="Days with expenses" value={byDay.length} />
+          </div>
+
+          {byDay.length === 0 ? (
+            <Card>
+              <CardBody>
+                <EmptyState title="No expenses in this range" hint="Log one from the Ledger page — it'll show up here, grouped by day." />
+              </CardBody>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {byDay.map((d) => (
+                <Card key={d.date}>
+                  <CardHeader title={istDateLabel(d.date)} action={<span className="text-sm font-semibold text-red-600">₹{d.total.toLocaleString('en-IN')}</span>} />
+                  <div className="divide-y divide-slate-100">
+                    {d.items.map((t) => (
+                      <div key={t.id} className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm">
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-900">{t.remarks || t.category || 'Expense'}</p>
+                          <p className="text-xs text-slate-400">
+                            {formatDateTimeShort(t.createdAt).split(', ')[1]}
+                            {t.category ? ` · ${t.category}` : ''} · {paymentMethodLabel(t.paymentMethod)}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-semibold text-red-600">−₹{t.amount.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

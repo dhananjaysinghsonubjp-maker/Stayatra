@@ -9,6 +9,7 @@ export type Tab =
   | 'bookings'
   | 'dues'
   | 'ledger'
+  | 'contacts'
   | 'housekeeping'
   | 'reports'
   | 'cm_calendar'
@@ -23,7 +24,6 @@ export type Tab =
   | 'settings_details'
   | 'settings_brand'
   | 'settings_rooms'
-  | 'settings_staff'
   | 'settings_invoice'
   | 'settings_ledger'
   | 'settings_credentials'
@@ -38,16 +38,27 @@ interface LeafItem {
   icon: IconFn;
 }
 
+// §user request — "Hotel Team" (Housekeeping + Important Contacts) nests inside Settings, so a
+// group can now hold either leaves or further groups, not just leaves — the nav was one level
+// deep until this request needed a second one.
 interface GroupItem {
   label: string;
   icon: IconFn;
-  children: LeafItem[];
+  children: NavEntry[];
 }
 
 type NavEntry = LeafItem | GroupItem;
 
 function isGroup(entry: NavEntry): entry is GroupItem {
   return 'children' in entry;
+}
+
+function isEntryVisible(entry: NavEntry, visibleTabs: Tab[]): boolean {
+  return isGroup(entry) ? entry.children.some((c) => isEntryVisible(c, visibleTabs)) : visibleTabs.includes(entry.id);
+}
+
+function groupContainsTab(entry: NavEntry, tab: Tab): boolean {
+  return isGroup(entry) ? entry.children.some((c) => groupContainsTab(c, tab)) : entry.id === tab;
 }
 
 function Icon(path: string) {
@@ -75,7 +86,6 @@ const NAV: NavEntry[] = [
   { id: 'bookings', label: 'Reservations', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
   { id: 'dues', label: 'Dues', icon: Icon('M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z') },
   { id: 'ledger', label: 'Ledger', icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z') },
-  { id: 'housekeeping', label: 'Housekeeping', icon: Icon('M9 3v2m6-2v2M4 8h16M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8H5z') },
   { id: 'reports', label: 'Reports', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
   {
     label: 'Bulk Update',
@@ -104,9 +114,26 @@ const NAV: NavEntry[] = [
     icon: Icon('M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2.5a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V2.5a2 2 0 114 0v.09c0 .68.39 1.29 1 1.51.35.15.75.09 1.09-.15l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.22.61.83 1 1.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z'),
     children: [
       { id: 'settings_details', label: 'Hotel Details', icon: Icon('M12 21c-4.5-4.03-7-7.42-7-10.5A7 7 0 0119 10.5c0 3.08-2.5 6.47-7 10.5zM12 12a2 2 0 100-4 2 2 0 000 4z') },
+      {
+        label: 'Hotel Team',
+        icon: Icon('M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z'),
+        children: [
+          // §user request — "Housekeeping section ko replace karke naam Staff karo, uske andar
+          // poora Staff & PINs wala roster rahega": same Tab id ('housekeeping'), reused for the
+          // combined Staff+Housekeeping-Records page (HotelTeamStaffPage) now — Staff & PINs
+          // below is gone, merged in here instead of being a separate Settings entry.
+          { id: 'housekeeping', label: 'Staff', icon: Icon('M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m5-3.13a4 4 0 100-8 4 4 0 000 8zm6 2a4 4 0 100-8') },
+          {
+            id: 'contacts',
+            label: 'Important Contacts',
+            icon: Icon(
+              'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z',
+            ),
+          },
+        ],
+      },
       { id: 'settings_brand', label: 'Hotel Brand', icon: Icon('M7 21h10M9 3h6l1 7a4 4 0 01-8 0l1-7zM12 14v7') },
       { id: 'settings_rooms', label: 'Room Setup', icon: Icon('M3 7v13m0-13l9-4 9 4m-18 0v13m18-13v13M3 20h18M9 10h.01M9 14h.01M15 10h.01M15 14h.01') },
-      { id: 'settings_staff', label: 'Staff & PINs', icon: Icon('M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m5-3.13a4 4 0 100-8 4 4 0 000 8zm6 2a4 4 0 100-8') },
       { id: 'settings_invoice', label: 'Invoice Settings', icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z') },
       { id: 'settings_ledger', label: 'Ledger Categories', icon: Icon('M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z') },
       { id: 'settings_credentials', label: 'Credentials', icon: Icon('M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v2') },
@@ -117,7 +144,99 @@ const NAV: NavEntry[] = [
 ];
 
 function visibleChildren(group: GroupItem, visibleTabs: Tab[]) {
-  return group.children.filter((c) => visibleTabs.includes(c.id));
+  return group.children.filter((c) => isEntryVisible(c, visibleTabs));
+}
+
+/** Recursive so a group (e.g. Settings) can hold another group (e.g. Hotel Team) as one of its
+ * own children — indentation just compounds naturally from each nested level's own `pl-3`
+ * container, no depth prop needed. `topLevel` only changes how a *leaf* renders (icon + the
+ * bolder outer style vs. the original plain-text inner-group style) — a group header keeps the
+ * same icon+chevron look at any depth, that part was never position-dependent. */
+function NavNode({
+  entry,
+  tab,
+  visibleTabs,
+  expanded,
+  setExpanded,
+  selectTab,
+  topLevel = false,
+}: {
+  entry: NavEntry;
+  tab: Tab;
+  visibleTabs: Tab[];
+  expanded: Record<string, boolean>;
+  setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  selectTab: (id: Tab) => void;
+  topLevel?: boolean;
+}) {
+  if (isGroup(entry)) {
+    const children = visibleChildren(entry, visibleTabs);
+    if (children.length === 0) return null;
+    const open = expanded[entry.label] ?? false;
+    const groupActive = children.some((c) => groupContainsTab(c, tab));
+    return (
+      <div>
+        <button
+          onClick={() => setExpanded((prev) => ({ ...prev, [entry.label]: !open }))}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            groupActive
+              ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
+              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+          }`}
+        >
+          <entry.icon className={`h-[18px] w-[18px] ${groupActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500'}`} />
+          <span className="flex-1 text-left">{entry.label}</span>
+          <CHEVRON className={`h-3.5 w-3.5 text-slate-400 transition-transform dark:text-slate-500 ${open ? 'rotate-90' : ''}`} />
+        </button>
+        {open && (
+          <div className="ml-4 mt-0.5 space-y-0.5 border-l border-slate-100 pl-3 dark:border-slate-700">
+            {children.map((child) => (
+              <NavNode
+                key={isGroup(child) ? child.label : child.id}
+                entry={child}
+                tab={tab}
+                visibleTabs={visibleTabs}
+                expanded={expanded}
+                setExpanded={setExpanded}
+                selectTab={selectTab}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!visibleTabs.includes(entry.id)) return null;
+  const active = tab === entry.id;
+  if (!topLevel) {
+    // Original inner-group leaf style — plain text, no icon, lighter weight.
+    return (
+      <button
+        onClick={() => selectTab(entry.id)}
+        className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+          active
+            ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
+            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
+        }`}
+      >
+        {entry.label}
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={() => selectTab(entry.id)}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+        active
+          ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
+          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+      }`}
+    >
+      <entry.icon className={`h-[18px] w-[18px] ${active ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500'}`} />
+      {entry.label}
+    </button>
+  );
 }
 
 export function Sidebar({
@@ -184,67 +303,18 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-0.5 px-3 py-4">
-        {NAV.map((entry) => {
-          if (isGroup(entry)) {
-            const children = visibleChildren(entry, visibleTabs);
-            if (children.length === 0) return null;
-            const open = expanded[entry.label] ?? false;
-            const groupActive = children.some((c) => c.id === tab);
-            return (
-              <div key={entry.label}>
-                <button
-                  onClick={() => setExpanded((prev) => ({ ...prev, [entry.label]: !open }))}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                    groupActive
-                      ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
-                  }`}
-                >
-                  <entry.icon className={`h-[18px] w-[18px] ${groupActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500'}`} />
-                  <span className="flex-1 text-left">{entry.label}</span>
-                  <CHEVRON className={`h-3.5 w-3.5 text-slate-400 transition-transform dark:text-slate-500 ${open ? 'rotate-90' : ''}`} />
-                </button>
-                {open && (
-                  <div className="ml-4 mt-0.5 space-y-0.5 border-l border-slate-100 pl-3 dark:border-slate-700">
-                    {children.map((child) => {
-                      const active = tab === child.id;
-                      return (
-                        <button
-                          key={child.id}
-                          onClick={() => selectTab(child.id)}
-                          className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                            active
-                              ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
-                              : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
-                          }`}
-                        >
-                          {child.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          }
-
-          if (!visibleTabs.includes(entry.id)) return null;
-          const active = tab === entry.id;
-          return (
-            <button
-              key={entry.id}
-              onClick={() => selectTab(entry.id)}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                active
-                  ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
-              }`}
-            >
-              <entry.icon className={`h-[18px] w-[18px] ${active ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500'}`} />
-              {entry.label}
-            </button>
-          );
-        })}
+        {NAV.map((entry) => (
+          <NavNode
+            key={isGroup(entry) ? entry.label : entry.id}
+            entry={entry}
+            tab={tab}
+            visibleTabs={visibleTabs}
+            expanded={expanded}
+            setExpanded={setExpanded}
+            selectTab={selectTab}
+            topLevel
+          />
+        ))}
       </nav>
 
       <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-700">

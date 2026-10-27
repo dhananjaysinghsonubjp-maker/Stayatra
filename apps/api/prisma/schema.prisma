@@ -178,7 +178,11 @@ model User {
   photoPath          String?             @map("photo_path")
   idType             IdType?             @map("id_type")
   idNumber           String?             @map("id_number")
-  idPhotoPath        String?             @map("id_photo_path")
+  // §user request — "Aadhaar front and back dono upload karte hain, owner dashboard mein ek
+  // printable page mein dono saath dikhein": a single idPhotoPath couldn't hold both sides.
+  // Replaces it (migration carries any existing value into idPhotoFrontPath, nothing lost).
+  idPhotoFrontPath   String?             @map("id_photo_front_path")
+  idPhotoBackPath    String?             @map("id_photo_back_path")
   // §user request — "General Manager" / "Front Office Manager" as two job-title choices a hotel
   // can pick between, both carrying the same front_desk permission level underneath (confirmed:
   // not two different access tiers). Free text so it degrades gracefully for anything older.
@@ -318,6 +322,7 @@ model Hotel {
   dayNotes        DayNote[]
   photos          HotelPhoto[]
   reviews         Review[]
+  contacts        HotelContact[]
 
   @@map("hotels")
 }
@@ -332,6 +337,26 @@ model HotelPhoto {
   hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
 
   @@map("hotel_photos")
+}
+
+// §user request — "hotel ke important contacts save kare, electrician/plumber ke 5-6 number,
+// FMO add kar sake lekin sirf owner delete kar sake": a flat, hotel-scoped address book — not
+// per-category records (an electrician isn't a structured entity elsewhere in this schema), just
+// Name + a free-text Category label (so "Plumber", "Electrician", "AC Repair"... aren't a fixed
+// enum the hotel is locked into) + Phone. Multiple rows can share a category on purpose (that's
+// the "5-6 electricians" case) — nothing here assumes one contact per category.
+model HotelContact {
+  id        String   @id @default(cuid())
+  hotelId   String   @map("hotel_id")
+  name      String
+  category  String
+  phone     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId])
+  @@map("hotel_contacts")
 }
 
 model RoomCategory {
@@ -684,6 +709,18 @@ model Booking {
   // Booking row (own status, own check-in, own payments) sharing this id. Null for the
   // ordinary single-room case — nothing about the existing flow changes for those.
   reservationGroupId String?     @map("reservation_group_id")
+  // §user request — "Neeraj ji ne booking karvayi hai, Room 102 mein koi aur guest aa raha hai":
+  // a multi-room reservation is made by one booker (e.g. a travel agent or corporate contact)
+  // on behalf of several actual occupants — one per room, each named separately at that room's
+  // own check-in. `guestName` above becomes that specific room's actual guest once checked in,
+  // which would otherwise lose who originally placed the booking — this preserves it. Set once
+  // at creation (createMultiRoomReservation), never touched again; null for an ordinary
+  // single-room booking where the booker and the guest are the same person.
+  bookedByName     String?       @map("booked_by_name")
+  // §user request — the group reservation's own summary ("Booking Details: Neeraj Gupta,
+  // <phone>") needs the booker's contact too, same staleness risk as bookedByName: guestPhone
+  // gets overwritten per-room at that room's own check-in.
+  bookedByPhone    String?       @map("booked_by_phone")
   guestEmail       String?       @map("guest_email")
   specialRequest   String?       @map("special_request")
   roomCategoryId   String        @map("room_category_id")
@@ -722,6 +759,15 @@ model Booking {
   // "saari cheezein voucher se extract karke dikhao").
   otaCancellationPolicy String? @map("ota_cancellation_policy")
   channelBreakdown       Json?  @map("channel_breakdown")
+  // §user request — "company ki name se GST invoice banana ho toh company info daal ke ban
+  // jaaye": a corporate guest's invoice needs to be billed to their employer (for GST input
+  // credit), not the individual — set from the invoice print view itself, right before
+  // printing, rather than captured upfront at check-in (not every booking needs it, and it's
+  // often decided only when the invoice is actually requested). Null = bill to the guest
+  // (unchanged, existing behaviour); set = invoice's "Billed to" switches to the company.
+  billToCompanyName    String? @map("bill_to_company_name")
+  billToCompanyGstin   String? @map("bill_to_company_gstin")
+  billToCompanyAddress String? @map("bill_to_company_address")
 
   hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   otaConnection OtaConnection? @relation(fields: [otaConnectionId], references: [id])

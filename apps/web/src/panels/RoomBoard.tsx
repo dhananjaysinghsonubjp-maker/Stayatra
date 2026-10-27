@@ -7,6 +7,7 @@ import { ChannelIcon } from './channel-manager/ChannelBadge';
 import { SOURCE_LABEL } from './channel-manager/ota-labels';
 import { computeInvoiceTotals } from '../invoice';
 import { formatDateShort } from '../dateFormat';
+import { istDateKey, istDateLabel } from '../components/DateRangePicker';
 import type { Room } from '../types';
 
 type BoardStatus = 'available' | 'departing_today' | 'occupied' | 'housekeeping';
@@ -80,6 +81,11 @@ const FILTER_DOT_TONE: Record<BoardFilter, string> = {
  * Rooms Open = "Available", Housekeeping, etc.) that used to also live in a separate stat-card
  * row above — that row is gone now, this is the one place those numbers live. Occupancy is the
  * only figure with no natural pill of its own, so it rides along as a plain, non-clickable chip. */
+/** §user request — "available, occupied, check-in, check-out ko ek proper line me karo aur
+ * slider do": on a narrow screen, 5 status pills + the occupancy chip used to wrap onto a second
+ * row (the last pill or two got cut off mid-word). `overflow-x-auto` + `flex-nowrap` + `shrink-0`
+ * per pill turns that into one horizontally-swipeable strip instead — same row always, never
+ * wraps, you just scroll sideways to reach the rest. */
 function RoomBoardToolbar({
   filter,
   onFilter,
@@ -87,6 +93,9 @@ function RoomBoardToolbar({
   occupancy,
   search,
   onSearch,
+  categories,
+  categoryFilters,
+  onCategoryFilters,
 }: {
   filter: BoardFilter;
   onFilter: (f: BoardFilter) => void;
@@ -94,56 +103,183 @@ function RoomBoardToolbar({
   occupancy: string;
   search: string;
   onSearch: (v: string) => void;
+  categories: { id: string; name: string }[];
+  categoryFilters: string[];
+  onCategoryFilters: (ids: string[]) => void;
 }) {
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
+  const [draftCategoryIds, setDraftCategoryIds] = useState<string[]>([]);
   const filters: BoardFilter[] = ['all', 'available', 'occupied', 'departing_today', 'housekeeping'];
+
+  function openFilterModal() {
+    setDraftCategoryIds(categoryFilters);
+    setFilterModalOpen(true);
+  }
+  function toggleDraftCategory(id: string) {
+    setDraftCategoryIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
   return (
     <Card className="mb-5 px-5 py-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {filters.map((f) => {
-            const active = filter === f;
-            return (
-              <button
-                key={f}
-                type="button"
-                onClick={() => onFilter(f)}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
-                  active
-                    ? 'border-brand-600 bg-brand-50 text-brand-700 dark:border-brand-500 dark:bg-brand-500/10 dark:text-brand-300'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-                }`}
-              >
-                {f !== 'all' && <span className={`h-2 w-2 rounded-full ${FILTER_DOT_TONE[f]}`} />}
-                {FILTER_LABEL[f]}
-                <span className={`ml-0.5 tabular-nums ${active ? 'text-brand-600 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500'}`}>
-                  {counts[f]}
+      <div className="flex flex-col gap-3.5">
+        <div className="flex items-center gap-2">
+          {/* §user request — "search bar proper lamba rahega": full-width, like the reference —
+              the filter icon sits beside it rather than inside it. */}
+          <div className="relative min-w-0 flex-1">
+            <svg
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Search by Room/Guest"
+              className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
+            />
+          </div>
+          {/* §user request, reference: DigiStay's "Filter Rooms" sheet — a plain funnel icon next
+              to the search bar that opens a full filter dialog (tabbed sidebar + checkbox list +
+              Cancel/Apply), not a cramped inline dropdown. The brand-coloured badge shows how many
+              room types are active, since the icon alone no longer says. */}
+          {categories.length > 0 && (
+            <button
+              type="button"
+              onClick={openFilterModal}
+              title="Filter rooms"
+              aria-label="Filter rooms"
+              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                categoryFilters.length > 0
+                  ? 'border-brand-600 bg-brand-50 text-brand-700 dark:border-brand-500 dark:bg-brand-500/10 dark:text-brand-300'
+                  : 'border-slate-300 bg-white text-slate-500 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.75}
+                  d="M3.75 5.25h16.5M5.25 9.75h13.5M8.25 14.25h7.5M11.25 18.75h1.5"
+                />
+              </svg>
+              {categoryFilters.length > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold text-white dark:bg-brand-400">
+                  {categoryFilters.length}
                 </span>
-              </button>
-            );
-          })}
-          <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-            Occupancy
-            <span className="font-bold tabular-nums text-brand-600 dark:text-brand-400">{occupancy}%</span>
-          </span>
+              )}
+            </button>
+          )}
         </div>
-        <div className="relative w-full sm:w-64">
-          <svg
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
-          </svg>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder="Search by Room/Guest"
-            className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
-          />
+        {/* §user request — "niche jo slider hai usme proper spacing de": wider gap between pills
+            (gap-2 → gap-2.5) plus right-end breathing room (pr-6) so the last pill never sits
+            flush against the card edge; the fade mask is the same "there's more, scroll →" cue
+            native carousels use, so this reads as a deliberate slider, not a cut-off row. */}
+        <div className="relative">
+          <div className="flex items-center gap-2.5 overflow-x-auto pb-1 pr-6 [-ms-overflow-style:none] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5">
+            {filters.map((f) => {
+              const active = filter === f;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => onFilter(f)}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
+                    active
+                      ? 'border-brand-600 bg-brand-50 text-brand-700 dark:border-brand-500 dark:bg-brand-500/10 dark:text-brand-300'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {f !== 'all' && <span className={`h-2 w-2 rounded-full ${FILTER_DOT_TONE[f]}`} />}
+                  {FILTER_LABEL[f]}
+                  <span className={`ml-0.5 tabular-nums ${active ? 'text-brand-600 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500'}`}>
+                    {counts[f]}
+                  </span>
+                </button>
+              );
+            })}
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+              Occupancy
+              <span className="font-bold tabular-nums text-brand-600 dark:text-brand-400">{occupancy}%</span>
+            </span>
+          </div>
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-white to-transparent dark:from-slate-800" />
         </div>
       </div>
+
+      {filterModalOpen && (
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-slate-900/40 sm:items-center"
+          onClick={() => setFilterModalOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl dark:bg-slate-800 sm:max-w-md sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Filter Rooms</h2>
+              <button
+                type="button"
+                onClick={() => setFilterModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* §note — only "Room Type" is a real tab today: rooms don't carry a per-room floor
+                field yet (Hotel has one address-level "apartment or floor" string, not a per-room
+                one), so a "Floor" tab would have nothing real to filter by. Built as a tab list
+                (not a flat checkbox page) so a second tab — Floor, once that data exists — slots
+                in here without reshaping this dialog. */}
+            <div className="flex min-h-0 flex-1">
+              <div className="w-32 shrink-0 border-r border-slate-100 py-2 dark:border-slate-700">
+                <div className="border-l-2 border-brand-600 bg-brand-50/60 px-4 py-2.5 text-sm font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+                  Room Type
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-3">
+                {categories.map((c) => {
+                  const checked = draftCategoryIds.includes(c.id);
+                  return (
+                    <label
+                      key={c.id}
+                      className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-50 py-3 text-sm text-slate-700 last:border-0 dark:border-slate-700/60 dark:text-slate-200"
+                    >
+                      {c.name}
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleDraftCategory(c.id)}
+                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600 dark:bg-slate-700"
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex gap-3 border-t border-slate-100 px-5 py-4 dark:border-slate-700">
+              <Button variant="secondary" className="flex-1 justify-center" onClick={() => setFilterModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 justify-center"
+                onClick={() => {
+                  onCategoryFilters(draftCategoryIds);
+                  setFilterModalOpen(false);
+                }}
+              >
+                Apply
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -155,6 +291,7 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<BoardFilter>('all');
   const [search, setSearch] = useState('');
+  const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [checkingOutId, setCheckingOutId] = useState<string | null>(null);
   const canCheckIn = ['owner', 'manager', 'front_desk'].includes(role('pms') ?? '');
 
@@ -206,18 +343,37 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
   const q = search.trim().toLowerCase();
   const filteredRooms = rooms.filter((r, i) => {
     if (filter !== 'all' && statuses[i] !== filter) return false;
+    if (categoryFilters.length > 0 && (!r.roomCategoryId || !categoryFilters.includes(r.roomCategoryId))) return false;
     if (q && !r.roomNumber.toLowerCase().includes(q) && !(r.currentStay?.guestName ?? '').toLowerCase().includes(q)) return false;
     return true;
   });
+  const categories = [...new Map(rooms.filter((r) => r.roomCategory).map((r) => [r.roomCategory!.id, r.roomCategory!.name])).entries()].map(
+    ([id, name]) => ({ id, name }),
+  );
+  // §user request — "top pe business current date show karo taki pta rahe vo current date hi
+  // dekh raha hai": Room View is a live snapshot (no date picker of its own, unlike Calendar), so
+  // staff had no on-screen confirmation of which day's board they were looking at. IST, same
+  // fixed-offset reasoning as everywhere else this matters (Calendar's todayPlus, Dashboard).
+  const todayLabel = istDateLabel(istDateKey(new Date().toISOString()));
 
   return (
     <div>
-      <PageHeader title="Room View" />
+      <PageHeader title="Room View" subtitle={`As of ${todayLabel}`} />
 
       {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {rooms.length > 0 && (
-        <RoomBoardToolbar filter={filter} onFilter={setFilter} counts={filterCounts} occupancy={occupancy} search={search} onSearch={setSearch} />
+        <RoomBoardToolbar
+          filter={filter}
+          onFilter={setFilter}
+          counts={filterCounts}
+          occupancy={occupancy}
+          search={search}
+          onSearch={setSearch}
+          categories={categories}
+          categoryFilters={categoryFilters}
+          onCategoryFilters={setCategoryFilters}
+        />
       )}
 
       {rooms.length === 0 ? (

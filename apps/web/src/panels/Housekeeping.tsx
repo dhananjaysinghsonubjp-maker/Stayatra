@@ -455,7 +455,7 @@ function DiscrepancyCard({
 }
 
 
-export function Housekeeping({ hotelId }: { hotelId: string }) {
+export function Housekeeping({ hotelId, hideHeader = false }: { hotelId: string; hideHeader?: boolean }) {
   const { token, user, role } = useAuth();
   const isHousekeeping = role('pms') === 'housekeeping';
   const isManager = role('pms') === 'manager';
@@ -520,12 +520,12 @@ export function Housekeeping({ hotelId }: { hotelId: string }) {
   if (isManager) {
     return (
       <div>
-        <PageHeader title="Housekeeping" />
+        {!hideHeader && <PageHeader title="Housekeeping" />}
         <Card>
           <CardHeader title="Housekeeping team" subtitle="Who's on housekeeping, and their shift." />
           <CardBody>
             {housekeepers.length === 0 ? (
-              <EmptyState title="No housekeeping staff yet" hint="Add them from Settings → Staff & PINs" />
+              <EmptyState title="No housekeeping staff yet" hint="Add them from Settings → Hotel Team → Staff" />
             ) : (
               <div className="space-y-2">
                 {housekeepers.map((h) => (
@@ -547,7 +547,7 @@ export function Housekeeping({ hotelId }: { hotelId: string }) {
 
   return (
     <div>
-      <PageHeader title="Housekeeping" />
+      {!hideHeader && <PageHeader title="Housekeeping" />}
 
       {canSubmitCleanings && (
         <CleaningWizard
@@ -582,7 +582,7 @@ export function Housekeeping({ hotelId }: { hotelId: string }) {
           <CardHeader title="Housekeeping team" subtitle="Who's on housekeeping, and their shift." />
           <CardBody>
             {housekeepers.length === 0 ? (
-              <EmptyState title="No housekeeping staff yet" hint="Add them from Settings → Staff & PINs" />
+              <EmptyState title="No housekeeping staff yet" hint="Add them from Settings → Hotel Team → Staff" />
             ) : (
               <div className="space-y-2">
                 {housekeepers.map((h) => (

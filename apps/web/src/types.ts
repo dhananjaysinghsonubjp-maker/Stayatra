@@ -139,10 +139,18 @@ export interface Booking {
   /** Groups several Booking rows (one per room) into one umbrella reservation — null for the
    * ordinary single-room case. */
   reservationGroupId: string | null;
+  /** Who actually placed a multi-room reservation (e.g. a travel agent or corporate contact
+   * booking several rooms on behalf of different guests) — set once at creation, distinct from
+   * `guestName`, which becomes that specific room's actual occupant at its own check-in. Null
+   * for an ordinary single-room booking, where the booker and the guest are the same person. */
+  bookedByName: string | null;
+  /** Same staleness reasoning as bookedByName, for the group's own contact number. */
+  bookedByPhone: string | null;
   purposeOfStay: string | null;
   idType: IdType | null;
   idNumber: string | null;
   roomCategoryId: string;
+  ratePlanId: string | null;
   assignedRoomId: string | null;
   checkIn: string;
   checkOut: string;
@@ -166,8 +174,17 @@ export interface Booking {
   otaCancellationPolicy: string | null;
   /** The channel's own voucher/payout breakdown (commission, taxes, TCS/TDS, net payable…) — shape varies per channel, rendered generically. */
   channelBreakdown: Record<string, string | number> | null;
+  /** §user request — set from the invoice print view, any time: switches the invoice's "Billed
+   * to" from the individual guest to this company (for their GST input credit). Null = bill to
+   * the guest, unchanged. */
+  billToCompanyName: string | null;
+  billToCompanyGstin: string | null;
+  billToCompanyAddress: string | null;
   payments?: Payment[];
   lineItems?: InvoiceLineItem[];
+  /** Co-occupants sharing this room (not separate bookings) — "Total Guests" is 1 (the primary
+   * guest) plus this list's length. */
+  guests?: BookingGuest[];
 }
 
 export interface Review {
@@ -238,7 +255,10 @@ export interface StaffProfile {
   photoPath: string | null;
   idType: IdType | null;
   idNumber: string | null;
-  idPhotoPath: string | null;
+  /** §user request — Aadhaar front and back, uploaded separately, shown together on one
+   * printable review page for the owner. */
+  idPhotoFrontPath: string | null;
+  idPhotoBackPath: string | null;
   approvalStatus: StaffApprovalStatus;
   approvalNote: string | null;
   hasPinSet: boolean;
@@ -451,6 +471,16 @@ export interface HousekeeperOption {
   id: string;
   name: string;
   shift: string | null;
+}
+
+/** §user request — hotel's own address book of outside vendors (electrician, plumber, …). */
+export interface HotelContact {
+  id: string;
+  hotelId: string;
+  name: string;
+  category: string;
+  phone: string;
+  createdAt: string;
 }
 
 export interface LedgerCategory {

@@ -22,6 +22,7 @@ import { NotificationsService } from './notifications/notifications.service.js';
 import { AuditService } from './common/audit.service.js';
 import { LedgerService } from './ledger/ledger.service.js';
 import { StaffService } from './staff/staff.service.js';
+import { ContactsService } from './contacts/contacts.service.js';
 import { createAppRouter } from './trpc/app.router.js';
 import { createContextFactory } from './trpc/context.js';
 
@@ -61,6 +62,7 @@ async function bootstrap() {
     audit: app.get(AuditService),
     ledger: app.get(LedgerService),
     staff: app.get(StaffService),
+    contacts: app.get(ContactsService),
   });
 
   app.use(

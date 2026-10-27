@@ -13,13 +13,12 @@ import { RoomDetailView } from './RoomDetailView';
 import { HotelDetails } from './settings/HotelDetails';
 import { Credentials } from './channel-manager/Credentials';
 import { Billing } from './Billing';
-import { StaffManagement } from './staff/StaffManagement';
 import { applyBrandColor, isValidHexColor } from '../brandColor';
 import { applyBrandFont, fontStackFor, DEFAULT_FONT_STACK } from '../brandFont';
 import { FONT_FAMILIES, fontOptionId, ensureFontFamilyLoaded } from '../fontCatalog';
 import type { Hotel, LedgerCategory, RatePlan, Room, RoomCategory } from '../types';
 
-export type SettingsView = 'details' | 'brand' | 'rooms' | 'staff' | 'invoice' | 'ledger' | 'credentials' | 'billing';
+export type SettingsView = 'details' | 'brand' | 'rooms' | 'invoice' | 'ledger' | 'credentials' | 'billing';
 
 export function Onboarding({
   hotel,
@@ -40,7 +39,7 @@ export function Onboarding({
   /** Which Settings sidebar item is active — each is its own sidebar entry now (§ user request, matching Bulk Update's group pattern), not an in-page tab bar. */
   view?: SettingsView;
 }) {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
   // "List Your Property": address + map pin, then basic info (which mints the Hotel ID),
@@ -193,9 +192,7 @@ export function Onboarding({
       return (
         <PropertyAddressStep
           onContinue={onAddressContinue}
-          onCancel={() => {
-            /* nothing before this step yet — "Back" just re-confirms the same step */
-          }}
+          onCancel={logout}
         />
       );
     }
@@ -270,7 +267,6 @@ const SETTINGS_TITLE: Record<SettingsView, string> = {
   details: 'Hotel Details',
   brand: 'Hotel Brand',
   rooms: 'Room Setup',
-  staff: 'Staff & PINs',
   invoice: 'Invoice Settings',
   ledger: 'Ledger Categories',
   credentials: 'Credentials',
@@ -326,12 +322,6 @@ function SettingsPage({
         <div className="space-y-6">
           <RoomCategoriesSection hotelId={hotel.id} token={token} />
           {hasPms && <RoomsSection hotelId={hotel.id} token={token} />}
-        </div>
-      )}
-      {view === 'staff' && (
-        <div className="space-y-6">
-          <MyPinSection token={token} />
-          {hasPms && <StaffManagement hotelId={hotel.id} token={token} isOwner={isOwner} />}
         </div>
       )}
       {view === 'invoice' && <InvoiceSettingsSection hotel={hotel} token={token} onUpdated={onHotelCreated} />}
@@ -1622,74 +1612,6 @@ function LedgerCategoriesSection({ hotelId, token }: { hotelId: string; token: s
           <Button type="submit">Add</Button>
         </form>
         {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
-      </CardBody>
-    </Card>
-  );
-}
-
-function MyPinSection({ token }: { token: string | null }) {
-  const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setMessage(null);
-    if (!/^\d{4}$/.test(pin)) {
-      setError('PIN must be exactly 4 digits');
-      return;
-    }
-    if (pin !== confirmPin) {
-      setError('PINs don’t match');
-      return;
-    }
-    setSaving(true);
-    try {
-      await mutate('auth.setMyPin', { pin }, token ?? undefined);
-      setMessage('PIN saved. You can now log in with Property ID + your role + this PIN.');
-      setPin('');
-      setConfirmPin('');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to save PIN');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader title="My PIN" subtitle="Set the 4-digit PIN you'll use to log in, instead of email + password, going forward." />
-      <CardBody>
-        <form onSubmit={submit} className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:items-end">
-          <Field label="New PIN">
-            <input
-              className={`${inputClass} text-center tracking-[0.4em]`}
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              inputMode="numeric"
-              placeholder="····"
-              required
-            />
-          </Field>
-          <Field label="Confirm PIN">
-            <input
-              className={`${inputClass} text-center tracking-[0.4em]`}
-              value={confirmPin}
-              onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              inputMode="numeric"
-              placeholder="····"
-              required
-            />
-          </Field>
-          <Button type="submit" disabled={saving}>
-            {saving ? 'Saving…' : 'Save PIN'}
-          </Button>
-          {error && <p className="sm:col-span-3 text-sm text-red-600">{error}</p>}
-          {message && <p className="sm:col-span-3 text-sm text-emerald-600">{message}</p>}
-        </form>
       </CardBody>
     </Card>
   );

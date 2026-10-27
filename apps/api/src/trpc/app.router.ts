@@ -17,6 +17,7 @@ import { createNotificationsRouter } from '../notifications/notifications.router
 import { createAuditRouter } from '../common/audit.router.js';
 import { createLedgerRouter } from '../ledger/ledger.router.js';
 import { createStaffRouter } from '../staff/staff.router.js';
+import { createContactsRouter } from '../contacts/contacts.router.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { HotelsService } from '../hotels/hotels.service.js';
 import type { RatesService } from '../rates/rates.service.js';
@@ -35,6 +36,7 @@ import type { NotificationsService } from '../notifications/notifications.servic
 import type { AuditService } from '../common/audit.service.js';
 import type { LedgerService } from '../ledger/ledger.service.js';
 import type { StaffService } from '../staff/staff.service.js';
+import type { ContactsService } from '../contacts/contacts.service.js';
 
 export function createAppRouter(services: {
   auth: AuthService;
@@ -55,6 +57,7 @@ export function createAppRouter(services: {
   audit: AuditService;
   ledger: LedgerService;
   staff: StaffService;
+  contacts: ContactsService;
 }) {
   return router({
     health: router({
@@ -81,6 +84,7 @@ export function createAppRouter(services: {
     audit: createAuditRouter(services.audit),
     ledger: createLedgerRouter(services.ledger),
     staff: createStaffRouter(services.staff),
+    contacts: createContactsRouter(services.contacts),
   });
 }
 

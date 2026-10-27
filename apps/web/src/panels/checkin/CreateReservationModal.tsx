@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button, Card, Field, inputClass } from '../../components/ui';
+import { formatDateShort } from '../../dateFormat';
 import { computeGstSlab } from '../../gst';
 import { computeInvoiceTotals } from '../../invoice';
 import { paymentMethodLabel } from '../../paymentMethods';
 import { RoomPickerModal } from './RoomPickerModal';
-import type { PaymentMethod, RatePlan, Room } from '../../types';
+import type { Booking, PaymentMethod, RatePlan, Room } from '../../types';
 
 type GstMode = 'exclusive' | 'inclusive' | 'exempt';
 type DiscountType = 'flat' | 'percent';
@@ -39,9 +40,14 @@ const METHOD_OPTIONS: PaymentMethod[] = ['cash', 'upi', 'online', 'card', 'bank_
 
 interface PickedRoom {
   room: Room;
-  totalAmount: number;
+  ratePerNight: number;
   ratePlanId: string;
   lineItems: DraftLineItem[];
+  // §user request, with a reference app's own per-room date chip as the target — a bulk/wedding
+  // reservation's rooms don't always share the same stay. Undefined = inherits the reservation's
+  // own check-in/check-out below.
+  checkIn?: string;
+  checkOut?: string;
 }
 
 /**
@@ -51,8 +57,22 @@ interface PickedRoom {
  * own Booking row sharing one reservationGroupId (§bookings.service.ts createMultiRoomReservation)
  * so each can later be checked in independently ("partial check-in" is just that, nothing more).
  */
-export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: string; onClose: () => void; onDone: () => void }) {
+export function CreateReservationModal({
+  hotelId,
+  onClose,
+  onDone,
+  editGroup,
+}: {
+  hotelId: string;
+  onClose: () => void;
+  onDone: () => void;
+  /** §user request, with a reference app's own calendar-bar "Edit reservation" as the target —
+   * every Booking row sharing one reservationGroupId, prefilling this same form instead of a
+   * blank one and saving via bookings.updateReservationGroup instead of create. */
+  editGroup?: Booking[];
+}) {
   const { token } = useAuth();
+  const isEditMode = Boolean(editGroup && editGroup.length > 0);
   const [source, setSource] = useState('direct');
   const [checkIn, setCheckIn] = useState(todayPlus(0));
   const [checkOut, setCheckOut] = useState(todayPlus(1));
@@ -72,6 +92,7 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
   // same InvoiceLineItem mechanism check-in's own "+ Add Extra Charges" already uses — only one
   // room's add-on form is open at a time, tracked by room id.
   const [addingChargeFor, setAddingChargeFor] = useState<string | null>(null);
+  const [editingDatesFor, setEditingDatesFor] = useState<string | null>(null);
   const [chargeDesc, setChargeDesc] = useState('');
   const [chargeQty, setChargeQty] = useState<number | ''>('');
   const [chargeUnitPrice, setChargeUnitPrice] = useState<number | ''>('');
@@ -95,20 +116,88 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
   const [advanceAmount, setAdvanceAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('upi');
 
+  // §user request — "corporate booking vala nahi dala hai": bill the whole reservation to a
+  // company (GST input credit) right at creation, same billToCompany* fields the invoice view's
+  // own "Bill to company" already writes later — this just sets them from the start.
+  const [isCorporate, setIsCorporate] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [companyGstin, setCompanyGstin] = useState('');
+  const [companyAddress, setCompanyAddress] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // §user request, with a reference app's own calendar-bar "Edit reservation" as the target —
+  // fills this same form from an existing group's bookings instead of starting blank. Each
+  // Booking row only carries its own assignedRoomId, not a full Room object, so the matching
+  // Room (for its category name, used throughout the room card below) is fetched once here.
+  useEffect(() => {
+    if (!editGroup || editGroup.length === 0) return;
+    (async () => {
+      const allRooms = await query<Room[]>('hotels.listRooms', { hotelId }, token ?? undefined);
+      const first = editGroup[0];
+      const isGroup = editGroup.length > 1;
+      const minCheckIn = editGroup.reduce((min, b) => (b.checkIn < min ? b.checkIn : min), first.checkIn).slice(0, 10);
+      const maxCheckOut = editGroup.reduce((max, b) => (b.checkOut > max ? b.checkOut : max), first.checkOut).slice(0, 10);
+      setSource(first.source);
+      setCheckIn(minCheckIn);
+      setCheckOut(maxCheckOut);
+      setGuestName(isGroup && first.bookedByName ? first.bookedByName : first.guestName);
+      setGuestPhone((isGroup && first.bookedByPhone ? first.bookedByPhone : first.guestPhone) ?? '');
+      setGuestEmail(first.guestEmail ?? '');
+      setSpecialRequest(first.specialRequest ?? '');
+      setGstMode(editGroup.every((b) => b.gstExempt) ? 'exempt' : 'exclusive');
+      if (first.billToCompanyName) {
+        setIsCorporate(true);
+        setCompanyName(first.billToCompanyName);
+        setCompanyGstin(first.billToCompanyGstin ?? '');
+        setCompanyAddress(first.billToCompanyAddress ?? '');
+      }
+      const newPicked: PickedRoom[] = editGroup
+        .filter((b) => b.assignedRoomId && allRooms.some((r) => r.id === b.assignedRoomId))
+        .map((b) => {
+          const room = allRooms.find((r) => r.id === b.assignedRoomId)!;
+          const bCheckIn = b.checkIn.slice(0, 10);
+          const bCheckOut = b.checkOut.slice(0, 10);
+          return {
+            room,
+            ratePerNight: Math.round((Number(b.totalAmount) / Math.max(1, b.nights)) * 100) / 100,
+            ratePlanId: b.ratePlanId ?? '',
+            lineItems: (b.lineItems ?? []).map((li) => ({
+              key: crypto.randomUUID(),
+              description: li.description,
+              quantity: li.quantity,
+              unitPrice: Number(li.unitPrice),
+              amount: Number(li.amount),
+            })),
+            checkIn: bCheckIn !== minCheckIn ? bCheckIn : undefined,
+            checkOut: bCheckOut !== maxCheckOut ? bCheckOut : undefined,
+          };
+        });
+      setPicked(newPicked);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editGroup]);
+
   const nights = Math.max(1, Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000));
+
+  function roomNights(p: Pick<PickedRoom, 'checkIn' | 'checkOut'>) {
+    const ci = p.checkIn || checkIn;
+    const co = p.checkOut || checkOut;
+    return Math.max(1, Math.round((new Date(co).getTime() - new Date(ci).getTime()) / 86400000));
+  }
 
   // "Inclusive" means each room's entered charge already has GST baked in — back out that
   // room's own pre-tax base (its own GST slab may differ room to room by price) before any
   // other total is computed, same as InvoiceStep does for a single room. Add-on charges are
   // never backed out — same as InvoiceStep, they sit on top of the room rate as-is.
   const roomsWithBase = picked.map((p) => {
-    const rate = computeGstSlab(p.totalAmount).rate;
-    const base = gstMode === 'inclusive' ? Math.round((p.totalAmount / (1 + rate / 100)) * 100) / 100 : p.totalAmount;
+    const roomStayNights = roomNights(p);
+    const totalAmount = p.ratePerNight * roomStayNights;
+    const rate = computeGstSlab(totalAmount).rate;
+    const base = gstMode === 'inclusive' ? Math.round((totalAmount / (1 + rate / 100)) * 100) / 100 : totalAmount;
     const extraChargesSum = p.lineItems.reduce((sum, li) => sum + li.amount, 0);
-    return { ...p, base, extraChargesSum };
+    return { ...p, totalAmount, base, extraChargesSum, roomStayNights };
   });
   const baseTotal = roomsWithBase.reduce((sum, p) => sum + p.base, 0);
   const extraChargesTotal = roomsWithBase.reduce((sum, p) => sum + p.extraChargesSum, 0);
@@ -121,7 +210,10 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
   const allLineItems = roomsWithBase.flatMap((p) => p.lineItems);
   const totals = computeInvoiceTotals({ totalAmount: baseTotal, lineItems: allLineItems, discountAmount: effectiveDiscountAmount || null, gstExempt: gstMode === 'exempt' });
   const grandTotal = totals.grandTotal;
-  const due = Math.max(0, grandTotal - advanceAmount);
+  // Edit mode never records a new payment through this form (that stays Add Payment's job) —
+  // "due" here reflects what's already been paid against the group instead of a fresh advance.
+  const alreadyPaid = isEditMode ? (editGroup ?? []).reduce((sum, b) => sum + Number(b.paidAmount ?? 0), 0) : 0;
+  const due = Math.max(0, grandTotal - (isEditMode ? alreadyPaid : advanceAmount));
 
   async function openPicker() {
     setError(null);
@@ -147,7 +239,7 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
       const existing = picked.find((p) => p.room.id === id);
       if (existing) return existing;
       const room = availableRooms.find((r) => r.id === id)!;
-      return { room, totalAmount: 0, ratePlanId: '', lineItems: [] };
+      return { room, ratePerNight: 0, ratePlanId: '', lineItems: [] };
     });
     setPicked(newlyPicked);
     setPickerOpen(false);
@@ -182,8 +274,17 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
     setPicked((prev) => prev.map((p) => (p.room.id === roomId ? { ...p, lineItems: p.lineItems.filter((li) => li.key !== key) } : p)));
   }
 
-  function updateAmount(roomId: string, amount: number) {
-    setPicked((prev) => prev.map((p) => (p.room.id === roomId ? { ...p, totalAmount: amount } : p)));
+  function updateRate(roomId: string, rate: number) {
+    setPicked((prev) => prev.map((p) => (p.room.id === roomId ? { ...p, ratePerNight: rate } : p)));
+  }
+
+  function updateRoomDate(roomId: string, field: 'checkIn' | 'checkOut', value: string) {
+    setPicked((prev) => prev.map((p) => (p.room.id === roomId ? { ...p, [field]: value } : p)));
+  }
+
+  function resetRoomDates(roomId: string) {
+    setPicked((prev) => prev.map((p) => (p.room.id === roomId ? { ...p, checkIn: undefined, checkOut: undefined } : p)));
+    setEditingDatesFor(null);
   }
 
   async function submit() {
@@ -196,39 +297,56 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
       setError('Add at least one room');
       return;
     }
+    if (guestPhone && guestPhone.length !== 10) {
+      setError('Contact number must be exactly 10 digits');
+      return;
+    }
+    if (isCorporate && !companyName.trim()) {
+      setError('Company name is required for a corporate booking');
+      return;
+    }
     setSubmitting(true);
     try {
-      await mutate(
-        'bookings.createMultiRoomReservation',
-        {
-          hotelId,
-          source,
-          checkIn,
-          checkOut,
-          guestName,
-          guestPhone: guestPhone || undefined,
-          guestEmail: guestEmail || undefined,
-          specialRequest: specialRequest || undefined,
-          rooms: roomsWithBase.map((p) => ({
-            roomId: p.room.id,
-            totalAmount: p.base,
-            ratePlanId: p.ratePlanId || undefined,
-            lineItems: p.lineItems.length > 0 ? p.lineItems.map((li) => ({ description: li.description, quantity: li.quantity, unitPrice: li.unitPrice })) : undefined,
-            discountAmount:
-              effectiveDiscountAmount > 0 && discountBase > 0
-                ? Math.round(((p.base + p.extraChargesSum) / discountBase) * effectiveDiscountAmount * 100) / 100
-                : undefined,
-            gstExempt: gstMode === 'exempt' ? true : undefined,
-          })),
-          advanceAmount: advanceAmount > 0 ? advanceAmount : undefined,
-          paymentMethod: advanceAmount > 0 ? paymentMethod : undefined,
-        },
-        token ?? undefined,
-      );
+      const shared = {
+        hotelId,
+        source,
+        checkIn,
+        checkOut,
+        guestName,
+        guestPhone: guestPhone || undefined,
+        guestEmail: guestEmail || undefined,
+        specialRequest: specialRequest || undefined,
+        companyName: isCorporate ? companyName.trim() : undefined,
+        companyGstin: isCorporate ? companyGstin.trim() || undefined : undefined,
+        companyAddress: isCorporate ? companyAddress.trim() || undefined : undefined,
+        rooms: roomsWithBase.map((p) => ({
+          roomId: p.room.id,
+          totalAmount: p.base,
+          ratePlanId: p.ratePlanId || undefined,
+          checkIn: p.checkIn || undefined,
+          checkOut: p.checkOut || undefined,
+          lineItems: p.lineItems.length > 0 ? p.lineItems.map((li) => ({ description: li.description, quantity: li.quantity, unitPrice: li.unitPrice })) : undefined,
+          discountAmount:
+            effectiveDiscountAmount > 0 && discountBase > 0
+              ? Math.round(((p.base + p.extraChargesSum) / discountBase) * effectiveDiscountAmount * 100) / 100
+              : undefined,
+          gstExempt: gstMode === 'exempt' ? true : undefined,
+        })),
+      };
+      if (isEditMode) {
+        const reservationGroupId = editGroup![0].reservationGroupId ?? editGroup![0].id;
+        await mutate('bookings.updateReservationGroup', { ...shared, reservationGroupId }, token ?? undefined);
+      } else {
+        await mutate(
+          'bookings.createMultiRoomReservation',
+          { ...shared, advanceAmount: advanceAmount > 0 ? advanceAmount : undefined, paymentMethod: advanceAmount > 0 ? paymentMethod : undefined },
+          token ?? undefined,
+        );
+      }
       onDone();
       onClose();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create reservation');
+      setError(err instanceof ApiError ? err.message : `Failed to ${isEditMode ? 'save' : 'create'} reservation`);
     } finally {
       setSubmitting(false);
     }
@@ -239,7 +357,7 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
       <div className="w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
         <Card className="flex max-h-[92vh] flex-col overflow-hidden rounded-b-none sm:rounded-b-xl">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create Reservation</h3>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">{isEditMode ? 'Edit Reservation' : 'Create Reservation'}</h3>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300">
               ✕
             </button>
@@ -291,6 +409,29 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
                   <input className={inputClass} value={specialRequest} onChange={(e) => setSpecialRequest(e.target.value)} />
                 </Field>
               </div>
+
+              {/* §user request — "corporate booking vala nahi dala hai": bills the stay to a
+                  company (for their GST input credit) instead of the individual guest, settable
+                  right here at creation instead of only after the fact via the invoice view. */}
+              <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <input type="checkbox" checked={isCorporate} onChange={(e) => setIsCorporate(e.target.checked)} />
+                🏢 Corporate Booking (bill to company)
+              </label>
+              {isCorporate && (
+                <div className="mt-2.5 grid grid-cols-1 gap-2.5 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40 sm:grid-cols-2">
+                  <Field label="Company name">
+                    <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" required />
+                  </Field>
+                  <Field label="GSTIN">
+                    <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="15-digit GSTIN" />
+                  </Field>
+                  <div className="sm:col-span-2">
+                    <Field label="Company address">
+                      <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
+                    </Field>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -298,19 +439,60 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Rooms</p>
               </div>
               <div className="space-y-2.5">
-                {picked.map((p) => {
+                {roomsWithBase.map((p) => {
                   const roomRatePlans = ratePlans.filter((rp) => rp.roomCategoryId === p.room.roomCategoryId);
+                  const hasCustomDates = Boolean(p.checkIn || p.checkOut);
                   return (
                     <div key={p.room.id} className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <p className="text-sm font-bold text-slate-900 dark:text-white">Room: {p.room.roomNumber}</p>
-                          <p className="text-xs text-slate-400 dark:text-slate-500">{p.room.roomCategory?.name ?? '—'} · {nights} night{nights === 1 ? '' : 's'}</p>
+                          <p className="text-xs text-slate-400 dark:text-slate-500">{p.room.roomCategory?.name ?? '—'}</p>
+                          {/* §user request — bulk/wedding reservations can need different dates per room; this
+                              chip defaults to the reservation's own dates and only diverges when edited. */}
+                          <button
+                            type="button"
+                            onClick={() => setEditingDatesFor(editingDatesFor === p.room.id ? null : p.room.id)}
+                            className="mt-1 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                          >
+                            📅 {formatDateShort(p.checkIn || checkIn)} – {formatDateShort(p.checkOut || checkOut)} · {p.roomStayNights} night{p.roomStayNights === 1 ? '' : 's'}
+                            {hasCustomDates && <span className="text-brand-600 dark:text-brand-400">(custom)</span>}
+                          </button>
                         </div>
                         <button type="button" onClick={() => removeRoom(p.room.id)} className="text-red-500 hover:text-red-700 dark:text-red-400">
                           🗑
                         </button>
                       </div>
+
+                      {editingDatesFor === p.room.id && (
+                        <div className="mt-2.5 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40">
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <Field label="Check-in">
+                              <input
+                                className={inputClass}
+                                type="date"
+                                value={p.checkIn || checkIn}
+                                onChange={(e) => updateRoomDate(p.room.id, 'checkIn', e.target.value)}
+                              />
+                            </Field>
+                            <Field label="Check-out">
+                              <input
+                                className={inputClass}
+                                type="date"
+                                value={p.checkOut || checkOut}
+                                min={p.checkIn || checkIn}
+                                onChange={(e) => updateRoomDate(p.room.id, 'checkOut', e.target.value)}
+                              />
+                            </Field>
+                          </div>
+                          {hasCustomDates && (
+                            <button type="button" onClick={() => resetRoomDates(p.room.id)} className="mt-1.5 text-xs text-brand-600 hover:underline dark:text-brand-400">
+                              Reset to reservation dates
+                            </button>
+                          )}
+                        </div>
+                      )}
+
                       <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                         <Field label="Rate Plan">
                           <select className={inputClass} value={p.ratePlanId} onChange={(e) => updateRatePlan(p.room.id, e.target.value)}>
@@ -325,16 +507,19 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
                         <div className="flex items-end gap-1.5">
                           <div className="flex-1">
                             <Field
-                              label={`Room charge for the stay (₹, ${gstMode === 'inclusive' ? 'incl. GST' : gstMode === 'exempt' ? 'GST exempt' : 'excl. GST'})`}
+                              label={`Rate /night (₹, ${gstMode === 'inclusive' ? 'incl. GST' : gstMode === 'exempt' ? 'GST exempt' : 'excl. GST'})`}
                             >
                               <input
                                 className={inputClass}
                                 type="number"
                                 min={0}
-                                value={p.totalAmount}
-                                onChange={(e) => updateAmount(p.room.id, Number(e.target.value))}
+                                value={p.ratePerNight}
+                                onChange={(e) => updateRate(p.room.id, Number(e.target.value))}
                               />
                             </Field>
+                            <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                              ₹{p.ratePerNight || 0} × {p.roomStayNights} night{p.roomStayNights === 1 ? '' : 's'} = <span className="font-semibold text-slate-600 dark:text-slate-300">₹{p.totalAmount.toFixed(2)}</span>
+                            </p>
                           </div>
                           {/* §user request — "+ icon jisme hum room ADD ON ke extra charges le sake, jaise extra
                               mattress and others": same InvoiceLineItem mechanism check-in's "+ Add Extra Charges"
@@ -533,32 +718,36 @@ export function CreateReservationModal({ hotelId, onClose, onDone }: { hotelId: 
               </>
             )}
 
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment Details</p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Advance (₹)">
-                  <input className={inputClass} type="number" min={0} max={grandTotal} value={advanceAmount} onChange={(e) => setAdvanceAmount(Number(e.target.value))} />
-                </Field>
-                <Field label="Payment Mode">
-                  <select className={inputClass} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)} disabled={advanceAmount <= 0}>
-                    {METHOD_OPTIONS.map((m) => (
-                      <option key={m} value={m}>
-                        {paymentMethodLabel(m)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+            {/* Edit mode never records a new payment through this form — that's Add Payment's
+                job, kept untouched so the group's existing ledger isn't duplicated. */}
+            {!isEditMode && (
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment Details</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Advance (₹)">
+                    <input className={inputClass} type="number" min={0} max={grandTotal} value={advanceAmount} onChange={(e) => setAdvanceAmount(Number(e.target.value))} />
+                  </Field>
+                  <Field label="Payment Mode">
+                    <select className={inputClass} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)} disabled={advanceAmount <= 0}>
+                      {METHOD_OPTIONS.map((m) => (
+                        <option key={m} value={m}>
+                          {paymentMethodLabel(m)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 dark:border-slate-700">
             <div className="text-sm">
               <span className="font-bold text-amber-600 dark:text-amber-400">₹{due.toFixed(2)}</span>
-              <span className="text-slate-400 dark:text-slate-500"> due of ₹{grandTotal.toFixed(2)}</span>
+              <span className="text-slate-400 dark:text-slate-500"> due of ₹{grandTotal.toFixed(2)}{isEditMode && alreadyPaid > 0 ? ` (₹${alreadyPaid.toFixed(2)} already paid)` : ''}</span>
             </div>
             <Button type="button" onClick={submit} disabled={submitting || picked.length === 0}>
-              {submitting ? 'Creating…' : 'Create Reservation'}
+              {isEditMode ? (submitting ? 'Saving…' : 'Save Changes') : submitting ? 'Creating…' : 'Create Reservation'}
             </Button>
           </div>
         </Card>

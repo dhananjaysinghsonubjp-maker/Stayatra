@@ -3,6 +3,7 @@ import { mutate, query, uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Badge, Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
+import { formatDateTimeShort } from '../../dateFormat';
 import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
 import type { Booking, Gender, Guest, IdType, RatePlan, Room } from '../../types';
 
@@ -40,8 +41,13 @@ interface Props {
 
 export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, onClose, onDone }: Props) {
   const { token } = useAuth();
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [mode, setMode] = useState<'new' | 'existing'>(reservation ? 'existing' : 'new');
+  // §user request, reference app's own post-check-in screen — a brief confirmation instead of
+  // the modal just vanishing, so the front desk gets a clear "done" moment with what just
+  // happened (which room, what time) before moving on.
+  const [successInfo, setSuccessInfo] = useState<{ roomNumber: string; checkedInAt: Date } | null>(null);
+  const [successCountdown, setSuccessCountdown] = useState(4);
 
   // guest identity
   const [guestId, setGuestId] = useState<string | undefined>(undefined);
@@ -57,6 +63,13 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   const [city, setCity] = useState('');
   const [pincode, setPincode] = useState('');
   const [purposeOfStay, setPurposeOfStay] = useState('');
+  // §user request — "corporate booking vala nahi dala hai": bills the stay to a company (for
+  // their GST input credit) right at check-in, same billToCompany* fields the invoice view's own
+  // "Bill to company" already writes later.
+  const [isCorporate, setIsCorporate] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [companyGstin, setCompanyGstin] = useState('');
+  const [companyAddress, setCompanyAddress] = useState('');
   const [idType, setIdType] = useState<IdType>('aadhaar');
   const [idNumber, setIdNumber] = useState('');
   const [idPhotoPath, setIdPhotoPath] = useState<string | undefined>(undefined);
@@ -88,10 +101,40 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   // shouldn't re-prompt the front desk to choose one, just use it.
   const [selectedRoomId, setSelectedRoomId] = useState(reservation?.assignedRoomId ?? room?.id ?? '');
 
+  // §user request — "guest ek din pehle aa jaata hai, dates adjust karne de check-in ke time hi":
+  // an existing reservation's stay dates used to be fixed at booking time with no way to correct
+  // them until after check-in (Edit Stay, and only within its 1-hour window). These are editable
+  // right here now, same as the "new guest" rate/nights fields below, so an early/late arrival is
+  // handled in the same step as check-in instead of a rushed follow-up edit.
+  const [stayCheckIn, setStayCheckIn] = useState('');
+  const [stayCheckOut, setStayCheckOut] = useState('');
+
   const selectedReservation = reservation ?? upcoming.find((r) => r.id === selectedReservationId) ?? null;
   const roomCategoryId = room?.roomCategoryId ?? selectedReservation?.roomCategoryId;
-  const totalAmount = mode === 'new' ? amountPerNight * nights : Number(selectedReservation?.totalAmount ?? 0);
+  const existingNights =
+    stayCheckIn && stayCheckOut ? Math.max(1, Math.round((new Date(stayCheckOut).getTime() - new Date(stayCheckIn).getTime()) / 86400000)) : 0;
+  const totalAmount = mode === 'new' ? amountPerNight * nights : amountPerNight * existingNights;
+  const datesChanged =
+    mode === 'existing' && selectedReservation && (stayCheckIn !== selectedReservation.checkIn.slice(0, 10) || stayCheckOut !== selectedReservation.checkOut.slice(0, 10));
   const gst = computeGstSlab(totalAmount);
+
+  // §user request — "bulk booking me ek hi naam sab rooms pe hota hai, check-in ke time us
+  // particular room ka actual guest pata hona chahiye": a multi-room reservation (Calendar's
+  // createMultiRoomReservation) shares one guestName across every room at booking time — there's
+  // no per-room guest yet. For an ordinary single-room reservation, prefilling from the booking
+  // is still right (there's only one guest, correcting a typo is the only reason to touch it).
+  // For a *group* booking (bookedByName set — "Neeraj ji ne 5 room book kiye"), the shared name
+  // is the booker, not this room's actual occupant, so this starts blank instead — "Booked by"
+  // stays visible separately (below) for context while the front desk types who's really here.
+  useEffect(() => {
+    if (mode !== 'existing' || !selectedReservation) return;
+    setGuestName(selectedReservation.bookedByName ? '' : selectedReservation.guestName);
+    setGuestPhone(selectedReservation.bookedByName ? '' : (selectedReservation.guestPhone ?? ''));
+    setStayCheckIn(selectedReservation.checkIn.slice(0, 10));
+    setStayCheckOut(selectedReservation.checkOut.slice(0, 10));
+    setAmountPerNight(Math.round(Number(selectedReservation.totalAmount) / Math.max(1, selectedReservation.nights)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReservation?.id, mode]);
 
   useEffect(() => {
     if (mode !== 'existing' || reservation) return;
@@ -115,6 +158,35 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
     query<RatePlan[]>('rates.listRatePlans', { roomCategoryId }, token ?? undefined).then(setRatePlans);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomCategoryId]);
+
+  // §bugfix — calling onDone() the moment check-in succeeds (while still showing the success
+  // screen) used to immediately unmount this modal when opened from ReservationDetailModal: its
+  // onDone also clears the "which booking is being checked in" state that this component's own
+  // render is conditional on, so the success screen never actually painted. onDone/onClose now
+  // both fire together, only once the success screen is actually dismissed.
+  function finish() {
+    onDone();
+    onClose();
+  }
+
+  // Auto-dismiss the success screen after a few seconds, matching the reference app's own
+  // countdown — the front desk doesn't have to click anything if they're ready to move on.
+  useEffect(() => {
+    if (step !== 3) return;
+    setSuccessCountdown(4);
+    const id = setInterval(() => {
+      setSuccessCountdown((n) => {
+        if (n <= 1) {
+          clearInterval(id);
+          finish();
+          return 0;
+        }
+        return n - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   // guest search-as-you-type once a full 10-digit phone is entered
   useEffect(() => {
@@ -197,11 +269,11 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
     e.preventDefault();
     setError(null);
 
-    if (mode === 'new' && !guestName.trim()) {
+    if (!guestName.trim()) {
       setError('Full name is required');
       return;
     }
-    if (mode === 'new' && guestPhone && !/^\d{10}$/.test(guestPhone)) {
+    if (guestPhone && !/^\d{10}$/.test(guestPhone)) {
       setError('Mobile number must be exactly 10 digits');
       return;
     }
@@ -221,6 +293,10 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
       setError('ID number is required');
       return;
     }
+    if (isCorporate && !companyName.trim()) {
+      setError('Company name is required for a corporate booking');
+      return;
+    }
     if (mode === 'new' && !room) {
       setError('No room selected');
       return;
@@ -233,6 +309,10 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
       setError('Select a room');
       return;
     }
+    if (mode === 'existing' && (!stayCheckIn || !stayCheckOut || stayCheckOut <= stayCheckIn)) {
+      setError('Check-out must be after check-in');
+      return;
+    }
 
     setStep(2);
   }
@@ -242,14 +322,15 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
     setError(null);
     setBusy(true);
     try {
-      // 'existing' mode never shows the guest-detail fields (they belong to the
-      // reservation already) — fall back to what's on the reservation itself,
-      // otherwise this silently sent an empty guestName and failed validation.
+      // 'existing' mode prefills guestName/guestPhone from the reservation (see the effect
+      // above) and now lets the front desk edit them — this room's actual occupant, not
+      // necessarily the group reservation's original lead name — so both modes just send
+      // whatever's currently in state.
       const guestDetails = {
         guestId,
         title,
-        guestName: mode === 'new' ? guestName : (selectedReservation?.guestName ?? ''),
-        guestPhone: (mode === 'new' ? guestPhone : (selectedReservation?.guestPhone ?? undefined)) || undefined,
+        guestName,
+        guestPhone: guestPhone || undefined,
         email: email || undefined,
         gender: gender || undefined,
         dateOfBirth: dateOfBirth || undefined,
@@ -262,6 +343,9 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
         idNumber,
         idPhotoPath,
         purposeOfStay: purposeOfStay || undefined,
+        companyName: isCorporate ? companyName.trim() : undefined,
+        companyGstin: isCorporate ? companyGstin.trim() || undefined : undefined,
+        companyAddress: isCorporate ? companyAddress.trim() || undefined : undefined,
       };
       const invoiceExtras = {
         lineItems: draft.lineItems.map((li) => ({ description: li.description, quantity: li.quantity, unitPrice: li.unitPrice })),
@@ -270,8 +354,10 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
         payment: draft.payment,
       };
 
+      let checkedInRoomNumber = '—';
       if (mode === 'new') {
         if (!room) throw new Error('No room selected');
+        checkedInRoomNumber = room.roomNumber;
         const checkIn = new Date();
         const checkOut = new Date(Date.now() + nights * 86400000);
         await mutate(
@@ -293,10 +379,24 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
         if (!selectedReservation) throw new Error('Select a reservation');
         const roomId = reservation ? selectedRoomId : (room?.id ?? '');
         if (!roomId) throw new Error('Select a room');
-        await mutate('bookings.checkInReservation', { bookingId: selectedReservation.id, roomId, ...guestDetails, ...invoiceExtras }, token ?? undefined);
+        checkedInRoomNumber = assignedRoomNumber ?? availableRooms.find((r) => r.id === roomId)?.roomNumber ?? room?.roomNumber ?? '—';
+        await mutate(
+          'bookings.checkInReservation',
+          {
+            bookingId: selectedReservation.id,
+            roomId,
+            ...guestDetails,
+            checkIn: new Date(`${stayCheckIn}T00:00:00`).toISOString(),
+            checkOut: new Date(`${stayCheckOut}T00:00:00`).toISOString(),
+            nights: existingNights,
+            totalAmount: draft.adjustedTotalAmount ?? totalAmount,
+            ...invoiceExtras,
+          },
+          token ?? undefined,
+        );
       }
-      onDone();
-      onClose();
+      setSuccessInfo({ roomNumber: checkedInRoomNumber, checkedInAt: new Date() });
+      setStep(3);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Check-in failed');
     } finally {
@@ -315,16 +415,20 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
           card's edge used to silently discard everything typed so far with
           no confirmation. Leaving via "Cancel"/"Cancel check-in" is explicit. */}
       <Card className="w-full max-w-2xl p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h4 className="text-sm font-semibold text-slate-900">{title_}</h4>
-          {room?.roomCategory && <Badge tone="slate">{room.roomCategory.name}</Badge>}
-        </div>
+        {step !== 3 && (
+          <>
+            <div className="mb-4 flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-slate-900">{title_}</h4>
+              {room?.roomCategory && <Badge tone="slate">{room.roomCategory.name}</Badge>}
+            </div>
 
-        <div className="mb-5 flex items-center justify-center gap-3">
-          <StepDot n={1} active={step === 1} done={step > 1} />
-          <div className={`h-px w-10 ${step > 1 ? 'bg-royal-500' : 'bg-slate-200'}`} />
-          <StepDot n={2} active={step === 2} done={false} />
-        </div>
+            <div className="mb-5 flex items-center justify-center gap-3">
+              <StepDot n={1} active={step === 1} done={step > 1} />
+              <div className={`h-px w-10 ${step > 1 ? 'bg-royal-500' : 'bg-slate-200'}`} />
+              <StepDot n={2} active={step === 2} done={false} />
+            </div>
+          </>
+        )}
 
         {step === 1 && (
           <>
@@ -385,15 +489,41 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
               )}
 
               {mode === 'existing' && selectedReservation && (
-                <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
-                  <p>
-                    <span className="font-medium text-slate-800">{selectedReservation.guestName}</span> · {selectedReservation.checkIn.slice(0, 10)} →{' '}
-                    {selectedReservation.checkOut.slice(0, 10)} · {selectedReservation.nights} night{selectedReservation.nights === 1 ? '' : 's'}
-                  </p>
-                  <p className="mt-1">
-                    Total ₹{selectedReservation.totalAmount} · GST slab {gst.label}
-                  </p>
-                </div>
+                <>
+                  {/* §user request — "Neeraj ji ne booking karvayi hai, 102 mein koi aur guest aa
+                      raha hai — unka check-in form bhare": the booker stays visible as context
+                      while the name/details fields below start blank for this specific room. */}
+                  {selectedReservation.bookedByName && (
+                    <div className="rounded-lg bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+                      Booked by {selectedReservation.bookedByName} — fill this room's actual guest below.
+                    </div>
+                  )}
+                  {/* §user request — "guest ek din pehle aa jaata hai, usi reservation me check-in
+                      ke time hi dates adjust karne de": reserved for 24→26, guest actually walks
+                      in on the 23rd and needs to leave the 25th — editable right here instead of
+                      locked to the original booking until a separate post-check-in Edit Stay. */}
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <Field label="Check-in">
+                      <input className={inputClass} type="date" value={stayCheckIn} onChange={(e) => setStayCheckIn(e.target.value)} required />
+                    </Field>
+                    <Field label="Check-out">
+                      <input className={inputClass} type="date" value={stayCheckOut} onChange={(e) => setStayCheckOut(e.target.value)} required />
+                    </Field>
+                    <Field label="Amount / night (₹)">
+                      <input className={inputClass} type="number" value={amountPerNight} onChange={(e) => setAmountPerNight(Number(e.target.value))} min={0} />
+                    </Field>
+                    <Field label="Total">
+                      <div className={`${inputClass} flex items-center bg-slate-50 font-medium text-slate-900`}>₹{totalAmount}</div>
+                    </Field>
+                  </div>
+                  {datesChanged && (
+                    <p className="text-xs text-amber-600">
+                      Reserved for {selectedReservation.checkIn.slice(0, 10)} → {selectedReservation.checkOut.slice(0, 10)} — adjusting to {stayCheckIn} →{' '}
+                      {stayCheckOut} ({existingNights} night{existingNights === 1 ? '' : 's'}) on check-in.
+                    </p>
+                  )}
+                  <p className="-mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
+                </>
               )}
 
               {mode === 'new' && (
@@ -420,7 +550,18 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                     </Field>
                   </div>
                   <p className="-mt-2 text-xs text-slate-400">GST slab: {gst.label}</p>
+                </>
+              )}
 
+              {/* §user request — "reservation page ke through check-in karta hu toh poori guest
+                  details nahi maangta, jaise walk-in ke maangta hai": this whole guest-capture
+                  block (ID scan, phone/saved-guest lookup, name, contact, address, purpose) used
+                  to be 'new'-mode only — an existing-reservation check-in skipped straight from
+                  "which reservation" to ID type/number, with no way to actually capture who's
+                  checking in. Every check-in needs the same real guest record now, regardless of
+                  how the stay was booked. */}
+              {(mode === 'new' || (mode === 'existing' && selectedReservation)) && (
+                <>
                   <div className="flex items-center gap-3 rounded-lg border border-dashed border-slate-300 p-3">
                     <input
                       ref={fileInputRef}
@@ -481,7 +622,7 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                       </select>
                     </Field>
                     <div className="col-span-3">
-                      <Field label="Full name">
+                      <Field label={mode === 'existing' && selectedReservation?.bookedByName ? "This room's guest name" : 'Full name'}>
                         <input className={inputClass} value={guestName} onChange={(e) => setGuestName(e.target.value)} required autoFocus />
                       </Field>
                     </div>
@@ -535,6 +676,28 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                       ))}
                     </select>
                   </Field>
+
+                  {/* §user request — "corporate booking vala nahi dala hai": bills the stay to a
+                      company (for their GST input credit) right at check-in. */}
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                    <input type="checkbox" checked={isCorporate} onChange={(e) => setIsCorporate(e.target.checked)} />
+                    🏢 Corporate Booking (bill to company)
+                  </label>
+                  {isCorporate && (
+                    <div className="grid grid-cols-1 gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-2">
+                      <Field label="Company name">
+                        <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" required />
+                      </Field>
+                      <Field label="GSTIN">
+                        <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="15-digit GSTIN" />
+                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="Company address">
+                          <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
@@ -568,8 +731,8 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
         {step === 2 && (
           <div className="max-h-[70vh] overflow-y-auto pr-1">
             <InvoiceStep
-              guestName={mode === 'new' ? guestName : (selectedReservation?.guestName ?? '')}
-              guestPhone={mode === 'new' ? guestPhone || undefined : (selectedReservation?.guestPhone ?? undefined)}
+              guestName={guestName}
+              guestPhone={guestPhone || undefined}
               totalAmount={totalAmount}
               alreadyPaid={mode === 'existing' ? Number(selectedReservation?.paidAmount ?? 0) : 0}
               onBack={() => setStep(1)}
@@ -577,6 +740,33 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
               onComplete={completeCheckIn}
               busy={busy}
             />
+          </div>
+        )}
+
+        {step === 3 && successInfo && (
+          <div className="flex flex-col items-center px-2 py-6 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </div>
+            <h4 className="mt-4 text-lg font-bold text-slate-900">Checked in successfully</h4>
+            <p className="mt-1 text-sm text-slate-500">Your guest is all set for a comfortable stay.</p>
+
+            <div className="mt-5 w-full divide-y divide-slate-100 rounded-xl border border-slate-200 text-sm">
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-slate-500">Room</span>
+                <span className="font-semibold text-royal-600">{successInfo.roomNumber}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-slate-500">Checked in</span>
+                <span className="font-medium text-slate-900">{formatDateTimeShort(successInfo.checkedInAt.toISOString())}</span>
+              </div>
+            </div>
+
+            <Button type="button" variant="royal" className="mt-5 w-full justify-center" onClick={finish}>
+              Done {successCountdown > 0 ? `· ${successCountdown}s` : ''}
+            </Button>
           </div>
         )}
       </Card>

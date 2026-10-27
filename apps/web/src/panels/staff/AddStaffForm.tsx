@@ -25,14 +25,19 @@ export function AddStaffForm({
   const [phone, setPhone] = useState('');
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [idNumber, setIdNumber] = useState('');
-  const [idPhotoPath, setIdPhotoPath] = useState<string | null>(null);
+  // §user request — "Aadhaar front and back dono upload": two separate photos, not one, so the
+  // owner's review page (StaffManagement.tsx) can print both sides together.
+  const [idPhotoFrontPath, setIdPhotoFrontPath] = useState<string | null>(null);
+  const [idPhotoBackPath, setIdPhotoBackPath] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [uploadingId, setUploadingId] = useState(false);
+  const [uploadingIdFront, setUploadingIdFront] = useState(false);
+  const [uploadingIdBack, setUploadingIdBack] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const idInputRef = useRef<HTMLInputElement>(null);
+  const idFrontInputRef = useRef<HTMLInputElement>(null);
+  const idBackInputRef = useRef<HTMLInputElement>(null);
   const selectedRole = DESIGNATION_OPTIONS.find((d) => d.designation === designation)?.role ?? 'housekeeping';
 
   async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -50,18 +55,33 @@ export function AddStaffForm({
     }
   }
 
-  async function handleIdUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleIdFrontUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploadingId(true);
+    setUploadingIdFront(true);
     setError(null);
     try {
       const result = await uploadFile<{ filePath: string }>('uploads/staff-id', file, token ?? undefined);
-      setIdPhotoPath(result.filePath);
+      setIdPhotoFrontPath(result.filePath);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Aadhar upload failed');
     } finally {
-      setUploadingId(false);
+      setUploadingIdFront(false);
+    }
+  }
+
+  async function handleIdBackUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingIdBack(true);
+    setError(null);
+    try {
+      const result = await uploadFile<{ filePath: string }>('uploads/staff-id', file, token ?? undefined);
+      setIdPhotoBackPath(result.filePath);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Aadhar upload failed');
+    } finally {
+      setUploadingIdBack(false);
     }
   }
 
@@ -72,7 +92,8 @@ export function AddStaffForm({
     setPhone('');
     setPhotoPath(null);
     setIdNumber('');
-    setIdPhotoPath(null);
+    setIdPhotoFrontPath(null);
+    setIdPhotoBackPath(null);
   }
 
   async function submit(e: React.FormEvent) {
@@ -93,7 +114,8 @@ export function AddStaffForm({
           phone: phone || undefined,
           photoPath: photoPath || undefined,
           idNumber: idNumber || undefined,
-          idPhotoPath: idPhotoPath || undefined,
+          idPhotoFrontPath: idPhotoFrontPath || undefined,
+          idPhotoBackPath: idPhotoBackPath || undefined,
         },
         token ?? undefined,
       );
@@ -177,17 +199,33 @@ export function AddStaffForm({
                 </div>
               </div>
             </Field>
-            <Field label="Aadhar card photo">
+            <Field label="Aadhar — front side">
               <div className="flex items-center gap-3">
-                {idPhotoPath ? (
-                  <img src={assetUrl(idPhotoPath)} alt="Aadhar" className="h-14 w-20 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-600" />
+                {idPhotoFrontPath ? (
+                  <img src={assetUrl(idPhotoFrontPath)} alt="Aadhar front" className="h-14 w-20 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-600" />
                 ) : (
                   <div className="flex h-14 w-20 items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-400 dark:bg-slate-700">No photo</div>
                 )}
                 <div>
-                  <input ref={idInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleIdUpload} />
-                  <Button type="button" variant="secondary" onClick={() => idInputRef.current?.click()} disabled={uploadingId}>
-                    {uploadingId ? 'Uploading…' : idPhotoPath ? 'Replace' : 'Upload Aadhar'}
+                  <input ref={idFrontInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleIdFrontUpload} />
+                  <Button type="button" variant="secondary" onClick={() => idFrontInputRef.current?.click()} disabled={uploadingIdFront}>
+                    {uploadingIdFront ? 'Uploading…' : idPhotoFrontPath ? 'Replace' : 'Upload front'}
+                  </Button>
+                  <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Camera only — can't pick from gallery.</p>
+                </div>
+              </div>
+            </Field>
+            <Field label="Aadhar — back side">
+              <div className="flex items-center gap-3">
+                {idPhotoBackPath ? (
+                  <img src={assetUrl(idPhotoBackPath)} alt="Aadhar back" className="h-14 w-20 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-600" />
+                ) : (
+                  <div className="flex h-14 w-20 items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-400 dark:bg-slate-700">No photo</div>
+                )}
+                <div>
+                  <input ref={idBackInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleIdBackUpload} />
+                  <Button type="button" variant="secondary" onClick={() => idBackInputRef.current?.click()} disabled={uploadingIdBack}>
+                    {uploadingIdBack ? 'Uploading…' : idPhotoBackPath ? 'Replace' : 'Upload back'}
                   </Button>
                   <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Camera only — can't pick from gallery.</p>
                 </div>
