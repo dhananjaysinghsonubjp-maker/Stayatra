@@ -488,7 +488,12 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
               </div>
             )}
 
-            <form onSubmit={goToStepTwo} noValidate className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
+            {/* §bugfix — "bottom me buttons hide ho rahe the, niche tak nahi aa raha": this form
+                used to cap its own height at 65vh with its own overflow-y-auto, nested inside the
+                panel Card's own max-h-[92vh] overflow-y-auto — two independent scroll regions,
+                the inner one hiding the Cancel/Next buttons past its own fixed cap regardless of
+                how much room was actually left. A single scroll region (the Card's) is enough. */}
+            <form onSubmit={goToStepTwo} noValidate className="space-y-4">
               {/* 1. Room — no picker here: the room is already fixed by which Room Board tile's
                   "Check in" was clicked (or already assigned at booking time); this just shows it
                   plus the price inputs, same fields a pick-a-room flow would ask for minus the
@@ -623,7 +628,27 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
 
                   {/* 3. Guest details */}
                   <Card className="border-slate-200 p-4">
-                    <SectionHeader icon="🧑" title="Guest details" />
+                    <SectionHeader
+                      icon="🧑"
+                      title="Guest details"
+                      action={
+                        // §user request — "individual/company ka option guest details ke header
+                        // pe ho, chhota aur clean, click karte hi niche company fields show
+                        // honge": moved up from a full-width pill row near the bottom.
+                        <div className="flex rounded-lg bg-slate-100 p-0.5 text-[11px]">
+                          {(['individual', 'company'] as const).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setGuestType(t)}
+                              className={`rounded-md px-2.5 py-1 font-semibold transition-colors ${guestType === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                            >
+                              {t === 'company' ? '🏢 Company' : '👤 Individual'}
+                            </button>
+                          ))}
+                        </div>
+                      }
+                    />
 
                     <div className="space-y-4">
                       <div>
@@ -740,22 +765,8 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                         </select>
                       </Field>
 
-                      {/* §user request — "corporate booking vala nahi dala hai", then a reference
-                          app's own Individual/Company toggle as the target: Company reveals the
-                          full company-billing form below and bills the stay to it (for their GST
-                          input credit) right at check-in. */}
-                      <div className="flex rounded-lg bg-slate-100 p-1">
-                        {(['individual', 'company'] as const).map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => setGuestType(t)}
-                            className={`flex-1 rounded-md py-1.5 text-xs font-semibold capitalize transition-colors ${guestType === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-                          >
-                            {t === 'company' ? '🏢 Company' : '👤 Individual'}
-                          </button>
-                        ))}
-                      </div>
+                      {/* Individual/Company itself is toggled from the section header above —
+                          this just reveals the company-billing fields once Company is picked. */}
                       {isCorporate && (
                         <div className="space-y-3 rounded-lg bg-slate-50 p-3">
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -820,8 +831,11 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
           </>
         )}
 
+        {/* §bugfix — same nested-scroll issue as step 1's form: this box's own max-h/overflow
+            used to compete with the panel Card's, cutting off InvoiceStep's own Back/Cancel/
+            Complete row. The Card's single scroll region is enough. */}
         {step === 2 && (
-          <div className="max-h-[70vh] overflow-y-auto pr-1">
+          <div>
             <InvoiceStep
               guestName={guestName}
               guestPhone={guestPhone || undefined}
@@ -866,11 +880,14 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   );
 }
 
-function SectionHeader({ icon, title }: { icon: string; title: string }) {
+function SectionHeader({ icon, title, action }: { icon: string; title: string; action?: React.ReactNode }) {
   return (
-    <div className="mb-3 flex items-center gap-2.5">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-royal-50 text-sm">{icon}</span>
-      <h5 className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</h5>
+    <div className="mb-3 flex items-center justify-between gap-2.5">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-royal-50 text-sm">{icon}</span>
+        <h5 className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</h5>
+      </div>
+      {action}
     </div>
   );
 }
