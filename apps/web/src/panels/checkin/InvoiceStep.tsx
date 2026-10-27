@@ -791,39 +791,42 @@ function ExtraChargeSlider({
     setTimeout(() => onAdd({ description: desc.trim(), amount: Number(amount), gstRate: gstEnabled ? gstRate : null }), 220);
   }
 
-  // §user request — "poora screen pe aana chahiye, jo already khula hai usko overlap kare, abhi
-  // half aa raha hai": a plain `fixed` element here was being contained by CheckInModal's own
-  // sliding panel, because that panel has a CSS transform on it — and a transformed ancestor
-  // becomes the containing block for its `fixed` descendants (so this only ever covered that
-  // panel's own width, not the real viewport). Porting straight to <body> escapes that box.
+  // §user request — "puri screen m aega, jo already hai usko overlap/hide ho jaye, abhi half aa
+  // raha hai": made this a true edge-to-edge full-screen takeover on every size (no narrow-drawer
+  // breakpoint variant), so the Invoice Card sitting underneath is fully covered, not peeking
+  // out past a width/height cap. Still portaled to <body> — without that, even `inset-0` here
+  // would stay confined to CheckInModal's own sliding panel, since a transformed ancestor becomes
+  // the containing block for `fixed` descendants.
   return createPortal(
-    <div className={`fixed inset-0 z-[65] overflow-y-auto bg-slate-900/40 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}>
+    <div className={`fixed inset-0 z-[65] bg-slate-900/60 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}>
       <div
-        className={`fixed inset-x-0 bottom-0 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl transition-transform duration-300 ease-out sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:max-h-full sm:w-full sm:max-w-md sm:rounded-none ${
-          entered && !closing ? 'translate-y-0 sm:translate-x-0' : 'translate-y-full sm:translate-y-0 sm:translate-x-full'
+        className={`fixed inset-0 flex flex-col overflow-hidden bg-white shadow-2xl transition-transform duration-300 ease-out ${
+          entered && !closing ? 'translate-y-0' : 'translate-y-full'
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-brand-50 px-5 py-4">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
-              <ChargeIcon />
-            </span>
-            <div>
-              <h5 className="text-sm font-bold text-slate-900">Extra Charges</h5>
-              <p className="text-xs text-slate-500">Add incidental or service fees with optional GST</p>
+        <div className="flex shrink-0 items-center justify-center border-b border-slate-100 bg-brand-50 px-5 py-4">
+          <div className="flex w-full max-w-xl items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
+                <ChargeIcon />
+              </span>
+              <div>
+                <h5 className="text-sm font-bold text-slate-900">Extra Charges</h5>
+                <p className="text-xs text-slate-500">Add incidental or service fees with optional GST</p>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={handleClose}
+              aria-label="Close"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-slate-600"
+            >
+              ✕
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            aria-label="Close"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-slate-600"
-          >
-            ✕
-          </button>
         </div>
 
-        <form id="extra-charge-form" onSubmit={submit} className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+        <form id="extra-charge-form" onSubmit={submit} className="mx-auto flex w-full max-w-xl flex-1 flex-col space-y-5 overflow-y-auto px-5 py-5">
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Quick reasons</p>
             <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
@@ -909,13 +912,15 @@ function ExtraChargeSlider({
           </div>
         </form>
 
-        <div className="flex shrink-0 gap-2 border-t border-slate-100 px-5 py-4">
-          <Button type="button" variant="secondary" className="flex-1" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button type="submit" form="extra-charge-form" variant="primary" className="flex-1" disabled={!desc.trim() || !amount}>
-            Add charge
-          </Button>
+        <div className="flex shrink-0 justify-center border-t border-slate-100 px-5 py-4">
+          <div className="flex w-full max-w-xl gap-2">
+            <Button type="button" variant="secondary" className="flex-1" onClick={handleClose}>
+              Cancel
+            </Button>
+            <Button type="submit" form="extra-charge-form" variant="primary" className="flex-1" disabled={!desc.trim() || !amount}>
+              Add charge
+            </Button>
+          </div>
         </div>
       </div>
     </div>,
