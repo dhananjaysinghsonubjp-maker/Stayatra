@@ -137,6 +137,21 @@ export function CreateReservationModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // §user request, with a reference app's own slide-over as the target — opens as a right-side
+  // panel on desktop (bottom sheet on phone) instead of a centered dialog, sliding in smoothly
+  // instead of just appearing. Mounts off-screen (`entered` false) and slides in one frame later;
+  // closing reverses that before the parent actually unmounts this component.
+  const [entered, setEntered] = useState(false);
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  function handleClose() {
+    setClosing(true);
+    setTimeout(onClose, 220);
+  }
+
   // §user request, with a reference app's own calendar-bar "Edit reservation" as the target —
   // fills this same form from an existing group's bookings instead of starting blank. Each
   // Booking row only carries its own assignedRoomId, not a full Room object, so the matching
@@ -377,12 +392,19 @@ export function CreateReservationModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
-        <Card className="flex max-h-[92vh] flex-col overflow-hidden rounded-b-none sm:rounded-b-xl">
+    <div
+      className={`fixed inset-0 z-50 bg-black/30 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}
+      onClick={handleClose}
+    >
+      <Card
+        onClick={(e) => e.stopPropagation()}
+        className={`fixed inset-x-0 bottom-0 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-b-none rounded-t-2xl shadow-2xl transition-transform duration-300 ease-out sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-full sm:w-full sm:max-w-xl sm:rounded-none ${
+          entered && !closing ? 'translate-y-0 sm:translate-x-0' : 'translate-y-full sm:translate-y-0 sm:translate-x-full'
+        }`}
+      >
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-700">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">{isEditMode ? 'Edit Reservation' : 'Create Reservation'}</h3>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300">
+            <button onClick={handleClose} className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300">
               ✕
             </button>
           </div>
@@ -813,7 +835,6 @@ export function CreateReservationModal({
             </Button>
           </div>
         </Card>
-      </div>
 
       {pickerOpen && (
         <RoomPickerModal
