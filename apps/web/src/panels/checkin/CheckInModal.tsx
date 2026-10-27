@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { mutate, query, uploadFiles, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
 import { formatDateTimeShort } from '../../dateFormat';
+import { CameraCapture } from './CameraCapture';
 import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
 import type { Booking, Gender, Guest, IdType, RatePlan, Room } from '../../types';
 
@@ -97,6 +98,15 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   const backInputRef = useRef<HTMLInputElement>(null);
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
+  // §user request — "upload hone ke baad picture bani aani chahiye ki kya upload hui hai": a
+  // local thumbnail of whatever was just picked/captured, independent of the server upload.
+  const frontPreview = useMemo(() => (frontFile ? URL.createObjectURL(frontFile) : null), [frontFile]);
+  const backPreview = useMemo(() => (backFile ? URL.createObjectURL(backFile) : null), [backFile]);
+  useEffect(() => () => { if (frontPreview) URL.revokeObjectURL(frontPreview); }, [frontPreview]);
+  useEffect(() => () => { if (backPreview) URL.revokeObjectURL(backPreview); }, [backPreview]);
+  // §user request — "upload bhi ho sake aur real-time image bhi click kar sake, ye add-on zaroor
+  // chahiye": which side's live-camera viewfinder (CameraCapture) is currently open, if any.
+  const [cameraFor, setCameraFor] = useState<'front' | 'back' | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
 
@@ -673,44 +683,38 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                         ))}
                       </div>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <input
-                            ref={frontInputRef}
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp"
-                            className="hidden"
-                            onChange={(e) => e.target.files?.[0] && handleAiCheckIn('front', e.target.files[0])}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => frontInputRef.current?.click()}
-                            disabled={scanning}
-                            className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white py-5 text-center hover:border-royal-400 disabled:opacity-60"
-                          >
-                            <span className="text-lg">⬆️</span>
-                            <span className="text-sm font-semibold text-slate-700">Front side{frontFile ? ' ✓' : ''}</span>
-                            <span className="text-xs text-slate-400">Drop or click to upload · JPG, PNG</span>
-                          </button>
-                        </div>
-                        <div>
-                          <input
-                            ref={backInputRef}
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp"
-                            className="hidden"
-                            onChange={(e) => e.target.files?.[0] && handleAiCheckIn('back', e.target.files[0])}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => backInputRef.current?.click()}
-                            disabled={scanning}
-                            className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white py-5 text-center hover:border-royal-400 disabled:opacity-60"
-                          >
-                            <span className="text-lg">⬆️</span>
-                            <span className="text-sm font-semibold text-slate-700">Back side (optional){backFile ? ' ✓' : ''}</span>
-                            <span className="text-xs text-slate-400">Helps read the address</span>
-                          </button>
-                        </div>
+                        <input
+                          ref={frontInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="hidden"
+                          onChange={(e) => e.target.files?.[0] && handleAiCheckIn('front', e.target.files[0])}
+                        />
+                        <input
+                          ref={backInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="hidden"
+                          onChange={(e) => e.target.files?.[0] && handleAiCheckIn('back', e.target.files[0])}
+                        />
+                        <IdPhotoSlot
+                          label="Front side"
+                          hint="JPG, PNG, WebP · max 5 MB"
+                          previewUrl={frontPreview}
+                          scanning={scanning}
+                          onUpload={() => frontInputRef.current?.click()}
+                          onCamera={() => setCameraFor('front')}
+                          onRemove={() => setFrontFile(null)}
+                        />
+                        <IdPhotoSlot
+                          label="Back side (optional)"
+                          hint="Helps read the address"
+                          previewUrl={backPreview}
+                          scanning={scanning}
+                          onUpload={() => backInputRef.current?.click()}
+                          onCamera={() => setCameraFor('back')}
+                          onRemove={() => setBackFile(null)}
+                        />
                       </div>
                       {scanning && <p className="mt-2 text-xs text-royal-600">Scanning…</p>}
                       {scanNotice && <p className="mt-2 text-xs text-amber-600">{scanNotice}</p>}
@@ -934,6 +938,16 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
           </div>
         )}
       </Card>
+
+      {cameraFor && (
+        <CameraCapture
+          onCapture={(file) => {
+            handleAiCheckIn(cameraFor, file);
+            setCameraFor(null);
+          }}
+          onClose={() => setCameraFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -946,6 +960,65 @@ function SectionHeader({ icon, title, action }: { icon: string; title: string; a
         <h5 className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</h5>
       </div>
       {action}
+    </div>
+  );
+}
+
+// §user request — "upload hone ke baad picture bani aani chahiye" (thumbnail once picked/
+// captured) + "upload bhi ho sake aur real-time image bhi click kar sake" (an Upload button next
+// to a Camera one, not just one or the other).
+function IdPhotoSlot({
+  label,
+  hint,
+  previewUrl,
+  scanning,
+  onUpload,
+  onCamera,
+  onRemove,
+}: {
+  label: string;
+  hint: string;
+  previewUrl: string | null;
+  scanning: boolean;
+  onUpload: () => void;
+  onCamera: () => void;
+  onRemove: () => void;
+}) {
+  if (previewUrl) {
+    return (
+      <div className="relative overflow-hidden rounded-lg border border-slate-300">
+        <img src={previewUrl} alt={label} className="h-32 w-full object-cover" />
+        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 px-2 py-1.5">
+          <span className="text-xs font-semibold text-white">{label} ✓</span>
+          <button type="button" onClick={onRemove} className="text-xs font-semibold text-white underline">
+            Replace
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white p-4 text-center">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <span className="text-xs text-slate-400">{hint}</span>
+      <div className="mt-1 flex w-full gap-2">
+        <button
+          type="button"
+          onClick={onUpload}
+          disabled={scanning}
+          className="flex-1 rounded-lg border border-slate-300 py-1.5 text-xs font-semibold text-slate-600 hover:border-royal-400 disabled:opacity-60"
+        >
+          📁 Upload
+        </button>
+        <button
+          type="button"
+          onClick={onCamera}
+          disabled={scanning}
+          className="flex-1 rounded-lg border border-slate-300 py-1.5 text-xs font-semibold text-slate-600 hover:border-royal-400 disabled:opacity-60"
+        >
+          📷 Camera
+        </button>
+      </div>
     </div>
   );
 }
