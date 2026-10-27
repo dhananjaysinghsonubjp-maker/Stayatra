@@ -29,7 +29,7 @@ const RESPONSE_SCHEMA = {
 export class GeminiIdExtractor implements IdExtractor {
   private readonly logger = new Logger(GeminiIdExtractor.name);
   private readonly client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  private readonly model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  private readonly model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 
   async extract(images: IdImage[]): Promise<ExtractedIdDetails> {
     const hasBack = images.some((img) => img.side === 'back');
