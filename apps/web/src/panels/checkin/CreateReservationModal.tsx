@@ -116,13 +116,23 @@ export function CreateReservationModal({
   const [advanceAmount, setAdvanceAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('upi');
 
-  // §user request — "corporate booking vala nahi dala hai": bill the whole reservation to a
-  // company (GST input credit) right at creation, same billToCompany* fields the invoice view's
-  // own "Bill to company" already writes later — this just sets them from the start.
-  const [isCorporate, setIsCorporate] = useState(false);
+  // §user request — "corporate booking vala nahi dala hai", then "poora company details daalne
+  // ka option" with a reference app's own Individual/Company toggle as the target: picking
+  // Company reveals this full set (Tax ID type + number, company contact, address) instead of
+  // just name/GSTIN/address, and bills the whole reservation to it — same billToCompany* fields
+  // the invoice view's own "Bill to company" already writes later, just set from the start.
+  const [guestType, setGuestType] = useState<'individual' | 'company'>('individual');
+  const isCorporate = guestType === 'company';
   const [companyName, setCompanyName] = useState('');
+  const [companyTaxIdType, setCompanyTaxIdType] = useState('GSTIN');
   const [companyGstin, setCompanyGstin] = useState('');
+  const [companyPhone, setCompanyPhone] = useState('');
+  const [companyEmail, setCompanyEmail] = useState('');
   const [companyAddress, setCompanyAddress] = useState('');
+  const [companyCountry, setCompanyCountry] = useState('India');
+  const [companyState, setCompanyState] = useState('');
+  const [companyCity, setCompanyCity] = useState('');
+  const [companyPincode, setCompanyPincode] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,10 +158,17 @@ export function CreateReservationModal({
       setSpecialRequest(first.specialRequest ?? '');
       setGstMode(editGroup.every((b) => b.gstExempt) ? 'exempt' : 'exclusive');
       if (first.billToCompanyName) {
-        setIsCorporate(true);
+        setGuestType('company');
         setCompanyName(first.billToCompanyName);
+        setCompanyTaxIdType(first.billToCompanyTaxIdType ?? 'GSTIN');
         setCompanyGstin(first.billToCompanyGstin ?? '');
+        setCompanyPhone(first.billToCompanyPhone ?? '');
+        setCompanyEmail(first.billToCompanyEmail ?? '');
         setCompanyAddress(first.billToCompanyAddress ?? '');
+        setCompanyCountry(first.billToCompanyCountry ?? 'India');
+        setCompanyState(first.billToCompanyState ?? '');
+        setCompanyCity(first.billToCompanyCity ?? '');
+        setCompanyPincode(first.billToCompanyPincode ?? '');
       }
       const newPicked: PickedRoom[] = editGroup
         .filter((b) => b.assignedRoomId && allRooms.some((r) => r.id === b.assignedRoomId))
@@ -317,8 +334,15 @@ export function CreateReservationModal({
         guestEmail: guestEmail || undefined,
         specialRequest: specialRequest || undefined,
         companyName: isCorporate ? companyName.trim() : undefined,
+        companyTaxIdType: isCorporate ? companyTaxIdType : undefined,
         companyGstin: isCorporate ? companyGstin.trim() || undefined : undefined,
+        companyPhone: isCorporate ? companyPhone.trim() || undefined : undefined,
+        companyEmail: isCorporate ? companyEmail.trim() || undefined : undefined,
         companyAddress: isCorporate ? companyAddress.trim() || undefined : undefined,
+        companyCountry: isCorporate ? companyCountry.trim() || undefined : undefined,
+        companyState: isCorporate ? companyState.trim() || undefined : undefined,
+        companyCity: isCorporate ? companyCity.trim() || undefined : undefined,
+        companyPincode: isCorporate ? companyPincode.trim() || undefined : undefined,
         rooms: roomsWithBase.map((p) => ({
           roomId: p.room.id,
           totalAmount: p.base,
@@ -410,24 +434,62 @@ export function CreateReservationModal({
                 </Field>
               </div>
 
-              {/* §user request — "corporate booking vala nahi dala hai": bills the stay to a
-                  company (for their GST input credit) instead of the individual guest, settable
-                  right here at creation instead of only after the fact via the invoice view. */}
-              <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                <input type="checkbox" checked={isCorporate} onChange={(e) => setIsCorporate(e.target.checked)} />
-                🏢 Corporate Booking (bill to company)
-              </label>
+              {/* §user request — "corporate booking vala nahi dala hai", then a reference app's
+                  own Individual/Company toggle as the target: Individual is the ordinary flow
+                  unchanged; Company reveals the full company-billing form below and bills the
+                  whole reservation to it (for their GST input credit) instead of the guest. */}
+              <div className="mt-3 flex rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+                {(['individual', 'company'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setGuestType(t)}
+                    className={`flex-1 rounded-md py-1.5 text-xs font-semibold capitalize transition-colors ${
+                      guestType === t ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    {t === 'company' ? '🏢 Company' : '👤 Individual'}
+                  </button>
+                ))}
+              </div>
               {isCorporate && (
-                <div className="mt-2.5 grid grid-cols-1 gap-2.5 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40 sm:grid-cols-2">
-                  <Field label="Company name">
-                    <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" required />
+                <div className="mt-2.5 space-y-2.5 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40">
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    <Field label="Tax ID Type">
+                      <select className={inputClass} value={companyTaxIdType} onChange={(e) => setCompanyTaxIdType(e.target.value)}>
+                        <option value="GSTIN">GSTIN</option>
+                        <option value="PAN">PAN</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </Field>
+                    <Field label="Tax ID Number">
+                      <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="Enter Tax Identification Number" />
+                    </Field>
+                    <Field label="Company Name">
+                      <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" required />
+                    </Field>
+                    <Field label="Company Phone">
+                      <input className={inputClass} value={companyPhone} onChange={(e) => setCompanyPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit mobile" />
+                    </Field>
+                  </div>
+                  <Field label="Company Email">
+                    <input className={inputClass} type="email" value={companyEmail} onChange={(e) => setCompanyEmail(e.target.value)} />
                   </Field>
-                  <Field label="GSTIN">
-                    <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="15-digit GSTIN" />
+                  <Field label="Address">
+                    <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
                   </Field>
-                  <div className="sm:col-span-2">
-                    <Field label="Company address">
-                      <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
+                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                    <Field label="Country">
+                      <input className={inputClass} value={companyCountry} onChange={(e) => setCompanyCountry(e.target.value)} />
+                    </Field>
+                    <Field label="State">
+                      <input className={inputClass} value={companyState} onChange={(e) => setCompanyState(e.target.value)} />
+                    </Field>
+                    <Field label="City">
+                      <input className={inputClass} value={companyCity} onChange={(e) => setCompanyCity(e.target.value)} />
+                    </Field>
+                    <Field label="Pincode">
+                      <input className={inputClass} value={companyPincode} onChange={(e) => setCompanyPincode(e.target.value)} />
                     </Field>
                   </div>
                 </div>

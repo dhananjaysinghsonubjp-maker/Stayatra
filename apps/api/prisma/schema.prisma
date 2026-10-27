@@ -766,8 +766,17 @@ model Booking {
   // often decided only when the invoice is actually requested). Null = bill to the guest
   // (unchanged, existing behaviour); set = invoice's "Billed to" switches to the company.
   billToCompanyName    String? @map("bill_to_company_name")
+  // §user request — "Tax ID Type" dropdown (GSTIN/PAN/Other) alongside the number itself, instead
+  // of assuming every company's tax ID is a GSTIN.
+  billToCompanyTaxIdType String? @map("bill_to_company_tax_id_type")
   billToCompanyGstin   String? @map("bill_to_company_gstin")
+  billToCompanyPhone   String? @map("bill_to_company_phone")
+  billToCompanyEmail   String? @map("bill_to_company_email")
   billToCompanyAddress String? @map("bill_to_company_address")
+  billToCompanyCountry String? @map("bill_to_company_country")
+  billToCompanyState   String? @map("bill_to_company_state")
+  billToCompanyCity    String? @map("bill_to_company_city")
+  billToCompanyPincode String? @map("bill_to_company_pincode")
 
   hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   otaConnection OtaConnection? @relation(fields: [otaConnectionId], references: [id])

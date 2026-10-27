@@ -63,13 +63,22 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   const [city, setCity] = useState('');
   const [pincode, setPincode] = useState('');
   const [purposeOfStay, setPurposeOfStay] = useState('');
-  // §user request — "corporate booking vala nahi dala hai": bills the stay to a company (for
-  // their GST input credit) right at check-in, same billToCompany* fields the invoice view's own
-  // "Bill to company" already writes later.
-  const [isCorporate, setIsCorporate] = useState(false);
+  // §user request — "corporate booking vala nahi dala hai", then "poora company details daalne
+  // ka option" with a reference app's own Individual/Company toggle as the target: bills the
+  // stay to a company (for their GST input credit) right at check-in, same billToCompany* fields
+  // the invoice view's own "Bill to company" already writes later.
+  const [guestType, setGuestType] = useState<'individual' | 'company'>('individual');
+  const isCorporate = guestType === 'company';
   const [companyName, setCompanyName] = useState('');
+  const [companyTaxIdType, setCompanyTaxIdType] = useState('GSTIN');
   const [companyGstin, setCompanyGstin] = useState('');
+  const [companyPhone, setCompanyPhone] = useState('');
+  const [companyEmail, setCompanyEmail] = useState('');
   const [companyAddress, setCompanyAddress] = useState('');
+  const [companyCountry, setCompanyCountry] = useState('India');
+  const [companyState, setCompanyState] = useState('');
+  const [companyCity, setCompanyCity] = useState('');
+  const [companyPincode, setCompanyPincode] = useState('');
   const [idType, setIdType] = useState<IdType>('aadhaar');
   const [idNumber, setIdNumber] = useState('');
   const [idPhotoPath, setIdPhotoPath] = useState<string | undefined>(undefined);
@@ -344,8 +353,15 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
         idPhotoPath,
         purposeOfStay: purposeOfStay || undefined,
         companyName: isCorporate ? companyName.trim() : undefined,
+        companyTaxIdType: isCorporate ? companyTaxIdType : undefined,
         companyGstin: isCorporate ? companyGstin.trim() || undefined : undefined,
+        companyPhone: isCorporate ? companyPhone.trim() || undefined : undefined,
+        companyEmail: isCorporate ? companyEmail.trim() || undefined : undefined,
         companyAddress: isCorporate ? companyAddress.trim() || undefined : undefined,
+        companyCountry: isCorporate ? companyCountry.trim() || undefined : undefined,
+        companyState: isCorporate ? companyState.trim() || undefined : undefined,
+        companyCity: isCorporate ? companyCity.trim() || undefined : undefined,
+        companyPincode: isCorporate ? companyPincode.trim() || undefined : undefined,
       };
       const invoiceExtras = {
         lineItems: draft.lineItems.map((li) => ({ description: li.description, quantity: li.quantity, unitPrice: li.unitPrice })),
@@ -677,23 +693,60 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                     </select>
                   </Field>
 
-                  {/* §user request — "corporate booking vala nahi dala hai": bills the stay to a
-                      company (for their GST input credit) right at check-in. */}
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-                    <input type="checkbox" checked={isCorporate} onChange={(e) => setIsCorporate(e.target.checked)} />
-                    🏢 Corporate Booking (bill to company)
-                  </label>
+                  {/* §user request — "corporate booking vala nahi dala hai", then a reference
+                      app's own Individual/Company toggle as the target: Company reveals the full
+                      company-billing form below and bills the stay to it (for their GST input
+                      credit) right at check-in. */}
+                  <div className="flex rounded-lg bg-slate-100 p-1">
+                    {(['individual', 'company'] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setGuestType(t)}
+                        className={`flex-1 rounded-md py-1.5 text-xs font-semibold capitalize transition-colors ${guestType === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                      >
+                        {t === 'company' ? '🏢 Company' : '👤 Individual'}
+                      </button>
+                    ))}
+                  </div>
                   {isCorporate && (
-                    <div className="grid grid-cols-1 gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-2">
-                      <Field label="Company name">
-                        <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" required />
+                    <div className="space-y-3 rounded-lg bg-slate-50 p-3">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <Field label="Tax ID Type">
+                          <select className={inputClass} value={companyTaxIdType} onChange={(e) => setCompanyTaxIdType(e.target.value)}>
+                            <option value="GSTIN">GSTIN</option>
+                            <option value="PAN">PAN</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </Field>
+                        <Field label="Tax ID Number">
+                          <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="Enter Tax Identification Number" />
+                        </Field>
+                        <Field label="Company Name">
+                          <input className={inputClass} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" required />
+                        </Field>
+                        <Field label="Company Phone">
+                          <input className={inputClass} value={companyPhone} onChange={(e) => setCompanyPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit mobile" />
+                        </Field>
+                      </div>
+                      <Field label="Company Email">
+                        <input className={inputClass} type="email" value={companyEmail} onChange={(e) => setCompanyEmail(e.target.value)} />
                       </Field>
-                      <Field label="GSTIN">
-                        <input className={inputClass} value={companyGstin} onChange={(e) => setCompanyGstin(e.target.value)} placeholder="15-digit GSTIN" />
+                      <Field label="Address">
+                        <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
                       </Field>
-                      <div className="sm:col-span-2">
-                        <Field label="Company address">
-                          <textarea className={`${inputClass} min-h-14`} value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <Field label="Country">
+                          <input className={inputClass} value={companyCountry} onChange={(e) => setCompanyCountry(e.target.value)} />
+                        </Field>
+                        <Field label="State">
+                          <input className={inputClass} value={companyState} onChange={(e) => setCompanyState(e.target.value)} />
+                        </Field>
+                        <Field label="City">
+                          <input className={inputClass} value={companyCity} onChange={(e) => setCompanyCity(e.target.value)} />
+                        </Field>
+                        <Field label="Pincode">
+                          <input className={inputClass} value={companyPincode} onChange={(e) => setCompanyPincode(e.target.value)} />
                         </Field>
                       </div>
                     </div>

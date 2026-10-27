@@ -63,11 +63,20 @@ const lineItemsAtCheckInSchema = z
 
 // §user request — "corporate booking vala nahi dala hai": bill the stay to a company (for their
 // GST input credit) right from reservation/check-in creation, instead of only after the fact via
-// the invoice view's own "Bill to company" (bookings.setCompanyBilling) — same three fields.
+// the invoice view's own "Bill to company" (bookings.setCompanyBilling). Expanded to the full
+// field set a reference app's own "Corporate Booking" panel collects — a full Tax ID + company
+// contact + address, not just name/GSTIN/address.
 const companyBillingSchema = {
   companyName: z.string().optional(),
+  companyTaxIdType: z.string().optional(),
   companyGstin: z.string().optional(),
+  companyPhone: z.string().optional(),
+  companyEmail: z.string().optional(),
   companyAddress: z.string().optional(),
+  companyCountry: z.string().optional(),
+  companyState: z.string().optional(),
+  companyCity: z.string().optional(),
+  companyPincode: z.string().optional(),
 };
 
 // Shared by createMultiRoomReservation and updateReservationGroup — one room per Booking row,

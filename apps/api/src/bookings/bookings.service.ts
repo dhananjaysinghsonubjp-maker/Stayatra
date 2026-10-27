@@ -187,8 +187,15 @@ export class BookingsService {
     // §user request — "corporate booking vala nahi dala hai": set right at creation, applied to
     // every room in the group (same billToCompany* columns setCompanyBilling already uses).
     companyName?: string;
+    companyTaxIdType?: string;
     companyGstin?: string;
+    companyPhone?: string;
+    companyEmail?: string;
     companyAddress?: string;
+    companyCountry?: string;
+    companyState?: string;
+    companyCity?: string;
+    companyPincode?: string;
     actorId: string;
   }) {
     if (input.rooms.length === 0) throw new BadRequestException('Select at least one room');
@@ -261,8 +268,15 @@ export class BookingsService {
             paidAmount: share > 0 ? share : undefined,
             paymentMethod: share > 0 ? input.paymentMethod : undefined,
             billToCompanyName: input.companyName,
+            billToCompanyTaxIdType: input.companyName ? input.companyTaxIdType : undefined,
             billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
+            billToCompanyPhone: input.companyName ? input.companyPhone : undefined,
+            billToCompanyEmail: input.companyName ? input.companyEmail : undefined,
             billToCompanyAddress: input.companyName ? input.companyAddress : undefined,
+            billToCompanyCountry: input.companyName ? input.companyCountry : undefined,
+            billToCompanyState: input.companyName ? input.companyState : undefined,
+            billToCompanyCity: input.companyName ? input.companyCity : undefined,
+            billToCompanyPincode: input.companyName ? input.companyPincode : undefined,
           },
         });
         // §user request — the same "+ Add Extra Charges" line items check-in already supports
@@ -351,8 +365,15 @@ export class BookingsService {
       checkOut?: Date;
     }[];
     companyName?: string;
+    companyTaxIdType?: string;
     companyGstin?: string;
+    companyPhone?: string;
+    companyEmail?: string;
     companyAddress?: string;
+    companyCountry?: string;
+    companyState?: string;
+    companyCity?: string;
+    companyPincode?: string;
     actorId: string;
   }) {
     if (input.rooms.length === 0) throw new BadRequestException('Select at least one room');
@@ -434,8 +455,15 @@ export class BookingsService {
           gstExempt: r.gstExempt ?? false,
           source: input.source,
           billToCompanyName: input.companyName,
+          billToCompanyTaxIdType: input.companyName ? input.companyTaxIdType : undefined,
           billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
+          billToCompanyPhone: input.companyName ? input.companyPhone : undefined,
+          billToCompanyEmail: input.companyName ? input.companyEmail : undefined,
           billToCompanyAddress: input.companyName ? input.companyAddress : undefined,
+          billToCompanyCountry: input.companyName ? input.companyCountry : undefined,
+          billToCompanyState: input.companyName ? input.companyState : undefined,
+          billToCompanyCity: input.companyName ? input.companyCity : undefined,
+          billToCompanyPincode: input.companyName ? input.companyPincode : undefined,
         };
         let booking;
         if (prior) {
@@ -503,8 +531,15 @@ export class BookingsService {
       discountAmount?: number;
       gstExempt?: boolean;
       companyName?: string;
+      companyTaxIdType?: string;
       companyGstin?: string;
+      companyPhone?: string;
+      companyEmail?: string;
       companyAddress?: string;
+      companyCountry?: string;
+      companyState?: string;
+      companyCity?: string;
+      companyPincode?: string;
       actorId: string;
     },
   ) {
@@ -558,8 +593,15 @@ export class BookingsService {
           checkedInAt: new Date(),
           source: 'walk_in',
           billToCompanyName: input.companyName,
+          billToCompanyTaxIdType: input.companyName ? input.companyTaxIdType : undefined,
           billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
+          billToCompanyPhone: input.companyName ? input.companyPhone : undefined,
+          billToCompanyEmail: input.companyName ? input.companyEmail : undefined,
           billToCompanyAddress: input.companyName ? input.companyAddress : undefined,
+          billToCompanyCountry: input.companyName ? input.companyCountry : undefined,
+          billToCompanyState: input.companyName ? input.companyState : undefined,
+          billToCompanyCity: input.companyName ? input.companyCity : undefined,
+          billToCompanyPincode: input.companyName ? input.companyPincode : undefined,
         },
       });
       if (input.lineItems?.length) {
@@ -645,8 +687,15 @@ export class BookingsService {
       nights?: number;
       totalAmount?: number;
       companyName?: string;
+      companyTaxIdType?: string;
       companyGstin?: string;
+      companyPhone?: string;
+      companyEmail?: string;
       companyAddress?: string;
+      companyCountry?: string;
+      companyState?: string;
+      companyCity?: string;
+      companyPincode?: string;
       actorId: string;
     },
   ) {
@@ -705,8 +754,15 @@ export class BookingsService {
           // Undefined (not passed) leaves whatever was already set at reservation time untouched
           // — only an explicit companyName here overwrites it, same as every other optional field.
           billToCompanyName: input.companyName,
+          billToCompanyTaxIdType: input.companyName ? input.companyTaxIdType : undefined,
           billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
+          billToCompanyPhone: input.companyName ? input.companyPhone : undefined,
+          billToCompanyEmail: input.companyName ? input.companyEmail : undefined,
           billToCompanyAddress: input.companyName ? input.companyAddress : undefined,
+          billToCompanyCountry: input.companyName ? input.companyCountry : undefined,
+          billToCompanyState: input.companyName ? input.companyState : undefined,
+          billToCompanyCity: input.companyName ? input.companyCity : undefined,
+          billToCompanyPincode: input.companyName ? input.companyPincode : undefined,
         },
       });
       if (input.lineItems?.length) {

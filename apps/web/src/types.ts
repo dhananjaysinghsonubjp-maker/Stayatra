@@ -178,8 +178,15 @@ export interface Booking {
    * to" from the individual guest to this company (for their GST input credit). Null = bill to
    * the guest, unchanged. */
   billToCompanyName: string | null;
+  billToCompanyTaxIdType: string | null;
   billToCompanyGstin: string | null;
+  billToCompanyPhone: string | null;
+  billToCompanyEmail: string | null;
   billToCompanyAddress: string | null;
+  billToCompanyCountry: string | null;
+  billToCompanyState: string | null;
+  billToCompanyCity: string | null;
+  billToCompanyPincode: string | null;
   payments?: Payment[];
   lineItems?: InvoiceLineItem[];
   /** Co-occupants sharing this room (not separate bookings) — "Total Guests" is 1 (the primary
