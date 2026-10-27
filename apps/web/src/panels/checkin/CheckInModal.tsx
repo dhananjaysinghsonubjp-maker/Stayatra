@@ -487,9 +487,19 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
         }`}
       >
         {step !== 3 && (
-          <div className="mb-4 flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-slate-900">{title_}</h4>
-            {room?.roomCategory && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{room.roomCategory.name}</span>}
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h4 className="min-w-0 truncate text-sm font-semibold text-slate-900">{title_}</h4>
+            {/* §user request — "upar jo Suite likha hai vaha ek cross hona chahiye jo check in
+                band karde, smoothly right-swipe hokar close ho": a close button in the slide-over's
+                own header, same handleClose used by the Cancel button lower down. */}
+            <button
+              type="button"
+              onClick={handleClose}
+              aria-label="Close check-in"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            >
+              ✕
+            </button>
           </div>
         )}
 
