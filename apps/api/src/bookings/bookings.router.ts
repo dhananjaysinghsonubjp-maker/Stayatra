@@ -113,6 +113,7 @@ const guestDetailsSchema = {
   idType: idTypeSchema,
   idNumber: z.string().min(1),
   idPhotoPath: z.string().optional(),
+  idPhotoBackPath: z.string().optional(),
   purposeOfStay: z.string().optional(),
 };
 

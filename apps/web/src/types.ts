@@ -116,6 +116,7 @@ export interface Guest {
   idType: IdType | null;
   idNumber: string | null;
   idPhotoPath: string | null;
+  idPhotoBackPath: string | null;
 }
 
 export interface InvoiceLineItem {

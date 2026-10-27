@@ -31,6 +31,7 @@ export interface CheckInGuestDetails {
   idType: IdType;
   idNumber: string;
   idPhotoPath?: string;
+  idPhotoBackPath?: string;
 }
 
 @Injectable()
@@ -67,6 +68,7 @@ export class BookingsService {
       idType: details.idType,
       idNumber: details.idNumber,
       idPhotoPath: details.idPhotoPath,
+      idPhotoBackPath: details.idPhotoBackPath,
     });
     return id;
   }

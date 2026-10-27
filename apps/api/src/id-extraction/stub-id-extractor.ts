@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ExtractedIdDetails, IdExtractor } from './id-extractor.interface.js';
+import type { ExtractedIdDetails, IdExtractor, IdImage } from './id-extractor.interface.js';
 
 /**
  * "AI Check-in" without a real ANTHROPIC_API_KEY configured (§ — added beyond
@@ -12,7 +12,7 @@ import type { ExtractedIdDetails, IdExtractor } from './id-extractor.interface.j
 export class StubIdExtractor implements IdExtractor {
   private readonly logger = new Logger(StubIdExtractor.name);
 
-  async extract(): Promise<ExtractedIdDetails> {
+  async extract(_images: IdImage[]): Promise<ExtractedIdDetails> {
     this.logger.log('[SIMULATED] ID extraction — no ANTHROPIC_API_KEY configured, returning stub data');
     return {
       name: 'Sample Guest (stub — set ANTHROPIC_API_KEY for real extraction)',

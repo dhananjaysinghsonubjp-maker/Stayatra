@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { mutate, query, uploadFile, ApiError } from '../../api';
+import { mutate, query, uploadFiles, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
@@ -82,13 +82,21 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   const [idType, setIdType] = useState<IdType>('aadhaar');
   const [idNumber, setIdNumber] = useState('');
   const [idPhotoPath, setIdPhotoPath] = useState<string | undefined>(undefined);
+  const [idPhotoBackPath, setIdPhotoBackPath] = useState<string | undefined>(undefined);
 
   // guest search / autofill
   const [matches, setMatches] = useState<Guest[]>([]);
   const [searching, setSearching] = useState(false);
 
-  // AI check-in
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // §user request — "front and back dono upload, AI dono se saari details (naam, gender, DOB,
+  // address, state, pincode, country, aadhaar number) fill kare, bas phone number hum khud type
+  // karenge": one upload slot per side, re-running extraction across whatever side(s) are
+  // present each time a new one is added (so front-only still autofills immediately, and adding
+  // back later refines/fills in the rest — address especially, which Aadhaar prints on the back).
+  const frontInputRef = useRef<HTMLInputElement>(null);
+  const backInputRef = useRef<HTMLInputElement>(null);
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [backFile, setBackFile] = useState<File | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
 
@@ -245,18 +253,27 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
     setMatches([]);
   }
 
-  async function handleAiCheckIn(file: File) {
+  async function handleAiCheckIn(side: 'front' | 'back', file: File) {
+    const nextFront = side === 'front' ? file : frontFile;
+    const nextBack = side === 'back' ? file : backFile;
+    if (side === 'front') setFrontFile(file);
+    else setBackFile(file);
+    if (!nextFront) return; // back uploaded before front — nothing to scan yet
+
     setScanning(true);
     setScanNotice(null);
     setError(null);
     try {
-      const result = await uploadFile<{ filePath: string; extracted: Record<string, string> & { confidence: string } }>(
+      const files: Record<string, File> = { front: nextFront };
+      if (nextBack) files.back = nextBack;
+      const result = await uploadFiles<{ filePath: string; backFilePath?: string; extracted: Record<string, string> & { confidence: string } }>(
         'uploads/id-scan',
-        file,
+        files,
         token ?? undefined,
       );
-      const { extracted, filePath } = result;
+      const { extracted, filePath, backFilePath } = result;
       setIdPhotoPath(filePath);
+      if (backFilePath) setIdPhotoBackPath(backFilePath);
       if (extracted.name) setGuestName(extracted.name);
       if (extracted.gender) setGender(extracted.gender as Gender);
       if (extracted.dateOfBirth) setDateOfBirth(extracted.dateOfBirth);
@@ -365,6 +382,7 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
         idType,
         idNumber,
         idPhotoPath,
+        idPhotoBackPath,
         purposeOfStay: purposeOfStay || undefined,
         companyName: isCorporate ? companyName.trim() : undefined,
         companyTaxIdType: isCorporate ? companyTaxIdType : undefined,
@@ -465,8 +483,8 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
           </div>
         )}
 
-        {/* §user request — "steps by room type ek particular box ho, properly section-wise":
-            1. Room  2. AI Check-in  3. Guest details, each its own card, in that order. */}
+        {/* §user request — "steps by room type ek particular box ho, properly section-wise": Room
+            and Guest details (ID upload folded into the latter, not its own box) as separate cards. */}
         {step === 1 && (
           <>
             {room && !reservation && (
@@ -608,25 +626,9 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                   record now, regardless of how the stay was booked. */}
               {(mode === 'new' || (mode === 'existing' && selectedReservation)) && (
                 <>
-                  {/* 2. AI Check-in — its own box, separate from the guest-detail fields below. */}
-                  <Card className="border-slate-200 p-4">
-                    <SectionHeader icon="✨" title="AI Check-in" />
-                    <div className="flex items-center gap-3 rounded-lg border border-dashed border-slate-300 p-3">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        onChange={(e) => e.target.files?.[0] && handleAiCheckIn(e.target.files[0])}
-                      />
-                      <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={scanning}>
-                        {scanning ? 'Scanning…' : '✨ Scan guest ID'}
-                      </Button>
-                      {scanNotice && <p className="text-xs text-amber-600">{scanNotice}</p>}
-                    </div>
-                  </Card>
-
-                  {/* 3. Guest details */}
+                  {/* §user request — "ID upload vala feature alag se nahi, guest details mein hi
+                      merge ho, jaise SS mein hai": folded into this one card instead of its own
+                      "AI Check-in" box. */}
                   <Card className="border-slate-200 p-4">
                     <SectionHeader
                       icon="🧑"
@@ -649,6 +651,71 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                         </div>
                       }
                     />
+
+                    {/* §user request — "front and back dono upload, AI dono se saari details
+                        (naam, gender, DOB, address, state, pincode, country, aadhaar number) fill
+                        kare, bas phone number hum khud type karenge": re-scans on each side added. */}
+                    <div className="mb-4 rounded-lg border border-dashed border-slate-300 bg-slate-50/60 p-3">
+                      <p className="text-sm font-bold text-slate-900">Guest Identification (OCR)</p>
+                      <p className="mb-3 text-xs text-slate-400">Upload a government-issued ID to automatically extract and fill guest details</p>
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        {ID_TYPES.map((t) => (
+                          <button
+                            key={t.value}
+                            type="button"
+                            onClick={() => setIdType(t.value)}
+                            className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition-colors ${
+                              idType === t.value ? 'bg-royal-600 text-white ring-royal-600' : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <input
+                            ref={frontInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            onChange={(e) => e.target.files?.[0] && handleAiCheckIn('front', e.target.files[0])}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => frontInputRef.current?.click()}
+                            disabled={scanning}
+                            className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white py-5 text-center hover:border-royal-400 disabled:opacity-60"
+                          >
+                            <span className="text-lg">⬆️</span>
+                            <span className="text-sm font-semibold text-slate-700">Front side{frontFile ? ' ✓' : ''}</span>
+                            <span className="text-xs text-slate-400">Drop or click to upload · JPG, PNG</span>
+                          </button>
+                        </div>
+                        <div>
+                          <input
+                            ref={backInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            onChange={(e) => e.target.files?.[0] && handleAiCheckIn('back', e.target.files[0])}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => backInputRef.current?.click()}
+                            disabled={scanning}
+                            className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white py-5 text-center hover:border-royal-400 disabled:opacity-60"
+                          >
+                            <span className="text-lg">⬆️</span>
+                            <span className="text-sm font-semibold text-slate-700">Back side (optional){backFile ? ' ✓' : ''}</span>
+                            <span className="text-xs text-slate-400">Helps read the address</span>
+                          </button>
+                        </div>
+                      </div>
+                      {scanning && <p className="mt-2 text-xs text-royal-600">Scanning…</p>}
+                      {scanNotice && <p className="mt-2 text-xs text-amber-600">{scanNotice}</p>}
+                      <p className="mt-2 text-[11px] text-slate-400">Max 5 MB per side</p>
+                    </div>
 
                     <div className="space-y-4">
                       <div>
@@ -739,20 +806,11 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                         </Field>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3">
-                        <Field label="ID type">
-                          <select className={inputClass} value={idType} onChange={(e) => setIdType(e.target.value as IdType)}>
-                            {ID_TYPES.map((t) => (
-                              <option key={t.value} value={t.value}>
-                                {t.label}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label="ID number">
-                          <input className={inputClass} value={idNumber} onChange={(e) => setIdNumber(e.target.value)} required />
-                        </Field>
-                      </div>
+                      {/* ID type itself is the pill row above (Guest Identification) — just the
+                          number stays here, editable after OCR fills it (or typed manually). */}
+                      <Field label="ID number">
+                        <input className={inputClass} value={idNumber} onChange={(e) => setIdNumber(e.target.value)} required />
+                      </Field>
 
                       <Field label="Purpose of stay *">
                         <select className={inputClass} value={purposeOfStay} onChange={(e) => setPurposeOfStay(e.target.value)} required>

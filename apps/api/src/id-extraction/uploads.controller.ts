@@ -1,5 +1,5 @@
-import { Controller, Post, UploadedFile, UseInterceptors, Inject, UnauthorizedException, Headers, BadRequestException } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Controller, Post, UploadedFile, UploadedFiles, UseInterceptors, Inject, UnauthorizedException, Headers, BadRequestException } from '@nestjs/common';
+import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import type {} from 'multer'; // side-effect import: activates the global Express.Multer.File augmentation
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -39,13 +39,26 @@ export class UploadsController {
     return path.join('uploads', subdir, filename);
   }
 
+  // §user request — "aadhaar front and back dono upload, AI dono se details padhe": front is
+  // required, back optional; re-sent (with front again) once the back photo is added too, so
+  // extraction always runs across whatever sides are available at that moment.
   @Post('id-scan')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
-  async uploadIdScan(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'front', maxCount: 1 }, { name: 'back', maxCount: 1 }], { limits: { fileSize: MAX_BYTES } }))
+  async uploadIdScan(
+    @UploadedFiles() files: { front?: Express.Multer.File[]; back?: Express.Multer.File[] },
+    @Headers('authorization') authHeader?: string,
+  ) {
     await this.requireUser(authHeader);
-    const filePath = await this.save('id-scans', file);
-    const extracted = await this.extractor.extract(file.buffer, file.mimetype);
-    return { filePath, extracted };
+    const front = files.front?.[0];
+    const back = files.back?.[0];
+    if (!front) throw new BadRequestException('Front side photo is required');
+
+    const [filePath, backFilePath] = await Promise.all([this.save('id-scans', front), back ? this.save('id-scans', back) : Promise.resolve(undefined)]);
+    const extracted = await this.extractor.extract([
+      { buffer: front.buffer, mimeType: front.mimetype, side: 'front' },
+      ...(back ? [{ buffer: back.buffer, mimeType: back.mimetype, side: 'back' as const }] : []),
+    ]);
+    return { filePath, backFilePath, extracted };
   }
 
   /** No AI extraction — just storage, for payment receipt photos (§ added beyond MD spec). */

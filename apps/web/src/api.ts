@@ -76,10 +76,16 @@ function fieldLabel(key: string): string {
   return key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()).trim();
 }
 
-// Outside tRPC (multipart) — see apps/api/src/id-extraction/id-scan.controller.ts.
+// Outside tRPC (multipart) — see apps/api/src/id-extraction/uploads.controller.ts.
 export async function uploadFile<T = unknown>(path: string, file: File, token?: string): Promise<T> {
+  return uploadFiles<T>(path, { file }, token);
+}
+
+// §user request — "aadhaar front and back dono upload": multiple named file fields in one
+// multipart request, e.g. { front, back } for uploads/id-scan.
+export async function uploadFiles<T = unknown>(path: string, files: Record<string, File>, token?: string): Promise<T> {
   const form = new FormData();
-  form.append('file', file);
+  for (const [field, file] of Object.entries(files)) form.append(field, file);
   const res = await fetch(`${API_ORIGIN}/${path}`, { method: 'POST', headers: authHeader(token), body: form });
   const json = await res.json();
   if (!res.ok) throw new ApiError(json.message ?? 'Upload failed');

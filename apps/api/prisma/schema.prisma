@@ -664,6 +664,9 @@ model Guest {
   idType      IdType?   @map("id_type")
   idNumber    String?   @map("id_number")
   idPhotoPath String?   @map("id_photo_path") // local disk path (dev) — would move to S3 in production per §3
+  // §user request — "aadhaar front and back dono upload, AI dono se details padhe (address
+  // khaas kar back side se)": idPhotoPath above now means "front"; this is the second side.
+  idPhotoBackPath String? @map("id_photo_back_path")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 

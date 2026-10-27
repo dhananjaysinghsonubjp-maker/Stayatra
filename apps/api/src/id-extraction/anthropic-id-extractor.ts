@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
-import type { ExtractedIdDetails, IdExtractor } from './id-extractor.interface.js';
+import type { ExtractedIdDetails, IdExtractor, IdImage } from './id-extractor.interface.js';
 
 const EXTRACT_TOOL = {
   name: 'record_id_details',
@@ -34,7 +34,8 @@ export class AnthropicIdExtractor implements IdExtractor {
   private readonly logger = new Logger(AnthropicIdExtractor.name);
   private readonly client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  async extract(imageBuffer: Buffer, mimeType: string): Promise<ExtractedIdDetails> {
+  async extract(images: IdImage[]): Promise<ExtractedIdDetails> {
+    const hasBack = images.some((img) => img.side === 'back');
     const message = await this.client.messages.create({
       model: 'claude-sonnet-5',
       max_tokens: 1024,
@@ -44,13 +45,18 @@ export class AnthropicIdExtractor implements IdExtractor {
         {
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mimeType as 'image/jpeg' | 'image/png' | 'image/webp', data: imageBuffer.toString('base64') },
-            },
+            ...images.map(
+              (img) =>
+                ({
+                  type: 'image' as const,
+                  source: { type: 'base64' as const, media_type: img.mimeType as 'image/jpeg' | 'image/png' | 'image/webp', data: img.buffer.toString('base64') },
+                }) satisfies Anthropic.ImageBlockParam,
+            ),
             {
               type: 'text',
-              text: 'This is a photo of a guest ID document at hotel check-in. Extract the fields into record_id_details. Leave a field out if it is not legible or not present — never guess.',
+              text: hasBack
+                ? 'These are front and back photos of a guest ID document at hotel check-in. Extract the fields into record_id_details, combining both sides — many Indian IDs (e.g. Aadhaar) print the address only on the back. Leave a field out if it is not legible or not present on either side — never guess.'
+                : 'This is a photo of a guest ID document at hotel check-in. Extract the fields into record_id_details. Leave a field out if it is not legible or not present — never guess.',
             },
           ],
         },

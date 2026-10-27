@@ -17,6 +17,7 @@ export interface GuestDetails {
   idType?: IdType;
   idNumber?: string;
   idPhotoPath?: string;
+  idPhotoBackPath?: string;
 }
 
 @Injectable()
@@ -57,6 +58,7 @@ export class GuestsService {
       idType: details.idType,
       idNumber: details.idNumber,
       idPhotoPath: details.idPhotoPath,
+      idPhotoBackPath: details.idPhotoBackPath,
     };
 
     if (details.guestId) {
