@@ -101,6 +101,20 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // §user request, with a reference app's own slide-over as the target, matching Create
+  // Reservation's own treatment — opens as a right-side panel on desktop (bottom sheet on
+  // phone) instead of a centered dialog, sliding in smoothly instead of just appearing.
+  const [entered, setEntered] = useState(false);
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  function handleClose() {
+    setClosing(true);
+    setTimeout(onClose, 220);
+  }
+
   // existing-reservation mode
   const [upcoming, setUpcoming] = useState<Booking[]>([]);
   const [selectedReservationId, setSelectedReservationId] = useState(reservation?.id ?? '');
@@ -425,12 +439,19 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   return (
     // z-[60] — matches RoomPickerModal's precedent for a modal that must paint above another
     // z-50 modal (ReservationDetailModal nests this one; z-10 used to lose the stacking fight).
-    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-900/40 px-4 py-8">
+    // §user request, with a reference app's own slide-over as the target, matching Create
+    // Reservation's own treatment — right-side panel on desktop, bottom sheet on phone, sliding
+    // in smoothly instead of appearing instantly.
+    <div className={`fixed inset-0 z-[60] overflow-y-auto bg-slate-900/40 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}>
       {/* No click-outside-to-close here on purpose: this is a long, multi-step
           form (guest details + payment), and a stray click just past the
           card's edge used to silently discard everything typed so far with
           no confirmation. Leaving via "Cancel"/"Cancel check-in" is explicit. */}
-      <Card className="w-full max-w-2xl p-5">
+      <Card
+        className={`fixed inset-x-0 bottom-0 flex max-h-[92vh] w-full flex-col overflow-y-auto rounded-b-none rounded-t-2xl p-5 shadow-2xl transition-transform duration-300 ease-out sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-full sm:w-full sm:max-w-2xl sm:rounded-none ${
+          entered && !closing ? 'translate-y-0 sm:translate-x-0' : 'translate-y-full sm:translate-y-0 sm:translate-x-full'
+        }`}
+      >
         {step !== 3 && (
           <>
             <div className="mb-4 flex items-center justify-between">
@@ -772,7 +793,7 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
               {error && <p className="text-sm text-red-600">{error}</p>}
 
               <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="secondary" onClick={onClose}>
+                <Button type="button" variant="secondary" onClick={handleClose}>
                   Cancel
                 </Button>
                 <Button type="submit" variant="royal">Next · Payment</Button>
@@ -789,7 +810,7 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
               totalAmount={totalAmount}
               alreadyPaid={mode === 'existing' ? Number(selectedReservation?.paidAmount ?? 0) : 0}
               onBack={() => setStep(1)}
-              onClose={onClose}
+              onClose={handleClose}
               onComplete={completeCheckIn}
               busy={busy}
             />
