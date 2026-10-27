@@ -55,15 +55,52 @@ function HamburgerButton({ tone, onClick }: { tone?: 'light' | 'dark'; onClick: 
   );
 }
 
+// §bugfix — "refresh karu toh 1 sec ke liye hotel-registration (map/address) screen dikhti hai
+// phir Dashboard pe switch ho jata hai": `hotel` started as null, and `!hotel` was read as "this
+// account has no property yet, show Onboarding" — true at the very start of every page load too,
+// before the fetch below has even had a chance to resolve. A dedicated loading flag (distinct
+// from "confirmed no hotel") keeps the screen on the same neutral loader `loading` below already
+// uses, until the fetch actually answers the question.
+const TAB_STORAGE_KEY = 'stayyatra.activeTab';
+
 function Shell() {
   const { token, user, loading, logout, role } = useAuth();
   const [hotel, setHotel] = useState<Hotel | null>(null);
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [hotelLoading, setHotelLoading] = useState(true);
+  // §bugfix — "refresh karu toh dashboard pe land karta hu, jis page pe tha vahi nahi rehta":
+  // this was plain in-memory state with nothing to restore it from on a fresh page load.
+  // Persisted across refreshes (not across logins — cleared in handleLogout below); still just
+  // local state otherwise; see visibleTabs below for what happens if a restored tab turns out not
+  // to be valid for this account (e.g. role changed, or a different account on the same browser).
+  const [tab, setTab] = useState<Tab>(() => {
+    try {
+      return (localStorage.getItem(TAB_STORAGE_KEY) as Tab | null) ?? 'dashboard';
+    } catch {
+      return 'dashboard';
+    }
+  });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Set by OTA Reviews' "Message" action (§ user request) — carries which guest's thread
   // Guest Messaging should open straight into, since tab switches here are just local state
   // with no routing/URL params to pass that through another way.
   const [pendingMessageBookingId, setPendingMessageBookingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TAB_STORAGE_KEY, tab);
+    } catch {
+      // private-browsing/storage-blocked — the tab just won't survive a refresh, nothing else breaks.
+    }
+  }, [tab]);
+
+  function handleLogout() {
+    try {
+      localStorage.removeItem(TAB_STORAGE_KEY);
+    } catch {
+      // see above
+    }
+    logout();
+  }
 
   useEffect(() => {
     // Reset immediately on every user change — otherwise a brand-new owner with no
@@ -72,13 +109,16 @@ function Shell() {
     // of the "List Your Property" wizard) until/unless the fetch below happened to
     // resolve to a non-empty result.
     setHotel(null);
+    setHotelLoading(true);
     if (!user) return;
+    const finish = (h: Hotel | null) => {
+      setHotel(h);
+      setHotelLoading(false);
+    };
     if (user.hotelId) {
-      query<Hotel>('hotels.get', { hotelId: user.hotelId }, token ?? undefined).then(setHotel);
+      query<Hotel>('hotels.get', { hotelId: user.hotelId }, token ?? undefined).then(finish);
     } else {
-      query<Hotel[]>('hotels.list', undefined, token ?? undefined).then((hotels) => {
-        setHotel(hotels[0] ?? null);
-      });
+      query<Hotel[]>('hotels.list', undefined, token ?? undefined).then((hotels) => finish(hotels[0] ?? null));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
@@ -95,7 +135,7 @@ function Shell() {
   }, [hotel?.fontFamily]);
 
   if (!token) return <LoginPanel />;
-  if (loading) {
+  if (loading || hotelLoading) {
     return (
       <div className="flex h-screen items-center justify-center text-sm text-slate-400 dark:text-slate-500">Loading…</div>
     );
@@ -134,7 +174,7 @@ function Shell() {
   // role shares. Bypasses visibleTabs/Sidebar/the top bar entirely, same as Skymax's role-gated
   // native navigators.
   if (isHousekeeping) {
-    return <HousekeepingApp hotel={hotel} onLogout={logout} />;
+    return <HousekeepingApp hotel={hotel} onLogout={handleLogout} />;
   }
 
   // Reservations (§7 Phase 1 #5) is Channel-Manager content, not PMS-only —
@@ -189,17 +229,22 @@ function Shell() {
 
   const roleLabel = (pmsRole ?? cmRole)?.replace('_', ' ') ?? 'no role';
   const bannerTone: 'light' | 'dark' = isColorDark(hotel.brandColor) ? 'light' : 'dark';
+  // A tab restored from a previous session (see TAB_STORAGE_KEY above) might not be valid for
+  // this account anymore — role changed, module no longer enabled, or a different account
+  // entirely on the same browser. Falls back to Dashboard instead of rendering a blank content
+  // area for a tab none of the blocks below match.
+  const activeTab: Tab = visibleTabs.includes(tab) ? tab : 'dashboard';
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-900">
       <Sidebar
         hotel={hotel}
-        tab={tab}
+        tab={activeTab}
         onTab={setTab}
         visibleTabs={visibleTabs}
         userLabel={user?.userId.slice(0, 10) ?? ''}
         roleLabel={roleLabel}
-        onLogout={logout}
+        onLogout={handleLogout}
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
       />
@@ -230,16 +275,16 @@ function Shell() {
           </div>
         )}
         <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
-          {tab === 'dashboard' && <Dashboard hotelId={hotel.id} hotelName={hotel.name} onNavigate={setTab} hasPms={hasPms} hasChannelManager={hasChannelManager} isOwner={isOwner} />}
-          {tab === 'rooms' && hasPms && <RoomBoard hotelId={hotel.id} />}
-          {tab === 'inhouse' && hasPms && !isHousekeeping && <InHouse hotelId={hotel.id} />}
-          {tab === 'bookings' && canSeeReservations && <Bookings hotelId={hotel.id} hasPms={hasPms} />}
-          {tab === 'dues' && hasPms && !isHousekeeping && <Dues hotelId={hotel.id} />}
-          {tab === 'ledger' && hasPms && !isHousekeeping && <Ledger hotelId={hotel.id} />}
-          {tab === 'contacts' && hasPms && !isHousekeeping && <Contacts hotelId={hotel.id} isOwner={pmsRole === 'owner'} />}
-          {tab === 'housekeeping' && canManagePms && <HotelTeamStaffPage hotelId={hotel.id} token={token} isOwner={isOwner} />}
-          {tab === 'reports' && canManagePms && <Reports hotelId={hotel.id} />}
-          {(tab === 'settings_details' || tab === 'settings_brand' || tab === 'settings_rooms' || tab === 'settings_invoice' || tab === 'settings_ledger' || tab === 'settings_credentials' || tab === 'settings_billing') &&
+          {activeTab === 'dashboard' && <Dashboard hotelId={hotel.id} hotelName={hotel.name} onNavigate={setTab} hasPms={hasPms} hasChannelManager={hasChannelManager} isOwner={isOwner} />}
+          {activeTab === 'rooms' && hasPms && <RoomBoard hotelId={hotel.id} />}
+          {activeTab === 'inhouse' && hasPms && !isHousekeeping && <InHouse hotelId={hotel.id} />}
+          {activeTab === 'bookings' && canSeeReservations && <Bookings hotelId={hotel.id} hasPms={hasPms} />}
+          {activeTab === 'dues' && hasPms && !isHousekeeping && <Dues hotelId={hotel.id} />}
+          {activeTab === 'ledger' && hasPms && !isHousekeeping && <Ledger hotelId={hotel.id} />}
+          {activeTab === 'contacts' && hasPms && !isHousekeeping && <Contacts hotelId={hotel.id} isOwner={pmsRole === 'owner'} />}
+          {activeTab === 'housekeeping' && canManagePms && <HotelTeamStaffPage hotelId={hotel.id} token={token} isOwner={isOwner} />}
+          {activeTab === 'reports' && canManagePms && <Reports hotelId={hotel.id} />}
+          {(activeTab === 'settings_details' || activeTab === 'settings_brand' || activeTab === 'settings_rooms' || activeTab === 'settings_invoice' || activeTab === 'settings_ledger' || activeTab === 'settings_credentials' || activeTab === 'settings_billing') &&
             canManage && (
               <Onboarding
                 hotel={hotel}
@@ -248,36 +293,36 @@ function Shell() {
                 hasChannelManager={hasChannelManager}
                 isOwner={isOwner}
                 view={
-                  tab === 'settings_details'
+                  activeTab === 'settings_details'
                     ? 'details'
-                    : tab === 'settings_brand'
+                    : activeTab === 'settings_brand'
                       ? 'brand'
-                      : tab === 'settings_rooms'
+                      : activeTab === 'settings_rooms'
                         ? 'rooms'
-                        : tab === 'settings_invoice'
+                        : activeTab === 'settings_invoice'
                           ? 'invoice'
-                          : tab === 'settings_ledger'
+                          : activeTab === 'settings_ledger'
                             ? 'ledger'
-                            : tab === 'settings_credentials'
+                            : activeTab === 'settings_credentials'
                               ? 'credentials'
                               : 'billing'
                 }
               />
             )}
-          {tab === 'audit_log' && canManage && <AuditLog hotelId={hotel.id} />}
-          {tab === 'cm_calendar' && canSeeReservations && (
+          {activeTab === 'audit_log' && canManage && <AuditLog hotelId={hotel.id} />}
+          {activeTab === 'cm_calendar' && canSeeReservations && (
             <Calendar hotelId={hotel.id} onNavigate={setTab} hasChannelManager={hasChannelManager} />
           )}
           {hasChannelManager && !isHousekeeping && (
             <>
-              {tab === 'cm_guest_messaging' && (
+              {activeTab === 'cm_guest_messaging' && (
                 <GuestMessaging
                   hotelId={hotel.id}
                   initialBookingId={pendingMessageBookingId}
                   onInitialConsumed={() => setPendingMessageBookingId(null)}
                 />
               )}
-              {tab === 'cm_reviews' && (
+              {activeTab === 'cm_reviews' && (
                 <OtaReviews
                   hotelId={hotel.id}
                   onMessageGuest={(bookingId) => {
@@ -286,12 +331,12 @@ function Shell() {
                   }}
                 />
               )}
-              {tab === 'cm_rate_update' && <RateUpdate hotelId={hotel.id} />}
-              {tab === 'cm_inventory_update' && <InventoryUpdate hotelId={hotel.id} />}
-              {tab === 'cm_advance_bulk_update' && <AdvanceBulkUpdate hotelId={hotel.id} />}
-              {tab === 'cm_inventory' && <Inventory hotelId={hotel.id} />}
-              {tab === 'cm_channels' && <ConnectedChannels hotelId={hotel.id} />}
-              {tab === 'cm_reports' && <BusinessReports hotelId={hotel.id} />}
+              {activeTab === 'cm_rate_update' && <RateUpdate hotelId={hotel.id} />}
+              {activeTab === 'cm_inventory_update' && <InventoryUpdate hotelId={hotel.id} />}
+              {activeTab === 'cm_advance_bulk_update' && <AdvanceBulkUpdate hotelId={hotel.id} />}
+              {activeTab === 'cm_inventory' && <Inventory hotelId={hotel.id} />}
+              {activeTab === 'cm_channels' && <ConnectedChannels hotelId={hotel.id} />}
+              {activeTab === 'cm_reports' && <BusinessReports hotelId={hotel.id} />}
             </>
           )}
         </div>
