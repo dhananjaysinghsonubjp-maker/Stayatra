@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '../../components/ui';
 
 /**
@@ -66,7 +67,11 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) 
     );
   }
 
-  return (
+  // Portal to <body> — opened from inside a slide-over panel that itself has a CSS transform
+  // (its slide animation), which would otherwise make this `fixed` only cover that panel's own
+  // box instead of the real viewport (a transformed ancestor becomes the containing block for
+  // `fixed` descendants).
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center bg-black/85 p-4">
       <div className="flex w-full max-w-sm flex-col items-center overflow-hidden rounded-xl bg-black">
         {error ? (
@@ -85,6 +90,7 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) 
           </Button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

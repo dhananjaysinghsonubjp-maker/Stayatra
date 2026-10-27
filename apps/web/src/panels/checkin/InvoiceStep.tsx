@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { uploadFile, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Badge, Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
@@ -776,16 +777,26 @@ function ExtraChargeSlider({
 
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState<number | ''>('');
+  const [gstEnabled, setGstEnabled] = useState(true);
   const [gstRate, setGstRate] = useState<number | null>(5);
   const [customGst, setCustomGst] = useState('');
 
+  // §user request — "charge add karne ke baad smoothly slide hoke band ho jaye": play the same
+  // slide-out the Cancel button uses, and only actually commit the charge (which unmounts this
+  // panel from the parent) once that animation has finished, not before it starts.
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!desc.trim() || !amount) return;
-    onAdd({ description: desc.trim(), amount: Number(amount), gstRate });
+    setClosing(true);
+    setTimeout(() => onAdd({ description: desc.trim(), amount: Number(amount), gstRate: gstEnabled ? gstRate : null }), 220);
   }
 
-  return (
+  // §user request — "poora screen pe aana chahiye, jo already khula hai usko overlap kare, abhi
+  // half aa raha hai": a plain `fixed` element here was being contained by CheckInModal's own
+  // sliding panel, because that panel has a CSS transform on it — and a transformed ancestor
+  // becomes the containing block for its `fixed` descendants (so this only ever covered that
+  // panel's own width, not the real viewport). Porting straight to <body> escapes that box.
+  return createPortal(
     <div className={`fixed inset-0 z-[65] overflow-y-auto bg-slate-900/40 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}>
       <div
         className={`fixed inset-x-0 bottom-0 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl transition-transform duration-300 ease-out sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:max-h-full sm:w-full sm:max-w-md sm:rounded-none ${
@@ -852,40 +863,49 @@ function ExtraChargeSlider({
           </div>
 
           <div className="space-y-3 border-t border-slate-100 pt-4">
-            <p className="text-sm font-bold text-slate-900">GST on this charge</p>
-            <div>
-              <p className="mb-1.5 text-xs font-medium text-slate-600">GST rate</p>
-              <div className="flex flex-wrap gap-2">
-                {[0, 5, 12, 18].map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => {
-                      setGstRate(r);
-                      setCustomGst('');
-                    }}
-                    className={`rounded-lg px-3.5 py-2 text-xs font-semibold ring-1 ring-inset transition-colors ${
-                      gstRate === r && customGst === '' ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    {r}%
-                  </button>
-                ))}
-              </div>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-900">GST on this charge</p>
+              <Toggle checked={gstEnabled} onChange={setGstEnabled} />
             </div>
-            <input
-              className={inputClass}
-              type="number"
-              value={customGst}
-              onChange={(e) => {
-                setCustomGst(e.target.value);
-                setGstRate(e.target.value === '' ? null : Number(e.target.value));
-              }}
-              placeholder="Or enter custom %"
-              min={0}
-              max={100}
-            />
-            <p className="text-[11px] text-slate-400">Use when the rate is not in the chips above</p>
+            {gstEnabled && (
+              <>
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-slate-600">GST rate</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[0, 5, 12, 18].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => {
+                          setGstRate(r);
+                          setCustomGst('');
+                        }}
+                        className={`rounded-lg px-3.5 py-2 text-xs font-semibold ring-1 ring-inset transition-colors ${
+                          gstRate === r && customGst === ''
+                            ? 'bg-brand-600 text-white ring-brand-600'
+                            : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        {r}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <input
+                  className={inputClass}
+                  type="number"
+                  value={customGst}
+                  onChange={(e) => {
+                    setCustomGst(e.target.value);
+                    setGstRate(e.target.value === '' ? null : Number(e.target.value));
+                  }}
+                  placeholder="Or enter custom %"
+                  min={0}
+                  max={100}
+                />
+                <p className="text-[11px] text-slate-400">Use when the rate is not in the chips above</p>
+              </>
+            )}
           </div>
         </form>
 
@@ -898,6 +918,7 @@ function ExtraChargeSlider({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
