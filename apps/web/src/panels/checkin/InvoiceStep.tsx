@@ -28,12 +28,47 @@ type PaymentMode = 'full' | 'partial' | 'due';
 type GstMode = 'exclusive' | 'inclusive' | 'exempt';
 type DiscountType = 'flat' | 'percent';
 
+// §user request — "quick reason ka box": common incidental/service charges a front-desk clerk can
+// tap instead of typing a description from scratch.
+const QUICK_CHARGE_REASONS = [
+  'Extra mattress',
+  'Extra bed',
+  'Extra pillow / linen',
+  'Extra guest',
+  'Baby cot',
+  'Late checkout',
+  'Early check-in',
+  'Room service',
+  'Minibar',
+  'Food & beverage',
+  'Laundry',
+  'Dry cleaning',
+  'Wi-Fi / internet',
+  'Airport transfer',
+  'Cab / transport',
+  'Pet fee',
+  'Smoking fine',
+  'Room damage',
+  'Lost key / card',
+  'Missing items',
+  'Spa / wellness',
+  'Doctor / medical',
+  'Conference / meeting',
+];
+
 export interface DraftLineItem {
   key: string;
   description: string;
   quantity: number;
   unitPrice: number;
   amount: number;
+  /**
+   * Captured per-charge for display only — §user decision: the app's one invoice GST figure
+   * stays a single blended slab on the room+charges subtotal (shared, unchanged math with the
+   * backend's own computeInvoiceTotals); wiring a real per-charge tax split in would need a
+   * schema + backend change this wasn't asked to take on yet.
+   */
+  gstRate?: number | null;
 }
 
 export interface InvoiceDraft {
@@ -113,11 +148,8 @@ export function InvoiceStep({
   const [discountPercent, setDiscountPercent] = useState(10);
   const [lineItems, setLineItems] = useState<DraftLineItem[]>([]);
 
-  // add-charge form — same empty-by-default reasoning as discountAmount above
+  // add-charge slider
   const [addingCharge, setAddingCharge] = useState(false);
-  const [chargeDesc, setChargeDesc] = useState('');
-  const [chargeQty, setChargeQty] = useState<number | ''>('');
-  const [chargeUnitPrice, setChargeUnitPrice] = useState<number | ''>('');
 
   const extraChargesSum = lineItems.reduce((sum, li) => sum + li.amount, 0);
   // "Inclusive" means the room rate the guest agreed to already has GST baked
@@ -154,14 +186,11 @@ export function InvoiceStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, outstanding]);
 
-  function addCharge(e: React.FormEvent) {
-    e.preventDefault();
-    const quantity = Number(chargeQty) || 1;
-    const unitPrice = Number(chargeUnitPrice) || 0;
-    setLineItems((prev) => [...prev, { key: crypto.randomUUID(), description: chargeDesc, quantity, unitPrice, amount: quantity * unitPrice }]);
-    setChargeDesc('');
-    setChargeQty('');
-    setChargeUnitPrice('');
+  function addCharge(item: { description: string; amount: number; gstRate: number | null }) {
+    setLineItems((prev) => [
+      ...prev,
+      { key: crypto.randomUUID(), description: item.description, quantity: 1, unitPrice: item.amount, amount: item.amount, gstRate: item.gstRate },
+    ]);
     setAddingCharge(false);
   }
 
@@ -201,9 +230,14 @@ export function InvoiceStep({
       {/* Payment */}
       <Card className="p-4">
         <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h5 className="text-sm font-semibold text-slate-900">Payment</h5>
-            <p className="text-xs text-slate-500">Collect now or leave as due</p>
+          <div className="flex items-center gap-2.5">
+            <IconBadge>
+              <WalletIcon />
+            </IconBadge>
+            <div>
+              <h5 className="text-sm font-semibold text-slate-900">Payment</h5>
+              <p className="text-xs text-slate-500">Collect now or leave as due</p>
+            </div>
           </div>
           <div className="text-right">
             <Badge tone={remainingAfterPayment > 0 ? 'occupied' : 'available'}>
@@ -432,7 +466,10 @@ export function InvoiceStep({
               </tr>
               {lineItems.map((li) => (
                 <tr key={li.key}>
-                  <td className="px-5 py-3 text-slate-700">{li.description}</td>
+                  <td className="px-5 py-3 text-slate-700">
+                    {li.description}
+                    {li.gstRate != null && <span className="ml-1.5 text-xs font-normal text-slate-400">({li.gstRate}% GST)</span>}
+                  </td>
                   <td className="px-5 py-3">{li.quantity}</td>
                   <td className="px-5 py-3">₹{li.unitPrice.toFixed(2)}</td>
                   <td className="px-5 py-3">₹{li.amount.toFixed(2)}</td>
@@ -448,40 +485,12 @@ export function InvoiceStep({
         </div>
 
         <div className="border-t border-slate-100 px-5 py-3">
-          {!addingCharge ? (
-            <button type="button" onClick={() => setAddingCharge(true)} className="text-xs font-medium text-royal-600 hover:underline">
-              + Add Extra Charges
-            </button>
-          ) : (
-            <form onSubmit={addCharge} className="grid grid-cols-4 gap-2">
-              <input className={inputClass} placeholder="Description" value={chargeDesc} onChange={(e) => setChargeDesc(e.target.value)} required />
-              <input
-                className={inputClass}
-                type="number"
-                placeholder="1"
-                value={chargeQty}
-                onChange={(e) => setChargeQty(e.target.value === '' ? '' : Number(e.target.value))}
-                min={1}
-              />
-              <input
-                className={inputClass}
-                type="number"
-                placeholder="0.00"
-                value={chargeUnitPrice}
-                onChange={(e) => setChargeUnitPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                min={0}
-              />
-              <div className="flex gap-2">
-                <Button type="submit" variant="secondary" className="flex-1">
-                  Add
-                </Button>
-                <Button type="button" variant="ghost" onClick={() => setAddingCharge(false)}>
-                  ✕
-                </Button>
-              </div>
-            </form>
-          )}
+          <button type="button" onClick={() => setAddingCharge(true)} className="text-xs font-semibold text-brand-600 hover:underline">
+            + Add Extra Charges
+          </button>
         </div>
+
+        {addingCharge && <ExtraChargeSlider onAdd={addCharge} onClose={() => setAddingCharge(false)} />}
 
         <div className="space-y-1.5 border-t border-slate-100 px-5 py-4 text-sm">
           <div className="flex justify-between text-slate-500">
@@ -510,7 +519,10 @@ export function InvoiceStep({
             </span>
             <span>₹{totals.gst.amount.toFixed(2)}</span>
           </div>
-          <div className="mt-2 flex justify-between rounded-lg bg-royal-50 px-3 py-2 text-base font-semibold text-royal-800">
+          {/* §user request — "total hi bda hona chahiye, paying now/due chota": Total stays the
+              one large, dominant figure (brand blue); Paying now / Due are smaller supporting
+              chips underneath, not competing with it in size. */}
+          <div className="mt-2 flex justify-between rounded-lg bg-brand-50 px-3 py-2.5 text-lg font-bold text-brand-800">
             <span>Total</span>
             <span>₹{totals.grandTotal.toFixed(2)}</span>
           </div>
@@ -520,19 +532,19 @@ export function InvoiceStep({
               <span>₹{alreadyPaid.toFixed(2)}</span>
             </div>
           )}
-          {mode !== 'due' && amount > 0 && (
-            <div className="mt-2 flex justify-between rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-              <span>Paying now</span>
-              <span>₹{amount.toFixed(2)}</span>
+          <div className={`mt-2 grid gap-2 ${mode !== 'due' && amount > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {mode !== 'due' && amount > 0 && (
+              <div className="rounded-lg bg-green-50 px-2.5 py-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Paying now</p>
+                <p className="text-sm font-bold text-green-700">₹{amount.toFixed(2)}</p>
+              </div>
+            )}
+            <div className={`rounded-lg px-2.5 py-1.5 ${remainingAfterPayment > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
+              <p className={`text-[10px] font-semibold uppercase tracking-wide ${remainingAfterPayment > 0 ? 'text-red-600' : 'text-green-600'}`}>Due</p>
+              <p className={`text-sm font-bold ${remainingAfterPayment > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                {remainingAfterPayment > 0 ? `₹${remainingAfterPayment.toFixed(2)}` : 'Paid in full ✓'}
+              </p>
             </div>
-          )}
-          <div
-            className={`mt-2 flex justify-between rounded-lg px-3 py-2 text-base font-bold ${
-              remainingAfterPayment > 0 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
-            }`}
-          >
-            <span>Due</span>
-            <span>{remainingAfterPayment > 0 ? `₹${remainingAfterPayment.toFixed(2)}` : 'Paid in full ✓'}</span>
           </div>
         </div>
       </Card>
@@ -603,7 +615,7 @@ function MethodPicker({ value, onChange }: { value: PaymentMethod; onChange: (m:
                     setOpen(false);
                   }}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
-                    isSelected ? 'bg-emerald-50' : 'hover:bg-slate-50'
+                    isSelected ? 'bg-green-50' : 'hover:bg-slate-50'
                   }`}
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base">{info.icon}</span>
@@ -613,10 +625,10 @@ function MethodPicker({ value, onChange }: { value: PaymentMethod; onChange: (m:
                   </span>
                   <span
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
-                      isSelected ? 'border-emerald-500' : 'border-slate-300'
+                      isSelected ? 'border-green-600' : 'border-slate-300'
                     }`}
                   >
-                    {isSelected && <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />}
+                    {isSelected && <span className="h-2.5 w-2.5 rounded-full bg-green-600" />}
                   </span>
                 </button>
               );
@@ -719,5 +731,173 @@ function TagIcon() {
       <path d="M12.59 2.59a2 2 0 0 0-1.42-.59H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.41l8 8a2 2 0 0 0 2.82 0l7.17-7.17a2 2 0 0 0 0-2.82l-8-8z" />
       <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
     </svg>
+  );
+}
+
+function WalletIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 7H5a2 2 0 0 1 0-4h12a2 2 0 0 1 2 2v2z" />
+      <path d="M3 7v12a2 2 0 0 0 2 2h16v-5" />
+      <path d="M22 12h-5a1.5 1.5 0 0 0 0 3h5z" />
+    </svg>
+  );
+}
+
+function ChargeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
+  );
+}
+
+// §user request — "extra charges mein click karein toh slider khule: quick reason box, description,
+// charge, GST on this item, niche add charge/cancel" (reference: a competitor's own "Extra
+// Charges" slide-over), rebuilt in StayYatra's own brand colours (deep royal blue #0C2171, green
+// #16A34A, red #DC2626 per the shared palette) rather than the reference's teal/mint theme.
+function ExtraChargeSlider({
+  onAdd,
+  onClose,
+}: {
+  onAdd: (item: { description: string; amount: number; gstRate: number | null }) => void;
+  onClose: () => void;
+}) {
+  const [entered, setEntered] = useState(false);
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  function handleClose() {
+    setClosing(true);
+    setTimeout(onClose, 220);
+  }
+
+  const [desc, setDesc] = useState('');
+  const [amount, setAmount] = useState<number | ''>('');
+  const [gstRate, setGstRate] = useState<number | null>(5);
+  const [customGst, setCustomGst] = useState('');
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!desc.trim() || !amount) return;
+    onAdd({ description: desc.trim(), amount: Number(amount), gstRate });
+  }
+
+  return (
+    <div className={`fixed inset-0 z-[65] overflow-y-auto bg-slate-900/40 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}>
+      <div
+        className={`fixed inset-x-0 bottom-0 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl transition-transform duration-300 ease-out sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:max-h-full sm:w-full sm:max-w-md sm:rounded-none ${
+          entered && !closing ? 'translate-y-0 sm:translate-x-0' : 'translate-y-full sm:translate-y-0 sm:translate-x-full'
+        }`}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-brand-50 px-5 py-4">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
+              <ChargeIcon />
+            </span>
+            <div>
+              <h5 className="text-sm font-bold text-slate-900">Extra Charges</h5>
+              <p className="text-xs text-slate-500">Add incidental or service fees with optional GST</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleClose}
+            aria-label="Close"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-slate-600"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form id="extra-charge-form" onSubmit={submit} className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Quick reasons</p>
+            <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+              {QUICK_CHARGE_REASONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setDesc(r)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition-colors ${
+                    desc === r ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-600 ring-slate-300 hover:bg-brand-50 hover:text-brand-700'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Add new charge</p>
+            <Field label="Description">
+              <input className={inputClass} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. Extra bed" required />
+            </Field>
+            <Field label="Charge amount (excl. GST)">
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₹</span>
+                <input
+                  className={`${inputClass} pl-7`}
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                  min={0}
+                  placeholder="0.00"
+                />
+              </div>
+            </Field>
+          </div>
+
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <p className="text-sm font-bold text-slate-900">GST on this charge</p>
+            <div>
+              <p className="mb-1.5 text-xs font-medium text-slate-600">GST rate</p>
+              <div className="flex flex-wrap gap-2">
+                {[0, 5, 12, 18].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => {
+                      setGstRate(r);
+                      setCustomGst('');
+                    }}
+                    className={`rounded-lg px-3.5 py-2 text-xs font-semibold ring-1 ring-inset transition-colors ${
+                      gstRate === r && customGst === '' ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    {r}%
+                  </button>
+                ))}
+              </div>
+            </div>
+            <input
+              className={inputClass}
+              type="number"
+              value={customGst}
+              onChange={(e) => {
+                setCustomGst(e.target.value);
+                setGstRate(e.target.value === '' ? null : Number(e.target.value));
+              }}
+              placeholder="Or enter custom %"
+              min={0}
+              max={100}
+            />
+            <p className="text-[11px] text-slate-400">Use when the rate is not in the chips above</p>
+          </div>
+        </form>
+
+        <div className="flex shrink-0 gap-2 border-t border-slate-100 px-5 py-4">
+          <Button type="button" variant="secondary" className="flex-1" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="extra-charge-form" variant="primary" className="flex-1" disabled={!desc.trim() || !amount}>
+            Add charge
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
