@@ -355,7 +355,19 @@ export function Calendar({
     }
   }
 
-  function RateCells({ instanceKey, ratePlanId, roomCategoryId }: { instanceKey: string; ratePlanId: string | undefined; roomCategoryId: string }) {
+  function RateCells({
+    instanceKey,
+    ratePlanId,
+    roomCategoryId,
+    room,
+    unbookedRoomsByDate,
+  }: {
+    instanceKey: string;
+    ratePlanId: string | undefined;
+    roomCategoryId: string;
+    room: Room | null;
+    unbookedRoomsByDate: Map<string, Room[]>;
+  }) {
     const rateRows = ratePlanId ? ratesByPlan[ratePlanId] ?? [] : [];
     const rateByDate = new Map(rateRows.map((r) => [r.date.slice(0, 10), r]));
     const restrictionRows = ratePlanId ? restrictionsByPlan[ratePlanId] ?? [] : [];
@@ -365,6 +377,13 @@ export function Calendar({
         {dates.map((d, i) => {
           const rate = rateByDate.get(d);
           const restriction = restrictionByDate.get(d);
+          // §user request — "4 room mein se inventory 2 hai toh 101,102 block, 103,104 open":
+          // the lowest-numbered not-already-booked rooms are the ones that read as oversold —
+          // same unbookedRoomsByDate ranking, just blocking the front of the list instead of the
+          // back, to match that exact example.
+          const unbooked = unbookedRoomsByDate.get(d) ?? [];
+          const roomRank = room ? unbooked.findIndex((r) => r.id === room.id) : -1;
+          const roomArtificiallyBlocked = Boolean(room) && roomRank >= 0 && !!rate && roomRank < unbooked.length - rate.availability;
           const inDragSelection =
             dragSelection?.instanceKey === instanceKey &&
             i >= Math.min(dragSelection.startIdx, dragSelection.endIdx) &&
@@ -394,7 +413,7 @@ export function Calendar({
                   <>
                     <p
                       className={`truncate text-[10px] font-medium ${
-                        restriction?.channelBlocked
+                        restriction?.channelBlocked || roomArtificiallyBlocked
                           ? 'text-red-500'
                           : rate.availability === 0
                             ? 'text-red-500'
@@ -403,9 +422,9 @@ export function Calendar({
                               : 'text-emerald-600'
                       }`}
                     >
-                      {restriction?.channelBlocked ? 'Blocked' : `${rate.availability} left`}
+                      {restriction?.channelBlocked || roomArtificiallyBlocked ? 'Blocked' : `${rate.availability} left`}
                     </p>
-                    <p className="truncate text-xs font-semibold text-slate-700">₹{rate.price}</p>
+                    {!roomArtificiallyBlocked && <p className="truncate text-xs font-semibold text-slate-700">₹{rate.price}</p>}
                   </>
                 ) : restriction?.channelBlocked ? (
                   // A restriction (Advance Bulk Update) can exist on its own, with no rate ever
@@ -657,6 +676,28 @@ export function Calendar({
               const categoryRooms = rooms.filter((r) => r.roomCategoryId === categoryId);
               const categoryRoomIds = new Set(categoryRooms.map((r) => r.id));
               const categoryBookings = activeBookings.filter((b) => b.roomCategoryId === categoryId);
+              // §user request — "4 rooms mein se inventory 2 kar di toh 101,102 block dikhne
+              // chahiye, 103,104 open": the rate grid used to show the exact same category-wide
+              // "N left" text on every room's row, with no per-room distinction at all — there was
+              // nothing here translating "2 of 4 sellable" into which 2 specific rooms that means.
+              // Computed fresh per date (not stored) so it's always consistent with the live
+              // availability count and real bookings, with no separate block records to keep in
+              // sync or release: for each date, rooms with no overlapping booking are ranked by
+              // room number, and whichever fall at or past the availability count are the ones
+              // genuinely oversold — RateCells below renders those as "Blocked".
+              const unbookedRoomsByDate = new Map<string, Room[]>();
+              for (const d of dates) {
+                const bookedRoomIds = new Set(
+                  categoryBookings
+                    .filter((b) => effectiveStartKey(b) <= d && b.checkOut.slice(0, 10) > d)
+                    .map((b) => b.assignedRoomId)
+                    .filter((id): id is string => Boolean(id)),
+                );
+                unbookedRoomsByDate.set(
+                  d,
+                  categoryRooms.filter((r) => !bookedRoomIds.has(r.id)).sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })),
+                );
+              }
               // A booking only shows on its own room's row once it has one (§user request — room-
               // number-wise rows instead of one pooled category row). A reservation created before
               // check-in time ever assigned a specific room (an OTA sync, or createManualBooking)
@@ -692,7 +733,15 @@ export function Calendar({
                           className="relative grid flex-1"
                           style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`, minHeight: viewMode === 'rates' ? 64 : Math.max(64, 40 + barsHeight) }}
                         >
-                          {viewMode !== 'stays' && <RateCells instanceKey={instanceKey} ratePlanId={ratePlanId} roomCategoryId={categoryId} />}
+                          {viewMode !== 'stays' && (
+                            <RateCells
+                              instanceKey={instanceKey}
+                              ratePlanId={ratePlanId}
+                              roomCategoryId={categoryId}
+                              room={room}
+                              unbookedRoomsByDate={unbookedRoomsByDate}
+                            />
+                          )}
                           {viewMode !== 'rates' && <BookingBars rowBookings={rowBookings} laneOf={laneOf} />}
                         </div>
                       </div>
