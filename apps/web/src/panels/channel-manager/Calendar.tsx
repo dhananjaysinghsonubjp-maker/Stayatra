@@ -92,7 +92,9 @@ export function Calendar({
   // single room-category's single cell to one date at a time, every category together. Keyed by
   // roomCategoryId since one date can hold several categories' drafts at once.
   const [editingDate, setEditingDate] = useState<string | null>(null);
-  const [dateEditDrafts, setDateEditDrafts] = useState<Record<string, { ratePlanId: string; price: string; availability: number; totalRooms: number }>>({});
+  const [dateEditDrafts, setDateEditDrafts] = useState<
+    Record<string, { ratePlanId: string; price: string; availability: number; totalRooms: number; bookedCount: number; maxAvailable: number }>
+  >({});
   const [savingDateEdit, setSavingDateEdit] = useState(false);
   const [dateEditError, setDateEditError] = useState<string | null>(null);
 
@@ -216,25 +218,36 @@ export function Calendar({
   }
 
   /**
-   * Opens the date editor for every room category at once — one Rate + Availability (out of
-   * that category's own room count) per category, prefilled from whatever's already loaded.
-   * §user request — "particular cell ki jagah, 'Rooms on OTA' row pe click karke saare
-   * categories ek box mein khulen". Blocked/day-note intentionally stay out of this box (still
-   * settable via Advance Update) — this is deliberately the simple, common-case editor.
+   * Opens the date editor for every room category at once — one Rate + Availability per category,
+   * prefilled from whatever's already loaded. §user request — "particular cell ki jagah, 'Rooms
+   * on OTA' row pe click karke saare categories ek box mein khulen". Blocked/day-note
+   * intentionally stay out of this box (still settable via Advance Update) — this is deliberately
+   * the simple, common-case editor.
+   *
+   * §bugfix — "availability ka number 4 se upar bhi ja raha hai, lock nahi ho raha": the cap is
+   * also tightened to actual physically-free rooms, not just the category's raw room count — a
+   * category with 4 rooms but 1 already booked for this date can only ever have 3 truly
+   * available, so that's the real ceiling (and what "out of N" now says), not 4.
    */
   function openDateEditor(date: string) {
-    const drafts: Record<string, { ratePlanId: string; price: string; availability: number; totalRooms: number }> = {};
+    const drafts: Record<string, { ratePlanId: string; price: string; availability: number; totalRooms: number; bookedCount: number; maxAvailable: number }> = {};
     for (const [categoryId] of categoriesInOrder) {
       const ratePlanId = primaryPlanByCategory.get(categoryId);
       if (!ratePlanId) continue;
       const rateRows = ratesByPlan[ratePlanId] ?? [];
       const rate = rateRows.find((r) => r.date.slice(0, 10) === date);
       const totalRooms = rooms.filter((r) => r.roomCategoryId === categoryId).length;
+      const bookedCount = activeBookings.filter(
+        (b) => b.roomCategoryId === categoryId && effectiveStartKey(b) <= date && b.checkOut.slice(0, 10) > date,
+      ).length;
+      const maxAvailable = Math.max(0, totalRooms - bookedCount);
       drafts[categoryId] = {
         ratePlanId,
         price: rate ? String(rate.price) : '',
-        availability: rate ? rate.availability : totalRooms,
+        availability: Math.min(maxAvailable, rate ? rate.availability : maxAvailable),
         totalRooms,
+        bookedCount,
+        maxAvailable,
       };
     }
     setDateEditDrafts(drafts);
@@ -243,10 +256,13 @@ export function Calendar({
   }
 
   function setDateEditField(categoryId: string, field: 'price' | 'availability', value: string) {
-    setDateEditDrafts((prev) => ({
-      ...prev,
-      [categoryId]: { ...prev[categoryId], [field]: field === 'availability' ? Math.max(0, Number(value)) : value },
-    }));
+    setDateEditDrafts((prev) => {
+      const current = prev[categoryId];
+      if (!current) return prev;
+      if (field === 'price') return { ...prev, [categoryId]: { ...current, price: value } };
+      const clamped = Math.min(current.maxAvailable, Math.max(0, Number(value) || 0));
+      return { ...prev, [categoryId]: { ...current, availability: clamped } };
+    });
   }
 
   /**
@@ -823,12 +839,23 @@ export function Calendar({
                       />
                     </div>
                     <div>
-                      <p className="mb-1.5 text-xs font-medium text-slate-600">Rooms available (out of {draft.totalRooms})</p>
+                      {/* §bugfix — "out of 4" used to always show the category's raw room count,
+                          even when some of those rooms already had a real booking on this date —
+                          the true, honest ceiling is only the rooms still physically free. */}
+                      <p className="mb-1.5 text-xs font-medium text-slate-600">
+                        Rooms available (out of {draft.maxAvailable}{draft.bookedCount > 0 ? `, ${draft.totalRooms} total` : ''})
+                      </p>
+                      {draft.bookedCount > 0 && (
+                        <p className="mb-1.5 text-[11px] text-amber-600">
+                          {draft.bookedCount} room{draft.bookedCount === 1 ? '' : 's'} already booked for this date — can't be counted as available.
+                        </p>
+                      )}
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
-                          onClick={() => setDateEditField(categoryId, 'availability', String(Math.max(0, draft.availability - 1)))}
-                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50"
+                          onClick={() => setDateEditField(categoryId, 'availability', String(draft.availability - 1))}
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                          disabled={draft.availability <= 0}
                         >
                           −
                         </button>
@@ -836,14 +863,15 @@ export function Calendar({
                           className={`${inputClass} w-20 text-center`}
                           type="number"
                           min={0}
-                          max={draft.totalRooms}
+                          max={draft.maxAvailable}
                           value={draft.availability}
                           onChange={(e) => setDateEditField(categoryId, 'availability', e.target.value)}
                         />
                         <button
                           type="button"
                           onClick={() => setDateEditField(categoryId, 'availability', String(draft.availability + 1))}
-                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50"
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                          disabled={draft.availability >= draft.maxAvailable}
                         >
                           +
                         </button>
