@@ -149,7 +149,12 @@ export function ClockTimePicker({
           <div className="absolute inset-0 rounded-full bg-slate-100" />
           <div
             className={`absolute left-1/2 top-1/2 w-0.5 origin-top bg-brand-600 ${dragging ? '' : 'transition-transform duration-150 ease-out'}`}
-            style={{ height: radius, transform: `translateX(-50%) rotate(${handAngle}deg)` }}
+            // The div's own box extends DOWN from its top edge (origin-top's pivot), so at
+            // rotate(0) it visually points to 6 o'clock, not 12 — the -180 corrects for that so
+            // handAngle's "0 = 12 o'clock, clockwise" convention (shared with the number
+            // positions below) actually matches what's drawn. §bugfix — hand was pointing exactly
+            // opposite the selected number (e.g. "50" selected, hand aimed at "20").
+            style={{ height: radius, transform: `translateX(-50%) rotate(${handAngle - 180}deg)` }}
           />
           <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-600" />
           {numbers.map((n) => {
