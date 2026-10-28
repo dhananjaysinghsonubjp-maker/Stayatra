@@ -17,6 +17,7 @@ import { Reports } from './panels/Reports';
 import { Calendar } from './panels/channel-manager/Calendar';
 import { GuestMessaging } from './panels/channel-manager/GuestMessaging';
 import { OtaReviews } from './panels/channel-manager/OtaReviews';
+import { RateInventoryUpdate } from './panels/channel-manager/RateInventoryUpdate';
 import { RateUpdate } from './panels/channel-manager/RateUpdate';
 import { InventoryUpdate } from './panels/channel-manager/InventoryUpdate';
 import { AdvanceBulkUpdate } from './panels/channel-manager/AdvanceBulkUpdate';
@@ -183,6 +184,7 @@ function Shell() {
   const canSeeReservations = (hasPms || hasChannelManager) && !isHousekeeping;
 
   const cmTabs: Tab[] = [
+    'cm_rate_inventory_update',
     'cm_rate_update',
     'cm_inventory_update',
     'cm_advance_bulk_update',
@@ -331,6 +333,7 @@ function Shell() {
                   }}
                 />
               )}
+              {activeTab === 'cm_rate_inventory_update' && <RateInventoryUpdate hotelId={hotel.id} />}
               {activeTab === 'cm_rate_update' && <RateUpdate hotelId={hotel.id} />}
               {activeTab === 'cm_inventory_update' && <InventoryUpdate hotelId={hotel.id} />}
               {activeTab === 'cm_advance_bulk_update' && <AdvanceBulkUpdate hotelId={hotel.id} />}

@@ -15,6 +15,7 @@ export type Tab =
   | 'cm_calendar'
   | 'cm_guest_messaging'
   | 'cm_reviews'
+  | 'cm_rate_inventory_update'
   | 'cm_rate_update'
   | 'cm_inventory_update'
   | 'cm_advance_bulk_update'
@@ -88,9 +89,15 @@ const NAV: NavEntry[] = [
   { id: 'ledger', label: 'Ledger', icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z') },
   { id: 'reports', label: 'Reports', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
   {
-    label: 'Bulk Update',
+    // §user request — "Bulk Update ka naam change hoke Room Management hoga"
+    label: 'Room Management',
     icon: BULK_UPDATE_ICON,
     children: [
+      {
+        id: 'cm_rate_inventory_update',
+        label: 'Rate & Invt. Update',
+        icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z'),
+      },
       { id: 'cm_rate_update', label: 'Rate Update', icon: Icon('M9 14l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z') },
       { id: 'cm_inventory_update', label: 'Inventory Update', icon: Icon('M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4') },
       {
@@ -262,7 +269,7 @@ export function Sidebar({
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
 }) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ 'Stay View': true, 'Bulk Update': true });
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ 'Stay View': true, 'Room Management': true });
 
   function selectTab(id: Tab) {
     onTab(id);
