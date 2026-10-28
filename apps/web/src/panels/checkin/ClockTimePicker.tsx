@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../components/ui';
 
@@ -10,6 +10,16 @@ function pad2(n: number) {
 // and each number's position around the dial, so the two stay in sync.
 function clockAngle(value: number, field: 'hour' | 'minute') {
   return field === 'hour' ? (value % 12) * 30 : value * 6;
+}
+
+// Inverse of clockAngle — a pointer position relative to the dial's center, turned back into a
+// clock value. Same 0deg-at-12-o'clock, clockwise convention.
+function angleToValue(deg: number, field: 'hour' | 'minute') {
+  if (field === 'hour') {
+    const h = Math.round(deg / 30) % 12;
+    return h === 0 ? 12 : h;
+  }
+  return Math.round(deg / 6) % 60;
 }
 
 /**
@@ -33,6 +43,11 @@ export function ClockTimePicker({
   const [hour12, setHour12] = useState(h24 % 12 === 0 ? 12 : h24 % 12);
   const [minute, setMinute] = useState(m);
   const [period, setPeriod] = useState<'AM' | 'PM'>(h24 >= 12 ? 'PM' : 'AM');
+  // §user request — "kaafi smooth hona chahiye, moveable": the hand tracks the pointer 1:1 while
+  // actually being dragged (no transition lag fighting the drag), and only eases between values
+  // for an ordinary tap/click or a programmatic change.
+  const [dragging, setDragging] = useState(false);
+  const dialRef = useRef<HTMLDivElement>(null);
 
   function apply() {
     const hour24 = period === 'AM' ? (hour12 === 12 ? 0 : hour12) : hour12 === 12 ? 12 : hour12 + 12;
@@ -53,6 +68,32 @@ export function ClockTimePicker({
     } else {
       setMinute(n);
     }
+  }
+
+  function setFromPointer(clientX: number, clientY: number) {
+    const rect = dialRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const dx = clientX - (rect.left + rect.width / 2);
+    const dy = clientY - (rect.top + rect.height / 2);
+    let deg = (Math.atan2(dx, -dy) * 180) / Math.PI;
+    if (deg < 0) deg += 360;
+    const v = angleToValue(deg, field);
+    if (field === 'hour') setHour12(v);
+    else setMinute(v);
+  }
+
+  function onDialPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    setFromPointer(e.clientX, e.clientY);
+  }
+  function onDialPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.buttons !== 1) return;
+    setFromPointer(e.clientX, e.clientY);
+  }
+  function onDialPointerUp() {
+    setDragging(false);
+    if (field === 'hour') setField('minute');
   }
 
   return createPortal(
@@ -96,10 +137,18 @@ export function ClockTimePicker({
           </div>
         </div>
 
-        <div className="relative mx-auto mb-5" style={{ width: size, height: size }}>
+        <div
+          ref={dialRef}
+          onPointerDown={onDialPointerDown}
+          onPointerMove={onDialPointerMove}
+          onPointerUp={onDialPointerUp}
+          onPointerCancel={onDialPointerUp}
+          className="relative mx-auto mb-5 touch-none select-none"
+          style={{ width: size, height: size }}
+        >
           <div className="absolute inset-0 rounded-full bg-slate-100" />
           <div
-            className="absolute left-1/2 top-1/2 h-0.5 origin-top bg-brand-600"
+            className={`absolute left-1/2 top-1/2 h-0.5 origin-top bg-brand-600 ${dragging ? '' : 'transition-transform duration-150 ease-out'}`}
             style={{ height: radius, transform: `translateX(-50%) rotate(${handAngle}deg)` }}
           />
           <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-600" />
