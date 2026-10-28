@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { assetUrl, mutate, query, uploadFile, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
+import { CameraCapture } from '../components/CameraCapture';
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, inputClass } from '../components/ui';
 import type { CleaningRecord, HousekeeperOption, InHouseRow, Room } from '../types';
 
@@ -159,7 +160,12 @@ export function CleaningWizard({
   // CleaningRecord — the backend already supports this (§8.6), the frontend just wasn't sending
   // one. Regenerated on reset(), so the NEXT cleaning gets its own fresh id.
   const [submissionId, setSubmissionId] = useState(() => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // §user request — "staff ke paas gallery se upload ka option nahi hona chahiye, sirf real-time
+  // photo": a plain `<input type="file" capture>` only HINTS at the camera — most desktop browsers
+  // and plenty of Android/Chrome configs ignore that hint and show the normal picker (gallery
+  // included) anyway. A live getUserMedia viewfinder (same CameraCapture used for ID/receipt
+  // photos elsewhere) makes picking from the gallery structurally impossible, not just discouraged.
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   function reset() {
     setStep('room');
@@ -185,10 +191,7 @@ export function CleaningWizard({
   const secondRequired = otherHousekeepers.length > 0;
   const canContinueFromTeam = !secondRequired || secondHousekeeperId !== '';
 
-  async function handlePhotoCapture(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // let the same photo be retaken without the input ignoring a repeat selection
-    if (!file) return;
+  async function handlePhotoCapture(file: File) {
     setError(null);
     setUploading(true);
     try {
@@ -340,15 +343,7 @@ export function CleaningWizard({
               Take at least {MIN_PHOTOS} photos: bedroom, bathroom, overall room ({photos.length}/{MIN_PHOTOS})
             </p>
             <p className="mb-3 text-xs text-slate-400 dark:text-slate-500">Camera only — evidence can't be picked from the gallery.</p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={handlePhotoCapture}
-            />
-            <PhotoGrid photos={photos} uploading={uploading} onCapture={() => fileInputRef.current?.click()} onRemove={removePhoto} />
+            <PhotoGrid photos={photos} uploading={uploading} onCapture={() => setCameraOpen(true)} onRemove={removePhoto} />
             <div className="mt-5 flex gap-2">
               <Button variant="ghost" onClick={() => setStep('team')}>
                 ← Back
@@ -357,6 +352,15 @@ export function CleaningWizard({
                 {submitting ? 'Submitting…' : guestCleaning && guestCleaningEligible ? 'Submit Guest Cleaning' : 'Submit Cleaning'}
               </Button>
             </div>
+            {cameraOpen && (
+              <CameraCapture
+                onCapture={(file) => {
+                  setCameraOpen(false);
+                  handlePhotoCapture(file);
+                }}
+                onClose={() => setCameraOpen(false)}
+              />
+            )}
           </div>
         )}
 

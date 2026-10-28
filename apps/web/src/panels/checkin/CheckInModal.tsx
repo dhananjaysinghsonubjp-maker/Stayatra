@@ -4,7 +4,7 @@ import { useAuth } from '../../AuthContext';
 import { Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
 import { formatDateTimeShort } from '../../dateFormat';
-import { CameraCapture } from './CameraCapture';
+import { CameraCapture } from '../../components/CameraCapture';
 import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
 import type { Booking, Gender, Guest, IdType, RatePlan, Room } from '../../types';
 

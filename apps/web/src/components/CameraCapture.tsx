@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button } from '../../components/ui';
+import { Button } from './ui';
 
 /**
  * §user request — "real time image bhi click kar sakte, ye add-on zaroor hona chahiye": a live

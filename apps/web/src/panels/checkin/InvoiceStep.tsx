@@ -7,7 +7,7 @@ import { computeGstSlab } from '../../gst';
 import { computeInvoiceTotals } from '../../invoice';
 import { PAYMENT_METHODS } from '../../paymentMethods';
 import type { PaymentMethod } from '../../types';
-import { CameraCapture } from './CameraCapture';
+import { CameraCapture } from '../../components/CameraCapture';
 
 // §user request — "Mode of Payment" ek proper header ke saath, dropdown mein icon + short
 // description dikhe (reference: RoomNexa's payment-mode picker). Local to this screen only —
