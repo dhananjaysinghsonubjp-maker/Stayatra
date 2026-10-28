@@ -383,6 +383,25 @@ export class RatesService {
    * §7 Phase 1 #3: a genuinely separate write path from Bulk Update. Always
    * wins over a bulk write to the same cell until explicitly overridden (§5.5).
    */
+  /**
+   * Every OTA connection sharing this rate plan's hotel, except the one already being written to
+   * directly. §user request — "4 room mein se 2 hi dikhne chahiye, chahe kisi bhi channel se dekho":
+   * availability must never be allowed to drift between channels (direct-ota-integration-guide.md's
+   * "pooled inventory... non-negotiable"), so every caller that touches availability fans it out
+   * here instead of trusting whichever single channel a form happened to have selected.
+   */
+  private async otherConnectionIds(ratePlanId: string, excludeConnectionId: string): Promise<string[]> {
+    const ratePlan = await this.prisma.ratePlan.findUniqueOrThrow({
+      where: { id: ratePlanId },
+      select: { roomCategory: { select: { hotelId: true } } },
+    });
+    const connections = await this.prisma.otaConnection.findMany({
+      where: { hotelId: ratePlan.roomCategory.hotelId, id: { not: excludeConnectionId } },
+      select: { id: true },
+    });
+    return connections.map((c) => c.id);
+  }
+
   async setValueOverride(input: {
     ratePlanId: string;
     otaConnectionId: string;
@@ -427,6 +446,29 @@ export class RatesService {
         }),
       ),
     );
+
+    // Price stays per-channel on purpose (a channel's own commission/markup is a real reason to
+    // differ) — only availability (a true physical-room count) fans out, and it overrides whatever
+    // source a sibling channel's cell already had: a conflicting per-channel override is exactly
+    // what breaks the pool, so the number just set here wins everywhere, no exceptions.
+    const siblingIds = await this.otherConnectionIds(input.ratePlanId, input.otaConnectionId);
+    for (const connId of siblingIds) {
+      const existingRows = await this.prisma.inventoryRate.findMany({
+        where: { ratePlanId: input.ratePlanId, otaConnectionId: connId, date: input.date },
+      });
+      const existingByTier = new Map(existingRows.map((r) => [r.occupancyTier, r]));
+      for (const tier of input.tiers) {
+        await this.upsertBulkCell(
+          input.ratePlanId,
+          connId,
+          input.date,
+          { occupancyTier: tier.occupancyTier, availability: tier.availability ?? 0 },
+          input.changedBy,
+          existingByTier.get(tier.occupancyTier),
+        );
+      }
+    }
+
     await this.logCmEvent(input.otaConnectionId, 'RATE_VALUE_OVERRIDE', input.changedBy, {
       ratePlanId: input.ratePlanId,
       otaConnectionId: input.otaConnectionId,
@@ -581,6 +623,12 @@ export class RatesService {
     let updated = 0;
     let skippedValueOverrides = 0;
 
+    // Same pooled-availability rule as setValueOverride — resolved once up front rather than per
+    // date/tier, and only when this call actually touches availability at all (Rate Update's own
+    // price-only calls never do, so they stay exactly as cheap as before).
+    const touchesAvailability = input.explicitTiers?.some((t) => t.availability !== undefined) ?? false;
+    const siblingIds = touchesAvailability ? await this.otherConnectionIds(input.ratePlanId, input.otaConnectionId) : [];
+
     for (const date of dates) {
       const existingRows = await this.prisma.inventoryRate.findMany({
         where: { ratePlanId: input.ratePlanId, otaConnectionId: input.otaConnectionId, date },
@@ -596,6 +644,23 @@ export class RatesService {
           }
           await this.upsertBulkCell(input.ratePlanId, input.otaConnectionId, date, tier, input.changedBy, existing);
           updated++;
+
+          if (tier.availability !== undefined && siblingIds.length > 0) {
+            const siblingRows = await this.prisma.inventoryRate.findMany({
+              where: { ratePlanId: input.ratePlanId, otaConnectionId: { in: siblingIds }, date, occupancyTier: tier.occupancyTier },
+            });
+            const siblingByConn = new Map(siblingRows.map((r) => [r.otaConnectionId, r]));
+            for (const connId of siblingIds) {
+              await this.upsertBulkCell(
+                input.ratePlanId,
+                connId,
+                date,
+                { occupancyTier: tier.occupancyTier, availability: tier.availability },
+                input.changedBy,
+                siblingByConn.get(connId),
+              );
+            }
+          }
         }
       } else if (input.adjust) {
         for (const existing of existingRows) {

@@ -16,8 +16,6 @@ export type Tab =
   | 'cm_guest_messaging'
   | 'cm_reviews'
   | 'cm_rate_inventory_update'
-  | 'cm_rate_update'
-  | 'cm_inventory_update'
   | 'cm_advance_bulk_update'
   | 'cm_inventory'
   | 'cm_channels'
@@ -94,12 +92,13 @@ const NAV: NavEntry[] = [
     icon: BULK_UPDATE_ICON,
     children: [
       {
+        // §user request — "Rate Update/Inventory Update ko sort/simple karo": those two separate
+        // pages are gone, folded into this one tool (now the only place for bulk rate+inventory,
+        // plus the Walk-in/Manual Room Block moved down from the old Inventory Update page).
         id: 'cm_rate_inventory_update',
         label: 'Rate & Invt. Update',
         icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z'),
       },
-      { id: 'cm_rate_update', label: 'Rate Update', icon: Icon('M9 14l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z') },
-      { id: 'cm_inventory_update', label: 'Inventory Update', icon: Icon('M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4') },
       {
         id: 'cm_advance_bulk_update',
         label: 'Advance Update',
