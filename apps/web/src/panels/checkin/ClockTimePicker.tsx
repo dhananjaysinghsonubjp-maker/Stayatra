@@ -148,7 +148,7 @@ export function ClockTimePicker({
         >
           <div className="absolute inset-0 rounded-full bg-slate-100" />
           <div
-            className={`absolute left-1/2 top-1/2 h-0.5 origin-top bg-brand-600 ${dragging ? '' : 'transition-transform duration-150 ease-out'}`}
+            className={`absolute left-1/2 top-1/2 w-0.5 origin-top bg-brand-600 ${dragging ? '' : 'transition-transform duration-150 ease-out'}`}
             style={{ height: radius, transform: `translateX(-50%) rotate(${handAngle}deg)` }}
           />
           <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-600" />
