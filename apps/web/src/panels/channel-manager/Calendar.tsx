@@ -422,7 +422,12 @@ export function Calendar({
                               : 'text-emerald-600'
                       }`}
                     >
-                      {restriction?.channelBlocked || roomArtificiallyBlocked ? 'Blocked' : `${rate.availability} left`}
+                      {/* §user request — "niche ek row bana ke No. of Rooms on OTA dena chahiye,
+                          clear rahega": that new category-level row above is now the one place
+                          the count lives — repeating it on every open room's own row (the
+                          original "sab rooms pe same number" confusion) would just bring the
+                          clutter back, so a room row now says plainly whether it's open or not. */}
+                      {restriction?.channelBlocked || roomArtificiallyBlocked ? 'Blocked' : room ? 'Open' : `${rate.availability} left`}
                     </p>
                     {!roomArtificiallyBlocked && <p className="truncate text-xs font-semibold text-slate-700">₹{rate.price}</p>}
                   </>
@@ -707,8 +712,40 @@ export function Calendar({
               const unassignedLanes = assignLanes(unassignedBookings);
               // No rooms set up for this category yet — still show one row so its rates aren't invisible.
               const rowRooms: (Room | null)[] = categoryRooms.length > 0 ? categoryRooms : [null];
+              const categoryRateRows = ratePlanId ? ratesByPlan[ratePlanId] ?? [] : [];
               return (
                 <div key={categoryId}>
+                  {/* §user request — "date ke niche ek row bana ke No. of Rooms on OTA dena
+                      chahiye, kaafi clear rahega": one row, one number per date, for this
+                      category as a whole — the thing every room row below used to repeat. */}
+                  {viewMode !== 'stays' && ratePlanId && (
+                    <div className="flex border-b border-slate-200 bg-slate-50">
+                      <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center bg-slate-50 px-3 py-2 sm:w-44">
+                        <p className="truncate text-[10px] font-bold uppercase tracking-wide text-slate-500">Rooms on OTA</p>
+                      </div>
+                      <div className="grid flex-1" style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))` }}>
+                        {dates.map((d) => {
+                          const rate = categoryRateRows.find((r) => r.date.slice(0, 10) === d);
+                          return (
+                            <div key={d} className="flex items-center justify-center border-l border-slate-100 py-2">
+                              {rate ? (
+                                <span
+                                  className={`text-xs font-bold ${
+                                    rate.availability === 0 ? 'text-red-500' : rate.availability <= 2 ? 'text-amber-600' : 'text-emerald-600'
+                                  }`}
+                                >
+                                  {rate.availability}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-300">—</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {rowRooms.map((room) => {
                     const rowBookings = room ? categoryBookings.filter((b) => b.assignedRoomId === room.id) : categoryBookings;
                     const { laneOf, laneCount } = assignLanes(rowBookings);
