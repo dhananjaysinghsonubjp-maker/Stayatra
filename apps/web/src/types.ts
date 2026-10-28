@@ -428,6 +428,18 @@ export interface Restriction {
   allocationCount: number | null;
 }
 
+export interface RoomMaintenanceBlock {
+  id: string;
+  hotelId: string;
+  roomId: string;
+  startAt: string;
+  endAt: string;
+  reason: string | null;
+  createdBy: string;
+  releasedAt: string | null;
+  room: { roomNumber: string; roomCategoryId: string | null };
+}
+
 /** `rates.listActiveOverrides`' shape — a value-override cell plus just enough of its
  * parent rate plan/room category/channel to label it in a list, without a separate lookup. */
 export interface ActiveOverrideRow {

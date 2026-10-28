@@ -4,6 +4,7 @@ import { authedProcedure, router, requireRole } from '../trpc/trpc.js';
 import type { HotelsService } from './hotels.service.js';
 
 const ownerOrManager = requireRole('pms', ['owner', 'manager']);
+const frontDeskUp = requireRole('pms', ['owner', 'manager', 'front_desk']);
 
 /**
  * `Hotel` and `RoomCategory` are shared by both modules (§5.1/§5.3 — a
@@ -244,5 +245,22 @@ export function createHotelsRouter(hotels: HotelsService) {
     listRooms: authedProcedure.input(z.object({ hotelId: z.string() })).query(({ input }) => hotels.listRooms(input.hotelId)),
 
     listStaff: ownerOrManager.input(z.object({ hotelId: z.string() })).query(({ input }) => hotels.listStaff(input.hotelId)),
+
+    // §user request, matching a reference app's Calendar empty-cell "Add Maintenance Block" panel.
+    checkRoomAvailability: frontDeskUp
+      .input(z.object({ roomId: z.string(), startAt: z.coerce.date(), endAt: z.coerce.date() }))
+      .query(({ input }) => hotels.checkRoomAvailability(input)),
+
+    createMaintenanceBlock: frontDeskUp
+      .input(z.object({ hotelId: z.string(), roomId: z.string(), startAt: z.coerce.date(), endAt: z.coerce.date(), reason: z.string().optional() }))
+      .mutation(({ ctx, input }) => hotels.createMaintenanceBlock({ ...input, actorId: ctx.user.userId })),
+
+    releaseMaintenanceBlock: frontDeskUp
+      .input(z.object({ maintenanceBlockId: z.string() }))
+      .mutation(({ ctx, input }) => hotels.releaseMaintenanceBlock({ ...input, actorId: ctx.user.userId })),
+
+    listMaintenanceBlocks: authedProcedure
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => hotels.listMaintenanceBlocks(input)),
   });
 }

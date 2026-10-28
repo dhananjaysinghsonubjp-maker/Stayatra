@@ -8,7 +8,7 @@ import { CreateReservationModal } from '../checkin/CreateReservationModal';
 import { DateFilterPill, MultiDatePicker, dateRangeKeys, istDateKey, istDateLabel, addDaysKey } from '../../components/DateRangePicker';
 import { OTA_LABEL, CHANNEL_META } from './ota-labels';
 import { ChannelIcon } from './ChannelBadge';
-import type { Booking, InventoryRate, OtaConnection, RatePlan, Restriction, Room } from '../../types';
+import type { Booking, InventoryRate, OtaConnection, RatePlan, Restriction, Room, RoomMaintenanceBlock } from '../../types';
 import type { Tab } from '../../layout/Sidebar';
 
 type ViewMode = 'both' | 'rates' | 'stays';
@@ -77,6 +77,13 @@ export function Calendar({
   const [menuFor, setMenuFor] = useState<{ booking: Booking; x: number; y: number } | null>(null);
   const [checkingInBooking, setCheckingInBooking] = useState<Booking | null>(null);
   const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
+  const [creatingReservation, setCreatingReservation] = useState(false);
+  // §user request, with a reference app's own empty-cell click menu as the target — click a date
+  // on a specific room's own row with nothing booked there and get Create Reservation / Add
+  // Maintenance Block, instead of nothing happening at all.
+  const [emptyCellMenu, setEmptyCellMenu] = useState<{ room: Room; date: string; x: number; y: number } | null>(null);
+  const [maintenanceBlockFor, setMaintenanceBlockFor] = useState<{ room: Room; date: string } | null>(null);
+  const [maintenanceBlocks, setMaintenanceBlocks] = useState<RoomMaintenanceBlock[]>([]);
   // §user request, with Housekeeping's own date filter as the explicit target — same From/To
   // range picker, single day or a multi-day range in one tap-through, instead of a plain
   // single-date input. The quick Today/7D/14D/... pills below still exist as shortcuts that
@@ -148,8 +155,12 @@ export function Calendar({
   useEffect(() => {
     async function load() {
       try {
-        const bookingRows = await query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate }, token ?? undefined);
+        const [bookingRows, maintenanceRows] = await Promise.all([
+          query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate }, token ?? undefined),
+          query<RoomMaintenanceBlock[]>('hotels.listMaintenanceBlocks', { hotelId, from: startDate, to: endDate }, token ?? undefined),
+        ]);
         setBookings(bookingRows);
+        setMaintenanceBlocks(maintenanceRows);
         if (!otaConnectionId || ratePlans.length === 0) {
           setRatesByPlan({});
           setRestrictionsByPlan({});
@@ -175,11 +186,17 @@ export function Calendar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId, otaConnectionId, ratePlans.length, startDate, endDate]);
 
-  /** Re-fetches just the bookings (not the rate grid) — called after Edit reservation or Start
-   * check-in finishes, so the bar the menu was opened from reflects the change immediately. */
+  /** Re-fetches bookings + maintenance blocks (not the rate grid) — called after Edit
+   * reservation, Start check-in, or a new Maintenance Block finishes, so the row the action
+   * came from reflects the change immediately. */
   async function refreshBookings() {
     try {
-      setBookings(await query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate }, token ?? undefined));
+      const [bookingRows, maintenanceRows] = await Promise.all([
+        query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate }, token ?? undefined),
+        query<RoomMaintenanceBlock[]>('hotels.listMaintenanceBlocks', { hotelId, from: startDate, to: endDate }, token ?? undefined),
+      ]);
+      setBookings(bookingRows);
+      setMaintenanceBlocks(maintenanceRows);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to refresh calendar');
     }
@@ -515,6 +532,45 @@ export function Calendar({
     );
   }
 
+  /** A room out of service for a date range — same spanning-bar layout as BookingBars, stacked
+   * in its own lane below whatever real bookings that room already has. */
+  function MaintenanceBars({ blocks, laneCount }: { blocks: RoomMaintenanceBlock[]; laneCount: number }) {
+    return (
+      <>
+        {blocks.map((m) => {
+          const startIdx = dates.indexOf(m.startAt.slice(0, 10));
+          const endIdx = dates.indexOf(m.endAt.slice(0, 10));
+          const colStart = startIdx === -1 ? 1 : startIdx + 1;
+          const colEnd = (endIdx === -1 ? dates.length : endIdx) + 1;
+          if (colEnd <= 1 || colStart > dates.length) return null;
+          return (
+            <div
+              key={m.id}
+              className="group relative z-10"
+              style={{
+                gridColumn: `${Math.max(1, colStart)} / ${Math.min(dates.length + 1, colEnd)}`,
+                gridRow: laneCount + 2,
+                marginBottom: 2,
+                marginTop: laneCount === 0 ? 6 : 2,
+              }}
+            >
+              <div className="flex w-full items-center gap-1 truncate rounded-md bg-slate-300 px-2 py-1 text-left text-xs font-semibold text-slate-700 shadow-sm">
+                🔧 Maintenance
+              </div>
+              <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-1 hidden w-56 rounded-lg bg-slate-900 p-3 text-xs text-white shadow-xl group-hover:block">
+                <p className="mb-1.5 font-bold">Maintenance block</p>
+                <p className="text-slate-300">
+                  {istDateLabel(m.startAt.slice(0, 10))} → {istDateLabel(m.endAt.slice(0, 10))}
+                </p>
+                {m.reason && <p className="mt-1 text-slate-400">{m.reason}</p>}
+              </div>
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
   return (
     <div>
       <PageHeader
@@ -742,6 +798,7 @@ export function Calendar({
 
                   {rowRooms.map((room) => {
                     const rowBookings = room ? categoryBookings.filter((b) => b.assignedRoomId === room.id) : categoryBookings;
+                    const rowMaintenanceBlocks = room ? maintenanceBlocks.filter((m) => m.roomId === room.id) : [];
                     const { laneOf, laneCount } = assignLanes(rowBookings);
                     const barsHeight = laneCount * 30;
                     const instanceKey = room ? room.id : categoryId;
@@ -764,10 +821,37 @@ export function Calendar({
                           className="relative grid flex-1"
                           style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`, minHeight: viewMode === 'rates' ? 64 : Math.max(64, 40 + barsHeight) }}
                         >
+                          {/* §user request, matching a reference app's empty-cell click menu —
+                              click a date on this specific room's row with nothing booked/blocked
+                              there and get Create Reservation / Add Maintenance Block. Sits behind
+                              the bars below (lower in the DOM, no explicit z-index), so it's only
+                              reachable where there's nothing covering that date already. */}
+                          {room && viewMode !== 'rates' && (
+                            <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))` }}>
+                              {dates.map((d, i) => {
+                                const covered =
+                                  rowBookings.some((b) => effectiveStartKey(b) <= d && b.checkOut.slice(0, 10) > d) ||
+                                  rowMaintenanceBlocks.some((m) => m.startAt.slice(0, 10) <= d && m.endAt.slice(0, 10) > d);
+                                if (covered) return <div key={d} />;
+                                return (
+                                  <button
+                                    key={d}
+                                    type="button"
+                                    onClick={(e) =>
+                                      setEmptyCellMenu({ room, date: d, x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 120) })
+                                    }
+                                    className="h-full w-full hover:bg-brand-50/50"
+                                    style={{ gridColumn: i + 1 }}
+                                  />
+                                );
+                              })}
+                            </div>
+                          )}
                           {viewMode !== 'stays' && (
                             <RateCells ratePlanId={ratePlanId} room={room} unbookedRoomsByDate={unbookedRoomsByDate} />
                           )}
                           {viewMode !== 'rates' && <BookingBars rowBookings={rowBookings} laneOf={laneOf} />}
+                          {viewMode !== 'rates' && rowMaintenanceBlocks.length > 0 && <MaintenanceBars blocks={rowMaintenanceBlocks} laneCount={laneCount} />}
                         </div>
                       </div>
                     );
@@ -1089,6 +1173,41 @@ export function Calendar({
         </div>
       )}
 
+      {/* §user request, matching a reference app's own empty-cell click menu. */}
+      {emptyCellMenu && (
+        <div className="fixed inset-0 z-40" onClick={() => setEmptyCellMenu(null)}>
+          <div
+            className="absolute w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+            style={{ left: emptyCellMenu.x, top: emptyCellMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="truncate border-b border-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400">
+              Room {emptyCellMenu.room.roomNumber} · {istDateLabel(emptyCellMenu.date)}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setCreatingReservation(true);
+                setEmptyCellMenu(null);
+              }}
+              className="block w-full px-3 py-2 text-left text-sm font-medium text-brand-600 hover:bg-brand-50"
+            >
+              Create Reservation
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMaintenanceBlockFor({ room: emptyCellMenu.room, date: emptyCellMenu.date });
+                setEmptyCellMenu(null);
+              }}
+              className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Add Maintenance Block
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* §user request — "koi bhi booking pr click karu toh uski detail khul jani chahiye" —
           same read-only billing view the Reservations table's own "View" opens. */}
       {viewingBooking && (
@@ -1111,6 +1230,30 @@ export function Calendar({
         />
       )}
 
+      {creatingReservation && (
+        <CreateReservationModal
+          hotelId={hotelId}
+          onClose={() => setCreatingReservation(false)}
+          onDone={() => {
+            setCreatingReservation(false);
+            void refreshBookings();
+          }}
+        />
+      )}
+
+      {maintenanceBlockFor && (
+        <MaintenanceBlockPanel
+          room={maintenanceBlockFor.room}
+          date={maintenanceBlockFor.date}
+          token={token}
+          onClose={() => setMaintenanceBlockFor(null)}
+          onCreated={() => {
+            setMaintenanceBlockFor(null);
+            void refreshBookings();
+          }}
+        />
+      )}
+
       {checkingInBooking && (
         <CheckInModal
           hotelId={hotelId}
@@ -1123,6 +1266,136 @@ export function Calendar({
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * §user request, matching a reference app's own "Create Maintenance Block" panel — opened from
+ * the empty-cell menu above. Checks live availability (hotels.checkRoomAvailability) as the
+ * picked dates change, same conflict logic the create mutation itself re-checks server-side.
+ */
+function MaintenanceBlockPanel({
+  room,
+  date,
+  token,
+  onClose,
+  onCreated,
+}: {
+  room: Room;
+  date: string;
+  token: string | null;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [startAt, setStartAt] = useState(`${date}T12:00`);
+  const [endAt, setEndAt] = useState(`${addDaysKey(date, 1)}T11:00`);
+  const [reason, setReason] = useState('');
+  const [availability, setAvailability] = useState<{ available: boolean; reason: string | null } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function check() {
+      if (!startAt || !endAt) return;
+      setChecking(true);
+      try {
+        const result = await query<{ available: boolean; reason: string | null }>(
+          'hotels.checkRoomAvailability',
+          { roomId: room.id, startAt: new Date(startAt).toISOString(), endAt: new Date(endAt).toISOString() },
+          token ?? undefined,
+        );
+        if (!cancelled) setAvailability(result);
+      } catch {
+        if (!cancelled) setAvailability(null);
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    }
+    void check();
+    return () => {
+      cancelled = true;
+    };
+  }, [room.id, startAt, endAt, token]);
+
+  async function submit() {
+    setSaving(true);
+    setError(null);
+    try {
+      await mutate(
+        'hotels.createMaintenanceBlock',
+        {
+          hotelId: room.hotelId,
+          roomId: room.id,
+          startAt: new Date(startAt).toISOString(),
+          endAt: new Date(endAt).toISOString(),
+          reason: reason.trim() || undefined,
+        },
+        token ?? undefined,
+      );
+      onCreated();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to create maintenance block');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/40" onClick={() => !saving && onClose()}>
+      <div className="h-full w-full max-w-sm overflow-y-auto bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Room {room.roomNumber}</p>
+            <p className="mt-1 text-lg font-bold text-slate-900">Create Maintenance Block</p>
+          </div>
+          <button onClick={() => !saving && onClose()} className="text-slate-400 hover:text-slate-600">
+            ✕
+          </button>
+        </div>
+
+        <div className="space-y-5 px-6 py-5">
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-slate-600">Start Date & Time</p>
+            <input className={`${inputClass} w-full`} type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-slate-600">End Date & Time</p>
+            <input className={`${inputClass} w-full`} type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
+          </div>
+
+          {checking ? (
+            <p className="text-xs text-slate-400">Checking…</p>
+          ) : availability ? (
+            <p className={`rounded-md px-3 py-2 text-sm font-medium ${availability.available ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+              {availability.available ? 'Room is available for these dates.' : availability.reason}
+            </p>
+          ) : null}
+
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-slate-600">Reason (optional)</p>
+            <input
+              className={`${inputClass} w-full`}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Plumbing repair, deep cleaning"
+            />
+          </div>
+        </div>
+
+        {error && <p className="px-6 pb-2 text-sm text-red-600">{error}</p>}
+
+        <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
+          <button type="button" onClick={() => !saving && onClose()} className="text-sm font-medium text-slate-500 hover:underline" disabled={saving}>
+            Cancel
+          </button>
+          <Button type="button" onClick={() => void submit()} disabled={saving || checking || (availability ? !availability.available : false)}>
+            {saving ? 'Creating…' : 'Create Block'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

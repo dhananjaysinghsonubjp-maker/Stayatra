@@ -319,6 +319,7 @@ model Hotel {
   notifications   Notification[]
   guestMessages   GuestMessage[]
   roomBlocks      RoomBlock[]
+  maintenanceBlocks RoomMaintenanceBlock[]
   dayNotes        DayNote[]
   photos          HotelPhoto[]
   reviews         Review[]
@@ -422,6 +423,29 @@ model RoomBlock {
 
   @@index([hotelId, roomCategoryId, startDate])
   @@map("room_blocks")
+}
+
+// §user request, matching a reference app's own "Create Maintenance Block" panel (Calendar's
+// empty-cell click menu) — unlike RoomBlock above (a category + count held back from the pooled
+// OTA count, no specific physical room), this is ONE SPECIFIC ROOM out of service for a real
+// reason (repair, deep clean) over a real date+time range, independent of OTA inventory entirely.
+model RoomMaintenanceBlock {
+  id         String    @id @default(cuid())
+  hotelId    String    @map("hotel_id")
+  roomId     String    @map("room_id")
+  startAt    DateTime  @map("start_at")
+  endAt      DateTime  @map("end_at") // exclusive, like a booking's checkOut
+  reason     String?
+  createdBy  String    @map("created_by")
+  releasedAt DateTime? @map("released_at")
+  releasedBy String?   @map("released_by")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  room  Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, roomId, startAt])
+  @@map("room_maintenance_blocks")
 }
 
 // A private staff-only note on one room category's one day (§ user request, matching a
@@ -993,6 +1017,7 @@ model Room {
   currentStay    Booking?         @relation("CurrentStay", fields: [currentStayId], references: [id])
   cleaningRecords CleaningRecord[]
   assignedBookings Booking[]      @relation("AssignedRoom")
+  maintenanceBlocks RoomMaintenanceBlock[]
 
   @@unique([hotelId, roomNumber])
   @@map("rooms")

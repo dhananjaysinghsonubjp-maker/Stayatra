@@ -1,4 +1,5 @@
 import { Injectable, ConflictException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BookingStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuthService } from '../auth/auth.service.js';
 
@@ -282,6 +283,77 @@ export class HotelsService {
 
   async listRoomCategories(hotelId: string) {
     return this.prisma.roomCategory.findMany({ where: { hotelId } });
+  }
+
+  /**
+   * One specific physical room, out of service for a real date+time range (repair, deep clean).
+   * §user request, matching a reference app's own "Create Maintenance Block" panel — distinct
+   * from RoomBlock (a category+count held back from pooled OTA inventory, no specific room).
+   * Shared by createMaintenanceBlock's own conflict check and the live "is this free?" query the
+   * panel calls as the picked dates change.
+   */
+  private async findRoomConflict(roomId: string, startAt: Date, endAt: Date, excludeMaintenanceBlockId?: string) {
+    const [overlappingBooking, overlappingBlock] = await Promise.all([
+      this.prisma.booking.findFirst({
+        where: {
+          assignedRoomId: roomId,
+          status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+          checkIn: { lt: endAt },
+          checkOut: { gt: startAt },
+        },
+      }),
+      this.prisma.roomMaintenanceBlock.findFirst({
+        where: {
+          roomId,
+          id: excludeMaintenanceBlockId ? { not: excludeMaintenanceBlockId } : undefined,
+          releasedAt: null,
+          startAt: { lt: endAt },
+          endAt: { gt: startAt },
+        },
+      }),
+    ]);
+    if (overlappingBooking) return `Already booked — ${overlappingBooking.guestName}, ${overlappingBooking.checkIn.toISOString().slice(0, 10)} → ${overlappingBooking.checkOut.toISOString().slice(0, 10)}`;
+    if (overlappingBlock) return 'Already under a maintenance block for part of this range';
+    return null;
+  }
+
+  /** The live confirmation message in the Create Maintenance Block panel — no mutation, just a read. */
+  async checkRoomAvailability(input: { roomId: string; startAt: Date; endAt: Date }) {
+    if (input.endAt <= input.startAt) return { available: false, reason: 'End must be after start' };
+    const conflict = await this.findRoomConflict(input.roomId, input.startAt, input.endAt);
+    return conflict ? { available: false, reason: conflict } : { available: true, reason: null };
+  }
+
+  async createMaintenanceBlock(input: { hotelId: string; roomId: string; startAt: Date; endAt: Date; reason?: string; actorId: string }) {
+    if (input.endAt <= input.startAt) throw new BadRequestException('End must be after start');
+    const conflict = await this.findRoomConflict(input.roomId, input.startAt, input.endAt);
+    if (conflict) throw new ConflictException(conflict);
+    return this.prisma.roomMaintenanceBlock.create({
+      data: {
+        hotelId: input.hotelId,
+        roomId: input.roomId,
+        startAt: input.startAt,
+        endAt: input.endAt,
+        reason: input.reason,
+        createdBy: input.actorId,
+      },
+    });
+  }
+
+  async releaseMaintenanceBlock(input: { maintenanceBlockId: string; actorId: string }) {
+    return this.prisma.roomMaintenanceBlock.update({
+      where: { id: input.maintenanceBlockId },
+      data: { releasedAt: new Date(), releasedBy: input.actorId },
+    });
+  }
+
+  /** Calendar's own grid read — every active (not yet released) block whose range overlaps the visible window. */
+  async listMaintenanceBlocks(input: { hotelId: string; from: Date; to: Date }) {
+    return this.prisma.roomMaintenanceBlock.findMany({
+      where: { hotelId: input.hotelId, releasedAt: null, startAt: { lt: input.to }, endAt: { gt: input.from } },
+      include: { room: { select: { roomNumber: true, roomCategoryId: true } } },
+      orderBy: { startAt: 'asc' },
+    });
   }
 
   async getHotel(hotelId: string) {

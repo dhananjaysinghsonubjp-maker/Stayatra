@@ -570,6 +570,14 @@ export class BookingsService {
     }
     if (room.status !== 'available') throw new ConflictException(`Room ${room.roomNumber} is not available`);
     if (!room.roomCategoryId) throw new ConflictException('Room has no category assigned yet — sort it during onboarding first');
+    // §user request — a room can be put out of service for a future date range (Calendar's own
+    // "Add Maintenance Block") without ever touching its *current* status, since that status is
+    // only ever "right now", not a calendar. This is the one place that actually stops a walk-in
+    // landing in a room while its block is live.
+    const activeMaintenanceBlock = await this.prisma.roomMaintenanceBlock.findFirst({
+      where: { roomId: input.roomId, releasedAt: null, startAt: { lt: input.checkOut }, endAt: { gt: input.checkIn } },
+    });
+    if (activeMaintenanceBlock) throw new ConflictException(`Room ${room.roomNumber} is under a maintenance block for this date`);
 
     const guestId = await this.linkGuestProfile(input.hotelId, input);
 
@@ -726,6 +734,12 @@ export class BookingsService {
     }
     if (room.status !== 'available') throw new ConflictException(`Room ${room.roomNumber} is not available`);
     if (room.roomCategoryId !== booking.roomCategoryId) throw new ConflictException('Room category does not match the reservation');
+    const effectiveCheckIn = input.checkIn ?? booking.checkIn;
+    const effectiveCheckOut = input.checkOut ?? booking.checkOut;
+    const activeMaintenanceBlock = await this.prisma.roomMaintenanceBlock.findFirst({
+      where: { roomId: input.roomId, releasedAt: null, startAt: { lt: effectiveCheckOut }, endAt: { gt: effectiveCheckIn } },
+    });
+    if (activeMaintenanceBlock) throw new ConflictException(`Room ${room.roomNumber} is under a maintenance block for this date`);
 
     const datesChanged = Boolean(
       input.checkIn && input.checkOut && (input.checkIn.getTime() !== booking.checkIn.getTime() || input.checkOut.getTime() !== booking.checkOut.getTime()),
