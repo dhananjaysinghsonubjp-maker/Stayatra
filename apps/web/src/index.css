@@ -6,8 +6,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* §user request — official StayYatra brand kit: Arial only, no Inter/Roboto/Poppins. */
-  --font-sans: Arial, Helvetica, sans-serif;
+  /* §user request — reverted the brand kit's Arial-only font back to the app's original stack. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
 
   /* §user request — official StayYatra brand kit (exact hexes given, not re-derived): Primary
      #0C2171, Hover #18368F, Light-blue-selection #E8EEFF for 50/700 respectively. 100/500 stay the
