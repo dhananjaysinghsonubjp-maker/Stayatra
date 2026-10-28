@@ -87,22 +87,18 @@ export function Calendar({
   const [selectedDates, setSelectedDates] = useState<string[]>(() => dateRangeKeys(todayPlus(-1), todayPlus(12)));
   const [viewMode, setViewMode] = useState<ViewMode>(hasChannelManager ? 'both' : 'stays');
   const [error, setError] = useState<string | null>(null);
-  // instanceKey scopes the modal to the exact row clicked (the rate plan id — one row per category).
-  const [editingCell, setEditingCell] = useState<{ instanceKey: string; ratePlanId: string; roomCategoryId: string; date: string } | null>(null);
-  const [draftPrice, setDraftPrice] = useState('');
-  const [draftAvailability, setDraftAvailability] = useState(1);
-  const [draftBlocked, setDraftBlocked] = useState(false);
-  const [draftNote, setDraftNote] = useState('');
-  const [loadingCell, setLoadingCell] = useState(false);
-  const [savingCell, setSavingCell] = useState(false);
-  // otaConnectionId -> whether THAT channel individually has a stop-sell restriction for this
-  // cell's date (§ user request) — a channel can be blocked on its own via Advance Bulk Update,
-  // and "Will push to" needs to show that plainly before Save & push here can silently flatten it.
-  const [channelBlockStatus, setChannelBlockStatus] = useState<Record<string, boolean>>({});
+  // §user request — "particular cell nahi, humne jo 'Rooms on OTA' row banayi hai usi se edit
+  // karenge, click karne par us date ke saare categories ka box ban jayega": editing moved from a
+  // single room-category's single cell to one date at a time, every category together. Keyed by
+  // roomCategoryId since one date can hold several categories' drafts at once.
+  const [editingDate, setEditingDate] = useState<string | null>(null);
+  const [dateEditDrafts, setDateEditDrafts] = useState<Record<string, { ratePlanId: string; price: string; availability: number; totalRooms: number }>>({});
+  const [savingDateEdit, setSavingDateEdit] = useState(false);
+  const [dateEditError, setDateEditError] = useState<string | null>(null);
 
   // Drag-to-select (§ user request) — mouse-down on a cell then dragging across more cells in
   // the same row selects a date range; releasing on the same cell you started on is just a plain
-  // click (handled by the existing single-cell editor above), releasing elsewhere opens Bulk Edit.
+  // click (handled by the date editor above), releasing elsewhere opens Bulk Edit.
   const [dragSelection, setDragSelection] = useState<{
     instanceKey: string;
     ratePlanId: string;
@@ -219,61 +215,75 @@ export function Calendar({
     setRestrictionsByPlan((prev) => ({ ...prev, [ratePlanId]: grid.restrictions }));
   }
 
-  /** Opens the Edit Cell modal and loads this cell's current blocked-state + private day note (not part of the already-fetched grid data). */
-  async function openCellEditor(
-    instanceKey: string,
-    ratePlanId: string,
-    roomCategoryId: string,
-    date: string,
-    rate: InventoryRate | undefined,
-    restriction: Restriction | undefined,
-  ) {
-    setEditingCell({ instanceKey, ratePlanId, roomCategoryId, date });
-    setDraftPrice(rate ? String(rate.price) : '');
-    setDraftAvailability(rate ? rate.availability : 1);
-    setDraftBlocked(restriction?.channelBlocked ?? false);
-    setDraftNote('');
-    setChannelBlockStatus({});
-    setLoadingCell(true);
-    try {
-      const [note, blockStatus] = await Promise.all([
-        query<{ note: string } | null>('rates.getDayNote', { roomCategoryId, date }, token ?? undefined),
-        query<Record<string, boolean>>('rates.getChannelBlockStatus', { ratePlanId, date }, token ?? undefined),
-      ]);
-      setDraftNote(note?.note ?? '');
-      setChannelBlockStatus(blockStatus);
-    } finally {
-      setLoadingCell(false);
+  /**
+   * Opens the date editor for every room category at once — one Rate + Availability (out of
+   * that category's own room count) per category, prefilled from whatever's already loaded.
+   * §user request — "particular cell ki jagah, 'Rooms on OTA' row pe click karke saare
+   * categories ek box mein khulen". Blocked/day-note intentionally stay out of this box (still
+   * settable via Advance Update) — this is deliberately the simple, common-case editor.
+   */
+  function openDateEditor(date: string) {
+    const drafts: Record<string, { ratePlanId: string; price: string; availability: number; totalRooms: number }> = {};
+    for (const [categoryId] of categoriesInOrder) {
+      const ratePlanId = primaryPlanByCategory.get(categoryId);
+      if (!ratePlanId) continue;
+      const rateRows = ratesByPlan[ratePlanId] ?? [];
+      const rate = rateRows.find((r) => r.date.slice(0, 10) === date);
+      const totalRooms = rooms.filter((r) => r.roomCategoryId === categoryId).length;
+      drafts[categoryId] = {
+        ratePlanId,
+        price: rate ? String(rate.price) : '',
+        availability: rate ? rate.availability : totalRooms,
+        totalRooms,
+      };
     }
+    setDateEditDrafts(drafts);
+    setDateEditError(null);
+    setEditingDate(date);
+  }
+
+  function setDateEditField(categoryId: string, field: 'price' | 'availability', value: string) {
+    setDateEditDrafts((prev) => ({
+      ...prev,
+      [categoryId]: { ...prev[categoryId], [field]: field === 'availability' ? Math.max(0, Number(value)) : value },
+    }));
   }
 
   /**
-   * Pooled inventory means one Save here pushes to every connected channel at once, not
-   * just whichever channel happened to be selected in the grid's filter dropdown — the
-   * server loops every OTA connection (`RatesService.saveCellEditor`).
+   * One setValueOverride call per category that actually has a price typed in — its own
+   * fan-out (rates.service.ts) pushes availability to every connected channel on its own, so
+   * this never needs its own channel loop. setValueOverride never touches restrictions/notes,
+   * so a deliberate stop-sell set elsewhere (Advance Update) can't be silently undone by saving
+   * this simpler box.
    */
-  async function saveCellEditor() {
-    if (!editingCell || !draftPrice) return;
-    setSavingCell(true);
+  async function saveDateEditor() {
+    if (!editingDate) return;
+    if (connections.length === 0) {
+      setDateEditError('Connect at least one OTA channel first (Connected Channels).');
+      return;
+    }
+    setSavingDateEdit(true);
+    setDateEditError(null);
     try {
-      await mutate(
-        'rates.saveCellEditor',
-        {
-          hotelId,
-          roomCategoryId: editingCell.roomCategoryId,
-          ratePlanId: editingCell.ratePlanId,
-          date: editingCell.date,
-          price: Number(draftPrice),
-          availability: draftAvailability,
-          blocked: draftBlocked,
-          dayNote: draftNote,
-        },
-        token ?? undefined,
-      );
-      await refreshRatePlanRates(editingCell.ratePlanId);
-      setEditingCell(null);
+      const entries = Object.entries(dateEditDrafts).filter(([, d]) => d.price !== '');
+      for (const [, draft] of entries) {
+        await mutate(
+          'rates.setValueOverride',
+          {
+            ratePlanId: draft.ratePlanId,
+            otaConnectionId: connections[0].id,
+            date: editingDate,
+            tiers: [{ occupancyTier: 1, price: Number(draft.price), availability: draft.availability }],
+          },
+          token ?? undefined,
+        );
+      }
+      await Promise.all(entries.map(([, draft]) => refreshRatePlanRates(draft.ratePlanId)));
+      setEditingDate(null);
+    } catch (err) {
+      setDateEditError(err instanceof ApiError ? err.message : 'Save failed');
     } finally {
-      setSavingCell(false);
+      setSavingDateEdit(false);
     }
   }
 
@@ -297,13 +307,8 @@ export function Calendar({
         const lo = Math.min(sel.startIdx, sel.endIdx);
         const hi = Math.max(sel.startIdx, sel.endIdx);
         if (lo === hi) {
-          // Plain click, no drag — open the single-cell editor exactly as before.
-          const d = dates[lo];
-          const rateRows = ratesByPlan[sel.ratePlanId] ?? [];
-          const rate = rateRows.find((r) => r.date.slice(0, 10) === d);
-          const restrictionRows = restrictionsByPlan[sel.ratePlanId] ?? [];
-          const restriction = restrictionRows.find((r) => r.date.slice(0, 10) === d);
-          void openCellEditor(sel.instanceKey, sel.ratePlanId, sel.roomCategoryId, d, rate, restriction);
+          // Plain click, no drag — open the date editor (every category at once) for this date.
+          openDateEditor(dates[lo]);
           return null;
         }
         setBulkEdit({
@@ -355,19 +360,12 @@ export function Calendar({
     }
   }
 
-  function RateCells({
-    instanceKey,
-    ratePlanId,
-    roomCategoryId,
-    room,
-    unbookedRoomsByDate,
-  }: {
-    instanceKey: string;
-    ratePlanId: string | undefined;
-    roomCategoryId: string;
-    room: Room | null;
-    unbookedRoomsByDate: Map<string, Room[]>;
-  }) {
+  // §user request — "particular cell nahi, jo hamare cells hai usme bas price and availability
+  // dikhegi": individual room cells are plain display now, not clickable — editing moved up to
+  // the category's own "Rooms on OTA" row. Still computes per-room Blocked (see
+  // unbookedRoomsByDate's own comment) since that distinction is genuinely useful to see at a
+  // glance, it just no longer opens anything on click.
+  function RateCells({ ratePlanId, room, unbookedRoomsByDate }: { ratePlanId: string | undefined; room: Room | null; unbookedRoomsByDate: Map<string, Room[]> }) {
     const rateRows = ratePlanId ? ratesByPlan[ratePlanId] ?? [] : [];
     const rateByDate = new Map(rateRows.map((r) => [r.date.slice(0, 10), r]));
     const restrictionRows = ratePlanId ? restrictionsByPlan[ratePlanId] ?? [] : [];
@@ -377,77 +375,41 @@ export function Calendar({
         {dates.map((d, i) => {
           const rate = rateByDate.get(d);
           const restriction = restrictionByDate.get(d);
-          // §user request — "4 room mein se inventory 2 hai toh 101,102 block, 103,104 open":
-          // the lowest-numbered not-already-booked rooms are the ones that read as oversold —
-          // same unbookedRoomsByDate ranking, just blocking the front of the list instead of the
-          // back, to match that exact example.
           const unbooked = unbookedRoomsByDate.get(d) ?? [];
           const roomRank = room ? unbooked.findIndex((r) => r.id === room.id) : -1;
           const roomArtificiallyBlocked = Boolean(room) && roomRank >= 0 && !!rate && roomRank < unbooked.length - rate.availability;
-          const inDragSelection =
-            dragSelection?.instanceKey === instanceKey &&
-            i >= Math.min(dragSelection.startIdx, dragSelection.endIdx) &&
-            i <= Math.max(dragSelection.startIdx, dragSelection.endIdx);
+          const blocked = restriction?.channelBlocked || roomArtificiallyBlocked;
           const isToday = d === today;
           return (
             <div
               key={d}
-              className={`relative border-l border-slate-100 ${isToday ? 'bg-brand-50/70' : ''}`}
+              className={`relative flex flex-col justify-center border-l border-slate-100 px-1.5 py-1.5 ${isToday ? 'bg-brand-50/70' : ''}`}
               style={{ gridColumn: i + 1, gridRow: 1 }}
             >
-              <button
-                type="button"
-                disabled={!ratePlanId || !otaConnectionId}
-                onMouseDown={() => ratePlanId && startDrag(instanceKey, ratePlanId, roomCategoryId, i)}
-                onMouseEnter={() => extendDrag(instanceKey, i)}
-                title={
-                  otaConnectionId
-                    ? "Click to edit this date, or drag across several days to bulk-edit them"
-                    : 'Pick a channel first'
-                }
-                className={`group w-full select-none px-1.5 py-1.5 text-left hover:bg-brand-50/60 disabled:cursor-default disabled:hover:bg-transparent ${
-                  inDragSelection ? 'bg-brand-100' : ''
-                }`}
-              >
-                {rate ? (
+              {rate ? (
+                blocked ? (
+                  <p className="truncate text-[10px] font-medium text-red-500">Blocked</p>
+                ) : (
                   <>
+                    <p className="truncate text-[10px] font-medium text-slate-500">₹{rate.price}</p>
                     <p
-                      className={`truncate text-[10px] font-medium ${
-                        restriction?.channelBlocked || roomArtificiallyBlocked
-                          ? 'text-red-500'
-                          : rate.availability === 0
-                            ? 'text-red-500'
-                            : rate.availability <= 2
-                              ? 'text-amber-600'
-                              : 'text-emerald-600'
+                      className={`truncate text-xs font-semibold ${
+                        rate.availability === 0 ? 'text-red-500' : rate.availability <= 2 ? 'text-amber-600' : 'text-emerald-700'
                       }`}
                     >
-                      {/* §user request — "niche ek row bana ke No. of Rooms on OTA dena chahiye,
-                          clear rahega": that new category-level row above is now the one place
-                          the count lives — repeating it on every open room's own row (the
-                          original "sab rooms pe same number" confusion) would just bring the
-                          clutter back, so a room row now says plainly whether it's open or not. */}
-                      {restriction?.channelBlocked || roomArtificiallyBlocked ? 'Blocked' : room ? 'Open' : `${rate.availability} left`}
+                      {rate.availability} left
                     </p>
-                    {!roomArtificiallyBlocked && <p className="truncate text-xs font-semibold text-slate-700">₹{rate.price}</p>}
                   </>
-                ) : restriction?.channelBlocked ? (
-                  // A restriction (Advance Bulk Update) can exist on its own, with no rate ever
-                  // set for this date — without this branch the cell fell through to the plain
-                  // "+ Rate" empty state and the block was invisible on the one screen owners
-                  // actually glance at (§ user request: a blocked date must show here automatically).
-                  <p className="truncate text-[10px] font-medium text-red-500">Blocked</p>
-                ) : ratePlanId && otaConnectionId ? (
-                  // §bugfix — "+ Set rate" force-wrapped mid-word ("+ Set rat" / "e") in the
-                  // narrower mobile column (56px, added for §user request's "4 dates on mobile"),
-                  // overflowing this row's height and visually bleeding into the booking bar/row
-                  // below it. Shorter text plus `truncate` (belt-and-suspenders) keeps it to one
-                  // line no matter how narrow the column gets.
-                  <p className="truncate text-[10px] text-slate-400 group-hover:font-medium group-hover:text-brand-600">+ Rate</p>
-                ) : (
-                  <p className="truncate text-[10px] text-slate-300">—</p>
-                )}
-              </button>
+                )
+              ) : restriction?.channelBlocked ? (
+                // A restriction (Advance Bulk Update) can exist on its own, with no rate ever
+                // set for this date — without this branch the cell fell through to the plain
+                // "—" empty state and the block was invisible on the one screen owners
+                // actually glance at (§ user request: a blocked date must show here automatically).
+                <p className="truncate text-[10px] font-medium text-red-500">Blocked</p>
+              ) : (
+                <p className="truncate text-[10px] text-slate-300">—</p>
+              )}
             </div>
           );
         })}
@@ -717,17 +679,33 @@ export function Calendar({
                 <div key={categoryId}>
                   {/* §user request — "date ke niche ek row bana ke No. of Rooms on OTA dena
                       chahiye, kaafi clear rahega": one row, one number per date, for this
-                      category as a whole — the thing every room row below used to repeat. */}
+                      category as a whole — the thing every room row below used to repeat.
+                      §user request — "particular cell nahi, hum sirf issi row mein click
+                      karenge": this row is now the one clickable/draggable entry point for
+                      editing — click a date to open every category's editor for it, drag
+                      across dates for Bulk Edit, same gestures the individual room cells used
+                      to have before they became plain display. */}
                   {viewMode !== 'stays' && ratePlanId && (
                     <div className="flex border-b border-slate-200 bg-slate-50">
                       <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center bg-slate-50 px-3 py-2 sm:w-44">
                         <p className="truncate text-[10px] font-bold uppercase tracking-wide text-slate-500">Rooms on OTA</p>
                       </div>
                       <div className="grid flex-1" style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))` }}>
-                        {dates.map((d) => {
+                        {dates.map((d, i) => {
                           const rate = categoryRateRows.find((r) => r.date.slice(0, 10) === d);
+                          const inDragSelection =
+                            dragSelection?.instanceKey === categoryId &&
+                            i >= Math.min(dragSelection.startIdx, dragSelection.endIdx) &&
+                            i <= Math.max(dragSelection.startIdx, dragSelection.endIdx);
                           return (
-                            <div key={d} className="flex items-center justify-center border-l border-slate-100 py-2">
+                            <button
+                              key={d}
+                              type="button"
+                              onMouseDown={() => startDrag(categoryId, ratePlanId, categoryId, i)}
+                              onMouseEnter={() => extendDrag(categoryId, i)}
+                              title="Click to edit this date, or drag across several days to bulk-edit them"
+                              className={`flex items-center justify-center border-l border-slate-100 py-2 hover:bg-brand-50/60 ${inDragSelection ? 'bg-brand-100' : ''}`}
+                            >
                               {rate ? (
                                 <span
                                   className={`text-xs font-bold ${
@@ -737,9 +715,9 @@ export function Calendar({
                                   {rate.availability}
                                 </span>
                               ) : (
-                                <span className="text-xs text-slate-300">—</span>
+                                <span className="text-xs text-slate-400 hover:text-brand-600">+ Set</span>
                               )}
-                            </div>
+                            </button>
                           );
                         })}
                       </div>
@@ -771,13 +749,7 @@ export function Calendar({
                           style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`, minHeight: viewMode === 'rates' ? 64 : Math.max(64, 40 + barsHeight) }}
                         >
                           {viewMode !== 'stays' && (
-                            <RateCells
-                              instanceKey={instanceKey}
-                              ratePlanId={ratePlanId}
-                              roomCategoryId={categoryId}
-                              room={room}
-                              unbookedRoomsByDate={unbookedRoomsByDate}
-                            />
+                            <RateCells ratePlanId={ratePlanId} room={room} unbookedRoomsByDate={unbookedRoomsByDate} />
                           )}
                           {viewMode !== 'rates' && <BookingBars rowBookings={rowBookings} laneOf={laneOf} />}
                         </div>
@@ -808,14 +780,14 @@ export function Calendar({
         </Card>
       )}
 
-      {editingCell && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setEditingCell(null)}>
+      {editingDate && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => !savingDateEdit && setEditingDate(null)}>
           <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Edit cell</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Edit rates</p>
                 <p className="mt-1 text-lg font-bold text-slate-900">
-                  {new Date(editingCell.date + 'T00:00:00Z').toLocaleDateString('en-IN', {
+                  {new Date(editingDate + 'T00:00:00Z').toLocaleDateString('en-IN', {
                     weekday: 'short',
                     day: 'numeric',
                     month: 'short',
@@ -824,129 +796,84 @@ export function Calendar({
                   })}
                 </p>
               </div>
-              <button onClick={() => setEditingCell(null)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => !savingDateEdit && setEditingDate(null)} className="text-slate-400 hover:text-slate-600">
                 ✕
               </button>
             </div>
 
-            <div className="space-y-5 px-6 py-5">
-              <div>
-                <p className="mb-1.5 text-xs font-medium text-slate-600">Day note</p>
-                <textarea
-                  className={`${inputClass} w-full`}
-                  rows={2}
-                  placeholder="Private note for staff — guests never see this."
-                  value={draftNote}
-                  onChange={(e) => setDraftNote(e.target.value)}
-                  disabled={loadingCell}
-                />
-              </div>
-
-              <div className="flex rounded-lg bg-slate-100 p-1">
-                <button
-                  type="button"
-                  onClick={() => setDraftBlocked(false)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-sm font-semibold ${!draftBlocked ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-                >
-                  🔓 Open
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDraftBlocked(true)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-sm font-semibold ${draftBlocked ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-                >
-                  🔒 Blocked
-                </button>
-              </div>
-
-              <div>
-                <p className="mb-1.5 text-xs font-medium text-slate-600">Rate per night</p>
-                <input
-                  autoFocus
-                  className={`${inputClass} w-full`}
-                  type="number"
-                  min={0}
-                  value={draftPrice}
-                  onChange={(e) => setDraftPrice(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <p className="mb-1.5 text-xs font-medium text-slate-600">Rooms available</p>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setDraftAvailability((v) => Math.max(0, v - 1))}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50"
-                  >
-                    −
-                  </button>
-                  <input
-                    className={`${inputClass} w-20 text-center`}
-                    type="number"
-                    min={0}
-                    value={draftAvailability}
-                    onChange={(e) => setDraftAvailability(Math.max(0, Number(e.target.value)))}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setDraftAvailability((v) => v + 1)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Will push to</p>
-                {connections.length === 0 ? (
-                  <p className="text-xs text-slate-400">No channels connected yet — this will only save locally.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {connections.map((c) => {
-                      const isIndividuallyBlocked = channelBlockStatus[c.id] ?? false;
-                      return (
-                        <span
-                          key={c.id}
-                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
-                            isIndividuallyBlocked ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 text-slate-700'
-                          }`}
+            {/* §user request — "Rooms on OTA row pe click karne ke baad us date ka box banega,
+                jisme har category apni Rate/Availability/Will push to ke saath": one section per
+                room category, all for this one date, instead of one category at a time. */}
+            <div className="divide-y divide-slate-100">
+              {categoriesInOrder.map(([categoryId, categoryName]) => {
+                const draft = dateEditDrafts[categoryId];
+                if (!draft) return null;
+                return (
+                  <div key={categoryId} className="space-y-3 px-6 py-5">
+                    <p className="text-sm font-bold text-slate-900">{categoryName}</p>
+                    <div>
+                      <p className="mb-1.5 text-xs font-medium text-slate-600">Rate per night</p>
+                      <input
+                        className={`${inputClass} w-full`}
+                        type="number"
+                        min={0}
+                        placeholder="—"
+                        value={draft.price}
+                        onChange={(e) => setDateEditField(categoryId, 'price', e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <p className="mb-1.5 text-xs font-medium text-slate-600">Rooms available (out of {draft.totalRooms})</p>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setDateEditField(categoryId, 'availability', String(Math.max(0, draft.availability - 1)))}
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50"
                         >
-                          <ChannelIcon source={c.otaCode} className="h-4 w-4" />
-                          {OTA_LABEL[c.otaCode] ?? c.otaCode}
-                          {isIndividuallyBlocked && <span className="font-semibold">· Blocked</span>}
-                        </span>
-                      );
-                    })}
+                          −
+                        </button>
+                        <input
+                          className={`${inputClass} w-20 text-center`}
+                          type="number"
+                          min={0}
+                          max={draft.totalRooms}
+                          value={draft.availability}
+                          onChange={(e) => setDateEditField(categoryId, 'availability', e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setDateEditField(categoryId, 'availability', String(draft.availability + 1))}
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                    {connections.length > 0 && (
+                      <p className="text-[11px] leading-relaxed text-slate-400">
+                        Also will push to:{' '}
+                        {connections.map((c, i) => (
+                          <span key={c.id} className="font-medium text-slate-500">
+                            {OTA_LABEL[c.otaCode] ?? c.otaCode}
+                            {i < connections.length - 1 ? ', ' : ''}
+                          </span>
+                        ))}{' '}
+                        and every other connected channel.
+                      </p>
+                    )}
                   </div>
-                )}
-                <p className="mt-2.5 text-[11px] leading-relaxed text-slate-400">
-                  Price and rooms available push to every connected channel together — same pooled inventory a real booking draws from.
-                  Incoming OTA bookings can still take a little longer to show up here; that timing is controlled by the OTA, not this
-                  screen.
-                </p>
-                {connections.some((c) => (channelBlockStatus[c.id] ?? false) !== draftBlocked) && (
-                  <p className="mt-2.5 rounded-md bg-amber-50 px-2.5 py-2 text-[11px] font-medium text-amber-700">
-                    ⚠️ The Open/Blocked toggle above also pushes to every channel — saving will set{' '}
-                    {connections
-                      .filter((c) => (channelBlockStatus[c.id] ?? false) !== draftBlocked)
-                      .map((c) => OTA_LABEL[c.otaCode] ?? c.otaCode)
-                      .join(', ')}{' '}
-                    to <strong>{draftBlocked ? 'Blocked' : 'Open'}</strong> too, overriding what Advance Bulk Update set for{' '}
-                    {connections.filter((c) => (channelBlockStatus[c.id] ?? false) !== draftBlocked).length === 1 ? 'it' : 'them'}{' '}
-                    individually.
-                  </p>
-                )}
-              </div>
+                );
+              })}
             </div>
 
+            {dateEditError && <p className="px-6 pb-2 text-sm text-red-600">{dateEditError}</p>}
+
             <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
-              <button type="button" onClick={() => setEditingCell(null)} className="text-sm font-medium text-slate-500 hover:underline">
+              <button type="button" onClick={() => setEditingDate(null)} className="text-sm font-medium text-slate-500 hover:underline" disabled={savingDateEdit}>
                 Cancel
               </button>
-              <Button type="button" onClick={() => void saveCellEditor()} disabled={savingCell || loadingCell || !draftPrice}>
-                {savingCell ? 'Saving…' : 'Save & push'}
+              <Button type="button" onClick={() => void saveDateEditor()} disabled={savingDateEdit}>
+                {savingDateEdit ? 'Saving…' : 'Save & push'}
               </Button>
             </div>
           </div>
