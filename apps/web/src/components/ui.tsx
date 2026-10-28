@@ -62,8 +62,9 @@ export function Button({
     secondary: 'bg-white text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:hover:bg-slate-700',
     danger: 'bg-red-600 text-white hover:bg-red-700',
     ghost: 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
-    // Check-in wizard's own accent — kept separate from `primary` so this
-    // doesn't recolor buttons anywhere else in the app.
+    // Check-in wizard's own variant name, kept so its many call sites don't all need touching —
+    // but `royal-*` now aliases `brand-*` 1:1 (§brand-kit: one blue app-wide), so visually this
+    // is identical to `primary`.
     royal: 'bg-royal-600 text-white hover:bg-royal-700',
   };
   return (

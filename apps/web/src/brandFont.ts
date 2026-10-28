@@ -8,7 +8,8 @@
  */
 import { FONT_FAMILIES, parseFontOptionId, ensureFontFamilyLoaded } from './fontCatalog';
 
-export const DEFAULT_FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif";
+// §user request — official StayYatra brand kit: Arial only. Matches index.css's --font-sans default.
+export const DEFAULT_FONT_STACK = 'Arial, Helvetica, sans-serif';
 
 export { FONT_FAMILIES };
 

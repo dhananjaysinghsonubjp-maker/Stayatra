@@ -616,20 +616,23 @@ function MethodPicker({ value, onChange }: { value: PaymentMethod; onChange: (m:
                     setOpen(false);
                   }}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
-                    isSelected ? 'bg-green-50' : 'hover:bg-slate-50'
+                    // §brand-kit §3/§7 — "Selected dropdown option: background #E8EEFF, text
+                    // #0C2171"; a payment method isn't a success/failure state, so this is a
+                    // selection, not a status — blue, not green.
+                    isSelected ? 'bg-brand-50' : 'hover:bg-slate-50'
                   }`}
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base">{info.icon}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-slate-900">{m.label}</span>
+                    <span className={`block text-sm font-semibold ${isSelected ? 'text-brand-700' : 'text-slate-900'}`}>{m.label}</span>
                     <span className="block text-xs text-slate-500">{info.description}</span>
                   </span>
                   <span
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
-                      isSelected ? 'border-green-600' : 'border-slate-300'
+                      isSelected ? 'border-brand-600' : 'border-slate-300'
                     }`}
                   >
-                    {isSelected && <span className="h-2.5 w-2.5 rounded-full bg-green-600" />}
+                    {isSelected && <span className="h-2.5 w-2.5 rounded-full bg-brand-600" />}
                   </span>
                 </button>
               );

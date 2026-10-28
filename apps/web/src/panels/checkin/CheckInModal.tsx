@@ -1132,12 +1132,14 @@ function StayDatesModal({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="mb-4 flex items-center justify-between rounded-xl bg-brand-50 px-3 py-2.5">
+          {/* §brand-kit §6 — summary strip bg is the workspace grey, not a light-blue tint; the
+              night-count pill is the one solid-blue/white-text element in this bar. */}
+          <div className="mb-4 flex items-center justify-between rounded-xl bg-[#F5F7FA] px-3 py-2.5">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Check In</p>
               <p className="text-sm font-bold text-slate-900">{formatDateShort(checkInDate)}</p>
             </div>
-            <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-brand-700 shadow-sm">
+            <span className="rounded-full bg-brand-600 px-2 py-1 text-xs font-bold text-white shadow-sm">
               {nights} night{nights === 1 ? '' : 's'}
             </span>
             <div className="text-right">
@@ -1198,15 +1200,15 @@ function StayDatesModal({
                   disabled={disabled && !isCheckIn}
                   onClick={() => !disabled && setDraftCheckOut(iso)}
                   className={`flex h-9 items-center justify-center rounded-full text-sm transition-colors ${
-                    isCheckIn
-                      ? 'bg-brand-100 font-bold text-brand-700'
-                      : isCheckOut
-                        ? 'bg-brand-600 font-bold text-white'
-                        : inRange
-                          ? 'bg-brand-50 text-brand-700'
-                          : disabled
-                            ? 'cursor-not-allowed text-slate-300'
-                            : 'text-slate-700 hover:bg-slate-100'
+                    // §brand-kit §6/§3 — "start date and end date: #0C2171 background with white
+                    // text", "selected range background: #E8EEFF, text charcoal".
+                    isCheckIn || isCheckOut
+                      ? 'bg-brand-600 font-bold text-white'
+                      : inRange
+                        ? 'bg-brand-50 text-slate-900'
+                        : disabled
+                          ? 'cursor-not-allowed text-slate-300'
+                          : 'text-slate-700 hover:bg-brand-50'
                   }`}
                 >
                   {Number(iso.slice(-2))}

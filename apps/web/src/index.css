@@ -6,35 +6,56 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+  /* §user request — official StayYatra brand kit: Arial only, no Inter/Roboto/Poppins. */
+  --font-sans: Arial, Helvetica, sans-serif;
 
-  /* §user request — StayYatra's own default brand colour (#0c2171, same shade-derivation formula
-     as brandColor.ts's deriveBrandShades, so a hotel's own custom colour and this default use
-     identical math). Background/shell stays white/light — only buttons/headings/links/chart
-     accents read this, same as before. */
-  --color-brand-50: #eef1fc;
+  /* §user request — official StayYatra brand kit (exact hexes given, not re-derived): Primary
+     #0C2171, Hover #18368F, Light-blue-selection #E8EEFF for 50/700 respectively. 100/500 stay the
+     same brandColor.ts-derived tints of #0C2171 they already were (same hue/saturation, just a
+     different lightness step) — the kit didn't specify those two, so there's nothing to replace
+     them with. A hotel's own custom brand colour (Settings) still overrides all of these the same
+     way it always did, via brandColor.ts's deriveBrandShades. */
+  --color-brand-50: #e8eeff;
   --color-brand-100: #d8dff8;
   --color-brand-500: #3d61ea;
   --color-brand-600: #0c2171;
-  --color-brand-700: #112e9d;
+  --color-brand-700: #18368f;
 
-  /* Royal blue — Check-In's own accent palette (§ scoped to the check-in
-     wizard only, so the rest of the app keeps its indigo `brand` colors). */
-  --color-royal-50: #eef2ff;
-  --color-royal-100: #e0e9ff;
-  --color-royal-200: #c2d3ff;
-  --color-royal-500: #5578e8;
-  --color-royal-600: #4169e1;
-  --color-royal-700: #3151b8;
-  --color-royal-800: #263e8f;
+  /* §user request — "entire application must use this colour system consistently... do not use
+     green [or a second, different blue] to indicate a selected date or active button": the
+     check-in wizard used to run its own separate lighter "royal" blue (#4169e1) alongside the
+     rest of the app's `brand` navy — two different blues was itself a brand-kit violation, so
+     `royal-*` now just aliases `brand-*` 1:1 instead of being its own palette. Kept as distinct
+     tokens (not a find/replace across every file) so this one line is the single place that does
+     it, and so any file still written against `royal-*` class names keeps compiling unchanged. */
+  --color-royal-50: var(--color-brand-50);
+  --color-royal-100: var(--color-brand-100);
+  --color-royal-200: var(--color-brand-100);
+  --color-royal-500: var(--color-brand-500);
+  --color-royal-600: var(--color-brand-600);
+  --color-royal-700: var(--color-brand-700);
+  --color-royal-800: var(--color-brand-700);
 
-  --color-status-available: #10b981;
+  /* §user request — brand kit §9/§7: workspace background, surfaces, text and borders. Used via
+     bg-surface/bg-workspace/text-charcoal/text-muted/border-default utility classes going forward
+     — existing bg-white/text-slate-900/border-slate-200 etc. elsewhere are visually close already
+     (this is the exact-hex version for new/updated screens) and keep working unchanged. */
+  --color-surface: #ffffff;
+  --color-workspace: #f5f7fa;
+  --color-charcoal: #222b3a;
+  --color-muted: #667085;
+  --color-border-default: #e0e5ec;
+
+  /* §user request — functional status colours (operational meaning only, never a stand-in for the
+     brand blue). Error/Success already matched Tailwind's red-600/green-600 exactly; Warning
+     moved from amber-500 (#f59e0b) to the kit's amber-600 (#d97706). */
+  --color-status-available: #16a34a;
   --color-status-available-bg: #ecfdf5;
-  --color-status-occupied: #f59e0b;
+  --color-status-occupied: #d97706;
   --color-status-occupied-bg: #fffbeb;
   --color-status-housekeeping: #3b82f6;
   --color-status-housekeeping-bg: #eff6ff;
-  --color-status-flagged: #ef4444;
+  --color-status-flagged: #dc2626;
   --color-status-flagged-bg: #fef2f2;
 }
 
@@ -48,8 +69,8 @@
 
 body {
   margin: 0;
-  background: #f8fafc;
-  color: #0f172a;
+  background: #f5f7fa;
+  color: #222b3a;
 }
 
 .dark body {
