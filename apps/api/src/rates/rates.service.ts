@@ -298,6 +298,11 @@ export class RatesService {
    * connected channel. `overrideValueOverrides: true` because the dates here were
    * deliberately drag-selected by hand, not swept up by an unrelated date-range edit —
    * silently skipping some would be more surprising than honoring the visible selection.
+   *
+   * §bugfix — same redundant-write fix as saveCellEditor: bulkUpdate's own availability fan-out
+   * (triggered once per connection here) used to mean every cell in the range got written once
+   * per connection *for every connection*, not once total. Only the first connection's call
+   * carries availability now — its fan-out handles the rest — later connections just get price.
    */
   async bulkEditCells(input: {
     hotelId: string;
@@ -317,16 +322,28 @@ export class RatesService {
     const primaryByCategory = new Map<string, string>();
     for (const rp of ratePlans) if (!primaryByCategory.has(rp.roomCategoryId)) primaryByCategory.set(rp.roomCategoryId, rp.id);
     const ratePlanIds = [...primaryByCategory.values()];
+    const [firstConn, ...restConns] = connections;
 
     for (const ratePlanId of ratePlanIds) {
-      for (const conn of connections) {
+      if (!firstConn) continue;
+      await this.bulkUpdate({
+        ratePlanId,
+        otaConnectionId: firstConn.id,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        daysOfWeek: input.daysOfWeek,
+        explicitTiers: [{ occupancyTier: 1, price: input.price, availability: input.availability }],
+        overrideValueOverrides: true,
+        changedBy: input.actorId,
+      });
+      for (const conn of restConns) {
         await this.bulkUpdate({
           ratePlanId,
           otaConnectionId: conn.id,
           startDate: input.startDate,
           endDate: input.endDate,
           daysOfWeek: input.daysOfWeek,
-          explicitTiers: [{ occupancyTier: 1, price: input.price, availability: input.availability }],
+          explicitTiers: [{ occupancyTier: 1, price: input.price }],
           overrideValueOverrides: true,
           changedBy: input.actorId,
         });
@@ -339,7 +356,17 @@ export class RatesService {
    * The Calendar cell editor's single "Save & push" action — pooled inventory (same
    * non-negotiable as `adjustAvailabilityForStay`) means one edit to a room-night applies
    * to every connected channel at once, not just whichever channel happened to be selected
-   * in the grid's filter dropdown, so this loops every OTA connection the hotel has.
+   * in the grid's filter dropdown.
+   *
+   * §bugfix — "cell ke andar click karke jo changes karte hain, usko bhi fix karo": this used
+   * to call setValueOverride once per connection to get that pooling — now that
+   * setValueOverride fans availability out to every *other* connection on its own (see its own
+   * comment), doing that in a loop here wrote every cell 3x for 3 channels (once directly, twice
+   * more from the other two calls' own fan-out). One call now carries price+availability for the
+   * first connection — its fan-out covers availability everywhere — and the rest only need price
+   * explicitly pushed (this editor has no per-channel price of its own, same "one value, every
+   * channel" design the UI already had). Restriction (channelBlocked) was never fanned and still
+   * isn't — it's genuinely per-channel — so that loop is unchanged.
    */
   async saveCellEditor(input: {
     hotelId: string;
@@ -353,14 +380,25 @@ export class RatesService {
     actorId: string;
   }) {
     const connections = await this.prisma.otaConnection.findMany({ where: { hotelId: input.hotelId }, select: { id: true } });
-    for (const conn of connections) {
+    const [first, ...rest] = connections;
+    if (first) {
       await this.setValueOverride({
         ratePlanId: input.ratePlanId,
-        otaConnectionId: conn.id,
+        otaConnectionId: first.id,
         date: input.date,
         tiers: [{ occupancyTier: 1, price: input.price, availability: input.availability }],
         changedBy: input.actorId,
       });
+      for (const conn of rest) {
+        const existing = await this.prisma.inventoryRate.findUnique({
+          where: {
+            ratePlanId_otaConnectionId_date_occupancyTier: { ratePlanId: input.ratePlanId, otaConnectionId: conn.id, date: input.date, occupancyTier: 1 },
+          },
+        });
+        await this.upsertBulkCell(input.ratePlanId, conn.id, input.date, { occupancyTier: 1, price: input.price }, input.actorId, existing ?? undefined);
+      }
+    }
+    for (const conn of connections) {
       await this.upsertRestriction({
         ratePlanId: input.ratePlanId,
         otaConnectionId: conn.id,
