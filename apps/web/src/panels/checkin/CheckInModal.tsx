@@ -6,6 +6,7 @@ import { Button, Card, Field, royalInputClass as inputClass } from '../../compon
 import { computeGstSlab } from '../../gst';
 import { formatDateShort, formatDateTimeShort } from '../../dateFormat';
 import { CameraCapture } from '../../components/CameraCapture';
+import { ClockTimePicker } from './ClockTimePicker';
 import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
 import { BOOKING_SOURCE_OPTIONS } from '../../bookingSource';
 import type { Booking, BookingSource, Gender, Guest, IdType, RatePlan, Room } from '../../types';
@@ -34,6 +35,12 @@ function addDaysISO(iso: string, days: number) {
 function nowHHMM() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+function formatTime12(hhmm: string) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${period}`;
 }
 
 function isAdult(dob: string): boolean {
@@ -579,16 +586,16 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                     <span className="text-xs font-semibold text-brand-600">Edit ✎</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="min-w-0 flex-1 rounded-lg bg-green-50 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Check In</p>
+                    <div className="min-w-0 flex-1 rounded-lg bg-brand-50 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Check In</p>
                       <p className="truncate text-sm font-bold text-slate-900">{formatDateShort(todayISO())}</p>
-                      <p className="text-xs text-slate-500">{arrivalTime}</p>
+                      <p className="text-xs text-slate-500">{formatTime12(arrivalTime)}</p>
                     </div>
                     <span className="shrink-0 text-slate-400">→</span>
                     <div className="min-w-0 flex-1 rounded-lg bg-amber-50 px-3 py-2">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">Check Out</p>
                       <p className="truncate text-sm font-bold text-slate-900">{formatDateShort(checkOutDateNew)}</p>
-                      <p className="text-xs text-slate-500">{departureTime}</p>
+                      <p className="text-xs text-slate-500">{formatTime12(departureTime)}</p>
                     </div>
                   </div>
                 </button>
@@ -1084,6 +1091,7 @@ function StayDatesModal({
   const [draftCheckOut, setDraftCheckOut] = useState(checkOutDate);
   const [draftCheckInTime, setDraftCheckInTime] = useState(checkInTime);
   const [draftCheckOutTime, setDraftCheckOutTime] = useState(checkOutTime);
+  const [timePickerFor, setTimePickerFor] = useState<'checkin' | 'checkout' | null>(null);
   const [viewDate, setViewDate] = useState(() => {
     const [y, m] = checkOutDate.split('-').map(Number);
     return { year: y, month: m - 1 };
@@ -1124,27 +1132,37 @@ function StayDatesModal({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="mb-4 flex items-center justify-between rounded-xl bg-green-50 px-3 py-2.5">
+          <div className="mb-4 flex items-center justify-between rounded-xl bg-brand-50 px-3 py-2.5">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Check In</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Check In</p>
               <p className="text-sm font-bold text-slate-900">{formatDateShort(checkInDate)}</p>
             </div>
-            <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-green-700 shadow-sm">
+            <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-brand-700 shadow-sm">
               {nights} night{nights === 1 ? '' : 's'}
             </span>
             <div className="text-right">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Check Out</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Check Out</p>
               <p className="text-sm font-bold text-slate-900">{formatDateShort(draftCheckOut)}</p>
             </div>
           </div>
 
+          {/* §user request — "time mein jo screenshot share kiya vesa clock chahiye": these open
+              the analog ClockTimePicker instead of the browser's native time input. */}
           <div className="mb-4 grid grid-cols-2 gap-3">
-            <Field label="Check-in time">
-              <input className={inputClass} type="time" value={draftCheckInTime} onChange={(e) => setDraftCheckInTime(e.target.value)} />
-            </Field>
-            <Field label="Check-out time">
-              <input className={inputClass} type="time" value={draftCheckOutTime} onChange={(e) => setDraftCheckOutTime(e.target.value)} />
-            </Field>
+            <div>
+              <p className="mb-1.5 text-xs font-medium text-slate-600">Check-in time</p>
+              <button type="button" onClick={() => setTimePickerFor('checkin')} className={`${inputClass} flex w-full items-center gap-2 text-left`}>
+                <span>🕐</span>
+                {formatTime12(draftCheckInTime)}
+              </button>
+            </div>
+            <div>
+              <p className="mb-1.5 text-xs font-medium text-slate-600">Check-out time</p>
+              <button type="button" onClick={() => setTimePickerFor('checkout')} className={`${inputClass} flex w-full items-center gap-2 text-left`}>
+                <span>🕐</span>
+                {formatTime12(draftCheckOutTime)}
+              </button>
+            </div>
           </div>
 
           <div className="mb-2 flex items-center justify-between">
@@ -1181,11 +1199,11 @@ function StayDatesModal({
                   onClick={() => !disabled && setDraftCheckOut(iso)}
                   className={`flex h-9 items-center justify-center rounded-full text-sm transition-colors ${
                     isCheckIn
-                      ? 'bg-green-100 font-bold text-green-700'
+                      ? 'bg-brand-100 font-bold text-brand-700'
                       : isCheckOut
-                        ? 'bg-green-600 font-bold text-white'
+                        ? 'bg-brand-600 font-bold text-white'
                         : inRange
-                          ? 'bg-green-50 text-green-700'
+                          ? 'bg-brand-50 text-brand-700'
                           : disabled
                             ? 'cursor-not-allowed text-slate-300'
                             : 'text-slate-700 hover:bg-slate-100'
@@ -1212,6 +1230,19 @@ function StayDatesModal({
           </Button>
         </div>
       </div>
+
+      {timePickerFor && (
+        <ClockTimePicker
+          label={timePickerFor === 'checkin' ? 'Check-in time' : 'Check-out time'}
+          value={timePickerFor === 'checkin' ? draftCheckInTime : draftCheckOutTime}
+          onApply={(hhmm) => {
+            if (timePickerFor === 'checkin') setDraftCheckInTime(hhmm);
+            else setDraftCheckOutTime(hhmm);
+            setTimePickerFor(null);
+          }}
+          onClose={() => setTimePickerFor(null)}
+        />
+      )}
     </div>,
     document.body,
   );
