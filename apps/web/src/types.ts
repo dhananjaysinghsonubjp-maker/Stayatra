@@ -129,6 +129,18 @@ export interface InvoiceLineItem {
   createdAt: string;
 }
 
+export type BookingSource =
+  | 'direct'
+  | 'walk_in'
+  | 'booking_com'
+  | 'mmt_goibibo'
+  | 'agoda'
+  | 'airbnb'
+  | 'expedia'
+  | 'cleartrip'
+  | 'easemytrip'
+  | 'yatra';
+
 export interface Booking {
   id: string;
   hotelId: string;
@@ -157,7 +169,7 @@ export interface Booking {
   checkOut: string;
   nights: number;
   status: 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled';
-  source: string;
+  source: BookingSource;
   paidAmount: string | null;
   paymentMethod?: string | null;
   totalAmount: string;

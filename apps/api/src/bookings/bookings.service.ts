@@ -528,6 +528,7 @@ export class BookingsService {
       checkIn: Date;
       checkOut: Date;
       nights: number;
+      source?: BookingSource;
       totalAmount: number;
       lineItems?: { description: string; quantity: number; unitPrice: number }[];
       discountAmount?: number;
@@ -593,7 +594,7 @@ export class BookingsService {
           gstExempt: input.gstExempt ?? false,
           status: BookingStatus.checked_in,
           checkedInAt: new Date(),
-          source: 'walk_in',
+          source: input.source ?? 'walk_in',
           billToCompanyName: input.companyName,
           billToCompanyTaxIdType: input.companyName ? input.companyTaxIdType : undefined,
           billToCompanyGstin: input.companyName ? input.companyGstin : undefined,

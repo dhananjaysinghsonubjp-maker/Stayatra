@@ -191,6 +191,10 @@ export function createBookingsRouter(bookings: BookingsService) {
           checkIn: z.coerce.date(),
           checkOut: z.coerce.date(),
           nights: z.number().int().positive().max(365),
+          // §user request — "booking source nahi daala hai": which channel this walk-in actually
+          // came through (phone booking, OTA, or a genuine on-the-spot walk-in), not always
+          // hardcoded to 'walk_in' regardless of what really happened.
+          source: bookingSourceSchema.optional(),
           totalAmount: z.number().nonnegative(),
           lineItems: lineItemsAtCheckInSchema,
           discountAmount: z.number().nonnegative().optional(),

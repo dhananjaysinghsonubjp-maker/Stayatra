@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { mutate, query, uploadFiles, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button, Card, Field, royalInputClass as inputClass } from '../../components/ui';
 import { computeGstSlab } from '../../gst';
-import { formatDateTimeShort } from '../../dateFormat';
+import { formatDateShort, formatDateTimeShort } from '../../dateFormat';
 import { CameraCapture } from '../../components/CameraCapture';
 import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
-import type { Booking, Gender, Guest, IdType, RatePlan, Room } from '../../types';
+import { BOOKING_SOURCE_OPTIONS } from '../../bookingSource';
+import type { Booking, BookingSource, Gender, Guest, IdType, RatePlan, Room } from '../../types';
 
 const ID_TYPES: { value: IdType; label: string }[] = [
   { value: 'aadhaar', label: 'Aadhaar' },
@@ -19,6 +21,20 @@ const ID_TYPES: { value: IdType; label: string }[] = [
 const TITLES = ['Mr', 'Mrs', 'Ms', 'Dr', 'Other'];
 
 const PURPOSES = ['Leisure', 'Business', 'Medical', 'Event/Wedding', 'Other'];
+
+// §user request — "FMO yahan check-in ki date hi alag karna chahega toh vo Reservation mein count
+// hogi": a direct/walk-in check-in's check-in date is always today, full stop — a different date
+// belongs in the separate Reservation flow (CreateReservationModal), not here.
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function addDaysISO(iso: string, days: number) {
+  return new Date(new Date(`${iso}T00:00:00`).getTime() + days * 86400000).toISOString().slice(0, 10);
+}
+function nowHHMM() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
 function isAdult(dob: string): boolean {
   const birth = new Date(dob);
@@ -115,6 +131,19 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   const [ratePlanId, setRatePlanId] = useState('');
   const [amountPerNight, setAmountPerNight] = useState(2000);
   const [nights, setNights] = useState(1);
+  // §user request — "booking source nahi daala hai, isko create karo": which channel this
+  // walk-in actually came through (a phone booking, an OTA, or a genuine on-the-spot walk-in).
+  // 'walk_in' default — this field only applies to mode==='new'; an existing reservation's
+  // source was already decided when that reservation was created.
+  const [bookingSource, setBookingSource] = useState<BookingSource>('walk_in');
+  // §user request — "upar check-in ke upar room ka check-in/check-out date aur time likha ho,
+  // editable ho, click karne par calendar khule": check-in date itself is always today (a
+  // different date is a Reservation, not a walk-in — see todayISO's comment), but its time and
+  // the check-out date+time are all editable through the StayDatesModal below.
+  const [arrivalTime, setArrivalTime] = useState(nowHHMM);
+  const [departureTime, setDepartureTime] = useState('11:00');
+  const [stayPickerOpen, setStayPickerOpen] = useState(false);
+  const checkOutDateNew = addDaysISO(todayISO(), nights);
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -416,8 +445,10 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
       if (mode === 'new') {
         if (!room) throw new Error('No room selected');
         checkedInRoomNumber = room.roomNumber;
-        const checkIn = new Date();
-        const checkOut = new Date(Date.now() + nights * 86400000);
+        // §user request — check-in time and check-out date+time now come from the Stay Details
+        // picker instead of always being "this exact submit moment" / "+N days at the same time".
+        const checkIn = new Date(`${todayISO()}T${arrivalTime}:00`);
+        const checkOut = new Date(`${checkOutDateNew}T${departureTime}:00`);
         await mutate(
           'bookings.checkInWalkIn',
           {
@@ -428,6 +459,7 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
             checkIn: checkIn.toISOString(),
             checkOut: checkOut.toISOString(),
             nights,
+            source: bookingSource,
             totalAmount: draft.adjustedTotalAmount ?? totalAmount,
             ...invoiceExtras,
           },
@@ -532,6 +564,36 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                 the inner one hiding the Cancel/Next buttons past its own fixed cap regardless of
                 how much room was actually left. A single scroll region (the Card's) is enough. */}
             <form onSubmit={goToStepTwo} noValidate className="space-y-4">
+              {/* §user request — "upar check-in ke upar room ka check-in/check-out date aur time
+                  likha ho, editable ho, click karne par aisa calendar khule": a reference app's own
+                  "Stay Details" card, rebuilt in our style. Walk-in only — an existing reservation
+                  already has its own date fields lower down in the Room card. */}
+              {mode === 'new' && (
+                <button
+                  type="button"
+                  onClick={() => setStayPickerOpen(true)}
+                  className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-brand-300"
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Stay Details</span>
+                    <span className="text-xs font-semibold text-brand-600">Edit ✎</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1 rounded-lg bg-green-50 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Check In</p>
+                      <p className="truncate text-sm font-bold text-slate-900">{formatDateShort(todayISO())}</p>
+                      <p className="text-xs text-slate-500">{arrivalTime}</p>
+                    </div>
+                    <span className="shrink-0 text-slate-400">→</span>
+                    <div className="min-w-0 flex-1 rounded-lg bg-amber-50 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">Check Out</p>
+                      <p className="truncate text-sm font-bold text-slate-900">{formatDateShort(checkOutDateNew)}</p>
+                      <p className="text-xs text-slate-500">{departureTime}</p>
+                    </div>
+                  </div>
+                </button>
+              )}
+
               {/* 1. Room — no picker here: the room is already fixed by which Room Board tile's
                   "Check in" was clicked (or already assigned at booking time); this just shows it
                   plus the price inputs, same fields a pick-a-room flow would ask for minus the
@@ -837,6 +899,21 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                         </select>
                       </Field>
 
+                      {/* §user request — "booking source nahi daala hai, isko create karo, purpose
+                          of stay ke niche": walk-in only — an existing reservation's source was
+                          already set when that reservation was first created. */}
+                      {mode === 'new' && (
+                        <Field label="Booking Source">
+                          <select className={inputClass} value={bookingSource} onChange={(e) => setBookingSource(e.target.value as BookingSource)}>
+                            {BOOKING_SOURCE_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      )}
+
                       {/* Individual/Company itself is toggled from the section header above —
                           this just reveals the company-billing fields once Company is picked. */}
                       {isCorporate && (
@@ -958,7 +1035,185 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
           onClose={() => setCameraFor(null)}
         />
       )}
+
+      {stayPickerOpen && (
+        <StayDatesModal
+          checkInDate={todayISO()}
+          checkOutDate={checkOutDateNew}
+          checkInTime={arrivalTime}
+          checkOutTime={departureTime}
+          onApply={(checkOutDate, checkInTime, checkOutTime) => {
+            const newNights = Math.max(1, Math.round((new Date(`${checkOutDate}T00:00:00`).getTime() - new Date(`${todayISO()}T00:00:00`).getTime()) / 86400000));
+            setNights(newNights);
+            setArrivalTime(checkInTime);
+            setDepartureTime(checkOutTime);
+            setStayPickerOpen(false);
+          }}
+          onClose={() => setStayPickerOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/**
+ * §user request, with a reference app's own "Select stay dates" screen as the target — a real
+ * calendar (range highlight + live night count), not just a bare `<input type="date">", which
+ * can't show a range or a running "N nights" total as you pick. Check-in day is fixed (today,
+ * greyed out, unclickable) — a walk-in's check-in is always "now"; a different date belongs in
+ * the separate Reservation flow, not here. Only the check-out day is actually pickable.
+ */
+function StayDatesModal({
+  checkInDate,
+  checkOutDate,
+  checkInTime,
+  checkOutTime,
+  onApply,
+  onClose,
+}: {
+  checkInDate: string;
+  checkOutDate: string;
+  checkInTime: string;
+  checkOutTime: string;
+  onApply: (checkOutDate: string, checkInTime: string, checkOutTime: string) => void;
+  onClose: () => void;
+}) {
+  const [draftCheckOut, setDraftCheckOut] = useState(checkOutDate);
+  const [draftCheckInTime, setDraftCheckInTime] = useState(checkInTime);
+  const [draftCheckOutTime, setDraftCheckOutTime] = useState(checkOutTime);
+  const [viewDate, setViewDate] = useState(() => {
+    const [y, m] = checkOutDate.split('-').map(Number);
+    return { year: y, month: m - 1 };
+  });
+
+  const nights = Math.max(1, Math.round((new Date(`${draftCheckOut}T00:00:00`).getTime() - new Date(`${checkInDate}T00:00:00`).getTime()) / 86400000));
+
+  const firstWeekday = new Date(viewDate.year, viewDate.month, 1).getDay();
+  const daysInMonth = new Date(viewDate.year, viewDate.month + 1, 0).getDate();
+  const cells: (string | null)[] = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => `${viewDate.year}-${String(viewDate.month + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`),
+  ];
+
+  function changeMonth(delta: number) {
+    setViewDate((v) => {
+      const m = v.month + delta;
+      return { year: v.year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 };
+    });
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[66] flex items-center justify-center bg-slate-900/60 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between border-b border-slate-100 px-5 py-4">
+          <div>
+            <h4 className="text-base font-bold text-slate-900">Select stay dates</h4>
+            <p className="text-xs text-slate-500">Choose when this guest checks out</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-4 flex items-center justify-between rounded-xl bg-green-50 px-3 py-2.5">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Check In</p>
+              <p className="text-sm font-bold text-slate-900">{formatDateShort(checkInDate)}</p>
+            </div>
+            <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-green-700 shadow-sm">
+              {nights} night{nights === 1 ? '' : 's'}
+            </span>
+            <div className="text-right">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Check Out</p>
+              <p className="text-sm font-bold text-slate-900">{formatDateShort(draftCheckOut)}</p>
+            </div>
+          </div>
+
+          <div className="mb-4 grid grid-cols-2 gap-3">
+            <Field label="Check-in time">
+              <input className={inputClass} type="time" value={draftCheckInTime} onChange={(e) => setDraftCheckInTime(e.target.value)} />
+            </Field>
+            <Field label="Check-out time">
+              <input className={inputClass} type="time" value={draftCheckOutTime} onChange={(e) => setDraftCheckOutTime(e.target.value)} />
+            </Field>
+          </div>
+
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-bold text-slate-900">
+              {MONTH_LABELS[viewDate.month]} {viewDate.year}
+            </p>
+            <div className="flex gap-1">
+              <button type="button" onClick={() => changeMonth(-1)} className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100">
+                ‹
+              </button>
+              <button type="button" onClick={() => changeMonth(1)} className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100">
+                ›
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-1 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-400">
+            {WEEKDAY_LABELS.map((d) => (
+              <div key={d}>{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((iso, i) => {
+              if (!iso) return <div key={`blank-${i}`} />;
+              const isCheckIn = iso === checkInDate;
+              const isCheckOut = iso === draftCheckOut;
+              const inRange = iso > checkInDate && iso < draftCheckOut;
+              const disabled = iso <= checkInDate;
+              return (
+                <button
+                  key={iso}
+                  type="button"
+                  disabled={disabled && !isCheckIn}
+                  onClick={() => !disabled && setDraftCheckOut(iso)}
+                  className={`flex h-9 items-center justify-center rounded-full text-sm transition-colors ${
+                    isCheckIn
+                      ? 'bg-green-100 font-bold text-green-700'
+                      : isCheckOut
+                        ? 'bg-green-600 font-bold text-white'
+                        : inRange
+                          ? 'bg-green-50 text-green-700'
+                          : disabled
+                            ? 'cursor-not-allowed text-slate-300'
+                            : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {Number(iso.slice(-2))}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 gap-2 border-t border-slate-100 px-5 py-4">
+          <Button type="button" variant="secondary" className="flex-1" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            className="flex-1"
+            onClick={() => onApply(draftCheckOut, draftCheckInTime, draftCheckOutTime)}
+          >
+            Apply dates · {nights} night{nights === 1 ? '' : 's'}
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

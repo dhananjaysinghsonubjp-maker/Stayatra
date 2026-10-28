@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
+import { BOOKING_SOURCE_OPTIONS } from '../../bookingSource';
 import { Button, Card, Field, inputClass } from '../../components/ui';
 import { formatDateShort } from '../../dateFormat';
 import { computeGstSlab } from '../../gst';
@@ -24,18 +25,8 @@ function todayPlus(days: number) {
   return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 }
 
-const SOURCE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'direct', label: 'Direct' },
-  { value: 'walk_in', label: 'Walk-in' },
-  { value: 'booking_com', label: 'Booking.com' },
-  { value: 'mmt_goibibo', label: 'MakeMyTrip / Goibibo' },
-  { value: 'agoda', label: 'Agoda' },
-  { value: 'airbnb', label: 'Airbnb' },
-  { value: 'expedia', label: 'Expedia' },
-  { value: 'cleartrip', label: 'Cleartrip' },
-  { value: 'easemytrip', label: 'EaseMyTrip' },
-  { value: 'yatra', label: 'Yatra' },
-];
+// Now shared with checkin/CheckInModal's own Booking Source field — see bookingSource.ts.
+const SOURCE_OPTIONS = BOOKING_SOURCE_OPTIONS;
 const METHOD_OPTIONS: PaymentMethod[] = ['cash', 'upi', 'online', 'card', 'bank_transfer', 'cheque', 'credit_sale', 'company_settlement', 'agent_settlement', 'cash_deposit'];
 
 interface PickedRoom {
