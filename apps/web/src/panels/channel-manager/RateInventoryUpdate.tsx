@@ -142,9 +142,15 @@ export function RateInventoryUpdate({ hotelId }: { hotelId: string }) {
       for (const key of Object.keys(dirty)) {
         const [ratePlanId, date] = key.split(':');
         const cell = cells[key];
-        if (!cell || cell.rate === '') continue;
-        const price = Number(cell.rate);
+        if (!cell) continue;
+        // §bugfix — this used to require Rate to be non-blank or silently skip the whole cell,
+        // so an Inventory-only edit on a date with no price set yet (nothing fetched to prefill
+        // Rate) never actually saved, with no error shown — looked like the inventory number
+        // just didn't "take." Price and availability are independent now; only skip if neither
+        // was actually touched.
+        const price = cell.rate === '' ? undefined : Number(cell.rate);
         const availability = cell.inventory === '' ? undefined : Number(cell.inventory);
+        if (price === undefined && availability === undefined) continue;
         const explicitTiers = [1, 2].map((occupancyTier) => ({ occupancyTier, price, availability }));
         for (const conn of connections) {
           await mutate('rates.bulkUpdate', { ratePlanId, otaConnectionId: conn.id, startDate: date, endDate: date, explicitTiers }, token ?? undefined);
