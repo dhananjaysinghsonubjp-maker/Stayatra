@@ -618,10 +618,22 @@ export class BookingsService {
           })),
         });
       }
-      await tx.room.update({
-        where: { id: input.roomId },
+      // §bugfix — "room 103 mein 2 check-in kaise ho gaye": the room's `available` status was
+      // only ever read once, well before this transaction (and even before linkGuestProfile's own
+      // DB round-trip) — two check-ins for the same room landing close together could both read
+      // `available`, both pass that check, and both end up creating a booking here. Claiming the
+      // room with an atomic conditional update (status still 'available' right now, in this same
+      // transaction) closes that window: Postgres row-locks the second writer behind the first,
+      // and its WHERE no longer matches once the first commits, so `count` comes back 0 and this
+      // whole transaction — including the booking row just created above — rolls back instead of
+      // leaving two checked-in bookings on one physical room.
+      const claimed = await tx.room.updateMany({
+        where: { id: input.roomId, status: 'available' },
         data: { status: 'occupied', currentStayId: created.id, statusChangedAt: new Date() },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException(`Room ${room.roomNumber} was just taken by another check-in — pick a different room`);
+      }
       return created;
     });
 
@@ -779,10 +791,16 @@ export class BookingsService {
           })),
         });
       }
-      await tx.room.update({
-        where: { id: input.roomId },
+      // §bugfix — same atomic-claim fix as checkInWalkIn: room.status was read well before this
+      // transaction, so two near-simultaneous check-ins onto the same room could both pass that
+      // earlier check. This conditional update is the real, race-free guard.
+      const claimed = await tx.room.updateMany({
+        where: { id: input.roomId, status: 'available' },
         data: { status: 'occupied', currentStayId: result.id, statusChangedAt: new Date() },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException(`Room ${room.roomNumber} was just taken by another check-in — pick a different room`);
+      }
       return result;
     });
 
@@ -1246,7 +1264,15 @@ export class BookingsService {
       if (newRoom) {
         const oldRoom = await tx.room.findFirst({ where: { currentStayId: booking.id } });
         if (oldRoom) await tx.room.update({ where: { id: oldRoom.id }, data: { status: 'available', currentStayId: null, statusChangedAt: new Date() } });
-        await tx.room.update({ where: { id: newRoom.id }, data: { status: 'occupied', currentStayId: booking.id, statusChangedAt: new Date() } });
+        // §bugfix — same atomic-claim pattern as check-in: newRoom.status was read before this
+        // transaction, so a concurrent check-in/room-switch onto the same room could win the race.
+        const claimed = await tx.room.updateMany({
+          where: { id: newRoom.id, status: 'available' },
+          data: { status: 'occupied', currentStayId: booking.id, statusChangedAt: new Date() },
+        });
+        if (claimed.count === 0) {
+          throw new ConflictException('The new room was just taken — pick a different room');
+        }
       }
 
       return result;
