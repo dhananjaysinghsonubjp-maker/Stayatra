@@ -151,9 +151,25 @@ export function RateInventoryUpdate({ hotelId }: { hotelId: string }) {
         const price = cell.rate === '' ? undefined : Number(cell.rate);
         const availability = cell.inventory === '' ? undefined : Number(cell.inventory);
         if (price === undefined && availability === undefined) continue;
-        const explicitTiers = [1, 2].map((occupancyTier) => ({ occupancyTier, price, availability }));
-        for (const conn of connections) {
-          await mutate('rates.bulkUpdate', { ratePlanId, otaConnectionId: conn.id, startDate: date, endDate: date, explicitTiers }, token ?? undefined);
+        // §bugfix — the backend now fans availability out to every connected channel on its own
+        // (rates.service.ts's setValueOverride/bulkUpdate), so sending it again on every
+        // connection here was writing each cell 3x for no reason (once directly, twice more as
+        // the backend's own fan-out from the other two calls). Availability only needs to be
+        // sent once; price (which the backend deliberately leaves per-channel) still goes to
+        // every connection explicitly, since this tool's whole point is one master price too.
+        await mutate(
+          'rates.bulkUpdate',
+          { ratePlanId, otaConnectionId: connections[0].id, startDate: date, endDate: date, explicitTiers: [1, 2].map((occupancyTier) => ({ occupancyTier, price, availability })) },
+          token ?? undefined,
+        );
+        if (price !== undefined) {
+          for (const conn of connections.slice(1)) {
+            await mutate(
+              'rates.bulkUpdate',
+              { ratePlanId, otaConnectionId: conn.id, startDate: date, endDate: date, explicitTiers: [1, 2].map((occupancyTier) => ({ occupancyTier, price })) },
+              token ?? undefined,
+            );
+          }
         }
         cellsUpdated++;
         if (availability !== undefined) {
