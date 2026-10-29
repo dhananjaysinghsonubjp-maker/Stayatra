@@ -2,10 +2,14 @@ import { Injectable, ConflictException, BadRequestException, ForbiddenException 
 import { BookingStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuthService } from '../auth/auth.service.js';
+import { RatesService } from '../rates/rates.service.js';
 
 @Injectable()
 export class HotelsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rates: RatesService,
+  ) {}
 
   /** §8.2 step 1: mints hotels.short_code immediately, shown to the owner to write down/print for staff. */
   async createHotel(input: {
@@ -324,11 +328,20 @@ export class HotelsService {
     return conflict ? { available: false, reason: conflict } : { available: true, reason: null };
   }
 
+  /**
+   * §user request — "ye room block hoga, aur same vo OTA mein bhi band ho jaana chahiye, 1
+   * inventory": a room taken out for maintenance is just as unsellable as one with a real guest
+   * in it — the pooled OTA count has to drop by exactly one for its category over this exact
+   * range, same adjustAvailabilityForStay every real booking already draws from, or a channel
+   * could still sell a room that's actually out of service.
+   */
   async createMaintenanceBlock(input: { hotelId: string; roomId: string; startAt: Date; endAt: Date; reason?: string; actorId: string }) {
     if (input.endAt <= input.startAt) throw new BadRequestException('End must be after start');
+    const room = await this.prisma.room.findUniqueOrThrow({ where: { id: input.roomId } });
+    if (!room.roomCategoryId) throw new ConflictException('Room has no category assigned yet');
     const conflict = await this.findRoomConflict(input.roomId, input.startAt, input.endAt);
     if (conflict) throw new ConflictException(conflict);
-    return this.prisma.roomMaintenanceBlock.create({
+    const block = await this.prisma.roomMaintenanceBlock.create({
       data: {
         hotelId: input.hotelId,
         roomId: input.roomId,
@@ -338,13 +351,36 @@ export class HotelsService {
         createdBy: input.actorId,
       },
     });
+    await this.rates.adjustAvailabilityForStay({
+      hotelId: input.hotelId,
+      roomCategoryId: room.roomCategoryId,
+      checkIn: input.startAt,
+      checkOut: input.endAt,
+      delta: -1,
+    });
+    return block;
   }
 
   async releaseMaintenanceBlock(input: { maintenanceBlockId: string; actorId: string }) {
-    return this.prisma.roomMaintenanceBlock.update({
+    const block = await this.prisma.roomMaintenanceBlock.findUniqueOrThrow({
+      where: { id: input.maintenanceBlockId },
+      include: { room: true },
+    });
+    const updated = await this.prisma.roomMaintenanceBlock.update({
       where: { id: input.maintenanceBlockId },
       data: { releasedAt: new Date(), releasedBy: input.actorId },
     });
+    if (block.room.roomCategoryId) {
+      // Gives the room-night back to the pool — mirror of the -1 applied when the block was made.
+      await this.rates.adjustAvailabilityForStay({
+        hotelId: block.hotelId,
+        roomCategoryId: block.room.roomCategoryId,
+        checkIn: block.startAt,
+        checkOut: block.endAt,
+        delta: 1,
+      });
+    }
+    return updated;
   }
 
   /** Calendar's own grid read — every active (not yet released) block whose range overlaps the visible window. */

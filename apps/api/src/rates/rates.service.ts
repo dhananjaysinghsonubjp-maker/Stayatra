@@ -4,10 +4,23 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { computeGstSlab } from '../common/gst.js';
 import { AuditService } from '../common/audit.service.js';
 
+/**
+ * §bugfix — a real stay's actual arrival/departure TIME (2pm check-in, 11am check-out next day —
+ * the exact Stay Details default this session) must never change how many nights this counts,
+ * only which calendar dates are covered does. The old version compared full timestamps
+ * (`cursor <= end`), so adjustAvailabilityForStay's own "checkout minus 24h" for a 1-night stay
+ * landed on *the same calendar day as check-in but an earlier time of day* (checkIn 14:00 vs.
+ * that 11:00) — `cursor <= end` was false on the very first iteration, so the loop produced ZERO
+ * dates and the OTA pool silently never decremented for any normal (non-midnight) walk-in at all.
+ * Both ends are truncated to their UTC calendar date before comparing, which also makes the
+ * "-24h" trick upstream in adjustAvailabilityForStay correct regardless of time-of-day (24h
+ * always lands on the previous calendar day, no matter what time it started at).
+ */
 function datesInRange(start: Date, end: Date, daysOfWeek?: number[]): Date[] {
   const dates: Date[] = [];
-  const cursor = new Date(start);
-  while (cursor <= end) {
+  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const endDate = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
+  while (cursor <= endDate) {
     if (!daysOfWeek || daysOfWeek.includes(cursor.getUTCDay())) dates.push(new Date(cursor));
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
