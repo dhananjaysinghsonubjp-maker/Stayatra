@@ -10,7 +10,7 @@ import { formatDateShort } from '../dateFormat';
 import { istDateKey, istDateLabel } from '../components/DateRangePicker';
 import type { Room } from '../types';
 
-type BoardStatus = 'available' | 'departing_today' | 'occupied' | 'housekeeping';
+type BoardStatus = 'available' | 'departing_today' | 'occupied' | 'housekeeping' | 'maintenance';
 
 /** §user request — Available green, Occupied blue (reverting the earlier all-blue pass for these
  * two specific states). Departing Today/Housekeeping weren't named, so they stay distinguishable
@@ -21,6 +21,10 @@ const STATUS_BADGE_STYLE: Record<BoardStatus, string> = {
   occupied: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
   departing_today: 'bg-[#002491]/90 text-white',
   housekeeping: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
+  // §user request — "room view mein vo room block ho jaega": a slate/grey tone, deliberately
+  // distinct from Housekeeping's amber, since this is a real out-of-service room, not a
+  // between-guests cleaning state.
+  maintenance: 'bg-slate-300 text-slate-700 dark:bg-slate-600 dark:text-slate-200',
 };
 /** §user request — the brand-colour left strip on every row sat flush under the equally
  * brand-coloured header with no gap, so it read as one glued-on bar running down the table
@@ -32,6 +36,7 @@ const STATUS_LABEL: Record<BoardStatus, string> = {
   occupied: 'Occupied',
   departing_today: 'Departing Today',
   housekeeping: 'Housekeeping',
+  maintenance: 'Maintenance',
 };
 
 /** Same calendar day, compared in the browser's local time — a cosmetic badge, not a financial figure. */
@@ -39,7 +44,13 @@ function isToday(isoDate: string): boolean {
   return isoDate.slice(0, 10) === new Date().toLocaleDateString('en-CA');
 }
 
-function boardStatus(room: Room): BoardStatus {
+// §user request — "room view mein vo room block ho jaega": a maintenance block never touches
+// Room.status (that field is only ever "right now", not a calendar range — see
+// RoomMaintenanceBlock's own schema comment), so this is the one place that overlays "is this
+// room under an active block RIGHT NOW" on top of it. Checked first — a room physically occupied
+// by a block is more important to see than whatever its stored status happens to say.
+function boardStatus(room: Room, maintenanceBlockedRoomIds: Set<string>): BoardStatus {
+  if (maintenanceBlockedRoomIds.has(room.id)) return 'maintenance';
   if (room.status === 'housekeeping') return 'housekeeping';
   if (room.status === 'available') return 'available';
   if (room.currentStay && isToday(room.currentStay.checkOut)) return 'departing_today';
@@ -65,6 +76,7 @@ const FILTER_LABEL: Record<BoardFilter, string> = {
   occupied: 'Occupied',
   departing_today: 'Checkout Due',
   housekeeping: 'Housekeeping',
+  maintenance: 'Maintenance',
 };
 const FILTER_DOT_TONE: Record<BoardFilter, string> = {
   all: 'bg-slate-400',
@@ -72,6 +84,7 @@ const FILTER_DOT_TONE: Record<BoardFilter, string> = {
   occupied: 'bg-blue-500',
   departing_today: 'bg-[#002491]',
   housekeeping: 'bg-amber-500',
+  maintenance: 'bg-slate-500',
 };
 
 /** §user request — reference: DigiStay's "Room view" toolbar (filter pills + search, one clean
@@ -109,7 +122,7 @@ function RoomBoardToolbar({
 }) {
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [draftCategoryIds, setDraftCategoryIds] = useState<string[]>([]);
-  const filters: BoardFilter[] = ['all', 'available', 'occupied', 'departing_today', 'housekeeping'];
+  const filters: BoardFilter[] = ['all', 'available', 'occupied', 'departing_today', 'housekeeping', 'maintenance'];
 
   function openFilterModal() {
     setDraftCategoryIds(categoryFilters);
@@ -293,11 +306,21 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
   const [search, setSearch] = useState('');
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [checkingOutId, setCheckingOutId] = useState<string | null>(null);
+  // §user request — "room view mein vo room block ho jaega": every room with an active
+  // maintenance block right now (startAt < now < endAt) — a zero-width "from/to = now" window on
+  // the same listMaintenanceBlocks Calendar's own grid uses.
+  const [maintenanceBlockedRoomIds, setMaintenanceBlockedRoomIds] = useState<Set<string>>(new Set());
   const canCheckIn = ['owner', 'manager', 'front_desk'].includes(role('pms') ?? '');
 
   async function refresh() {
     try {
-      setRooms(await query<Room[]>('bookings.getRoomBoard', { hotelId }, token ?? undefined));
+      const now = new Date().toISOString();
+      const [roomRows, blocks] = await Promise.all([
+        query<Room[]>('bookings.getRoomBoard', { hotelId }, token ?? undefined),
+        query<{ roomId: string }[]>('hotels.listMaintenanceBlocks', { hotelId, from: now, to: now }, token ?? undefined),
+      ]);
+      setRooms(roomRows);
+      setMaintenanceBlockedRoomIds(new Set(blocks.map((b) => b.roomId)));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load Room View');
     }
@@ -323,7 +346,7 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId]);
 
-  const statuses = rooms.map(boardStatus);
+  const statuses = rooms.map((r) => boardStatus(r, maintenanceBlockedRoomIds));
   const counts = {
     total: rooms.length,
     available: statuses.filter((s) => s === 'available').length,
@@ -339,6 +362,7 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
     occupied: statuses.filter((s) => s === 'occupied').length,
     departing_today: statuses.filter((s) => s === 'departing_today').length,
     housekeeping: statuses.filter((s) => s === 'housekeeping').length,
+    maintenance: statuses.filter((s) => s === 'maintenance').length,
   };
   const q = search.trim().toLowerCase();
   const filteredRooms = rooms.filter((r, i) => {
@@ -413,7 +437,7 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
                     needed to read every row) → Action (end of row, same place every other table in
                     the app puts it). */}
                 {filteredRooms.map((r, i) => {
-                  const status = boardStatus(r);
+                  const status = boardStatus(r, maintenanceBlockedRoomIds);
                   const due = dueForRoom(r);
                   const delayed = r.delayed ?? false;
                   const rowBg = i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-800/60';

@@ -77,12 +77,26 @@ export function Calendar({
   const [menuFor, setMenuFor] = useState<{ booking: Booking; x: number; y: number } | null>(null);
   const [checkingInBooking, setCheckingInBooking] = useState<Booking | null>(null);
   const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
-  const [creatingReservation, setCreatingReservation] = useState(false);
+  // §user request — "check-in ka option pe click karne ke baad wahi check-in wala feature khul
+  // jayega, room automatic select rahega": the empty-cell menu's first option opens the real
+  // CheckInModal (walk-in, same as Room View's own "Check in") with this exact room prefilled,
+  // not a blank future-reservation form.
+  const [checkingInRoom, setCheckingInRoom] = useState<Room | null>(null);
   // §user request, with a reference app's own empty-cell click menu as the target — click a date
-  // on a specific room's own row with nothing booked there and get Create Reservation / Add
-  // Maintenance Block, instead of nothing happening at all.
+  // on a specific room's own row with nothing booked there and get Check In / Add Maintenance
+  // Block, instead of nothing happening at all.
   const [emptyCellMenu, setEmptyCellMenu] = useState<{ room: Room; date: string; x: number; y: number } | null>(null);
-  const [maintenanceBlockFor, setMaintenanceBlockFor] = useState<{ room: Room; date: string } | null>(null);
+  // One panel for both Create (no existingBlock) and Edit (existingBlock set) — §user request,
+  // "block daalne ke baad edit karne ka bhi option aana chahiye".
+  const [maintenanceBlockPanel, setMaintenanceBlockPanel] = useState<{
+    roomId: string;
+    roomNumber: string;
+    initialDate?: string;
+    existingBlock?: RoomMaintenanceBlock;
+  } | null>(null);
+  // §user request — clicking an existing "Maintenance" bar gets its own Edit/Remove menu, same
+  // click-then-menu pattern booking bars already have.
+  const [maintenanceMenuFor, setMaintenanceMenuFor] = useState<{ block: RoomMaintenanceBlock; x: number; y: number } | null>(null);
   const [maintenanceBlocks, setMaintenanceBlocks] = useState<RoomMaintenanceBlock[]>([]);
   // §user request, with Housekeeping's own date filter as the explicit target — same From/To
   // range picker, single day or a multi-day range in one tap-through, instead of a plain
@@ -554,9 +568,16 @@ export function Calendar({
                 marginTop: laneCount === 0 ? 6 : 2,
               }}
             >
-              <div className="flex w-full items-center gap-1 truncate rounded-md bg-slate-300 px-2 py-1 text-left text-xs font-semibold text-slate-700 shadow-sm">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMaintenanceMenuFor({ block: m, x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 100) });
+                }}
+                className="flex w-full items-center gap-1 truncate rounded-md bg-slate-300 px-2 py-1 text-left text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-400"
+              >
                 🔧 Maintenance
-              </div>
+              </button>
               <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-1 hidden w-56 rounded-lg bg-slate-900 p-3 text-xs text-white shadow-xl group-hover:block">
                 <p className="mb-1.5 font-bold">Maintenance block</p>
                 <p className="text-slate-300">
@@ -1187,17 +1208,17 @@ export function Calendar({
             <button
               type="button"
               onClick={() => {
-                setCreatingReservation(true);
+                setCheckingInRoom(emptyCellMenu.room);
                 setEmptyCellMenu(null);
               }}
               className="block w-full px-3 py-2 text-left text-sm font-medium text-brand-600 hover:bg-brand-50"
             >
-              Create Reservation
+              Check In
             </button>
             <button
               type="button"
               onClick={() => {
-                setMaintenanceBlockFor({ room: emptyCellMenu.room, date: emptyCellMenu.date });
+                setMaintenanceBlockPanel({ roomId: emptyCellMenu.room.id, roomNumber: emptyCellMenu.room.roomNumber, initialDate: emptyCellMenu.date });
                 setEmptyCellMenu(null);
               }}
               className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
@@ -1230,28 +1251,68 @@ export function Calendar({
         />
       )}
 
-      {creatingReservation && (
-        <CreateReservationModal
+      {checkingInRoom && (
+        <CheckInModal
           hotelId={hotelId}
-          onClose={() => setCreatingReservation(false)}
+          room={checkingInRoom}
+          onClose={() => setCheckingInRoom(null)}
           onDone={() => {
-            setCreatingReservation(false);
+            setCheckingInRoom(null);
             void refreshBookings();
           }}
         />
       )}
 
-      {maintenanceBlockFor && (
+      {maintenanceBlockPanel && (
         <MaintenanceBlockPanel
-          room={maintenanceBlockFor.room}
-          date={maintenanceBlockFor.date}
+          hotelId={hotelId}
+          roomId={maintenanceBlockPanel.roomId}
+          roomNumber={maintenanceBlockPanel.roomNumber}
+          initialDate={maintenanceBlockPanel.initialDate}
+          existingBlock={maintenanceBlockPanel.existingBlock}
           token={token}
-          onClose={() => setMaintenanceBlockFor(null)}
-          onCreated={() => {
-            setMaintenanceBlockFor(null);
+          onClose={() => setMaintenanceBlockPanel(null)}
+          onSaved={() => {
+            setMaintenanceBlockPanel(null);
             void refreshBookings();
           }}
         />
+      )}
+
+      {/* §user request — clicking a "Maintenance" bar gets Edit/Remove, same pattern as the
+          booking-bar menu above. */}
+      {maintenanceMenuFor && (
+        <div className="fixed inset-0 z-40" onClick={() => setMaintenanceMenuFor(null)}>
+          <div
+            className="absolute w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+            style={{ left: maintenanceMenuFor.x, top: maintenanceMenuFor.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                const b = maintenanceMenuFor.block;
+                setMaintenanceBlockPanel({ roomId: b.roomId, roomNumber: b.room.roomNumber, existingBlock: b });
+                setMaintenanceMenuFor(null);
+              }}
+              className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Edit Maintenance Block
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const blockId = maintenanceMenuFor.block.id;
+                setMaintenanceMenuFor(null);
+                await mutate('hotels.releaseMaintenanceBlock', { maintenanceBlockId: blockId }, token ?? undefined);
+                void refreshBookings();
+              }}
+              className="block w-full px-3 py-2 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+            >
+              Remove Block
+            </button>
+          </div>
+        </div>
       )}
 
       {checkingInBooking && (
@@ -1270,27 +1331,48 @@ export function Calendar({
   );
 }
 
+/** A UTC ISO timestamp, formatted as the local-time string a `datetime-local` input expects —
+ * the inverse of `new Date(aDatetimeLocalString).toISOString()`, which is how every submit here
+ * already sends a picked value back (so the round trip through Edit lands on the same instant). */
+function toLocalDatetimeInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /**
  * §user request, matching a reference app's own "Create Maintenance Block" panel — opened from
- * the empty-cell menu above. Checks live availability (hotels.checkRoomAvailability) as the
- * picked dates change, same conflict logic the create mutation itself re-checks server-side.
+ * the empty-cell menu (create) or an existing "Maintenance" bar's own menu (edit, via
+ * `existingBlock`). Checks live availability (hotels.checkRoomAvailability) as the picked dates
+ * change, same conflict logic the create/update mutations themselves re-check server-side.
  */
 function MaintenanceBlockPanel({
-  room,
-  date,
+  hotelId,
+  roomId,
+  roomNumber,
+  initialDate,
+  existingBlock,
   token,
   onClose,
-  onCreated,
+  onSaved,
 }: {
-  room: Room;
-  date: string;
+  hotelId: string;
+  roomId: string;
+  roomNumber: string;
+  initialDate?: string;
+  existingBlock?: RoomMaintenanceBlock;
   token: string | null;
   onClose: () => void;
-  onCreated: () => void;
+  onSaved: () => void;
 }) {
-  const [startAt, setStartAt] = useState(`${date}T12:00`);
-  const [endAt, setEndAt] = useState(`${addDaysKey(date, 1)}T11:00`);
-  const [reason, setReason] = useState('');
+  const isEdit = Boolean(existingBlock);
+  const [startAt, setStartAt] = useState(
+    existingBlock ? toLocalDatetimeInput(existingBlock.startAt) : `${initialDate}T12:00`,
+  );
+  const [endAt, setEndAt] = useState(
+    existingBlock ? toLocalDatetimeInput(existingBlock.endAt) : `${addDaysKey(initialDate ?? '', 1)}T11:00`,
+  );
+  const [reason, setReason] = useState(existingBlock?.reason ?? '');
   const [availability, setAvailability] = useState<{ available: boolean; reason: string | null } | null>(null);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1304,7 +1386,12 @@ function MaintenanceBlockPanel({
       try {
         const result = await query<{ available: boolean; reason: string | null }>(
           'hotels.checkRoomAvailability',
-          { roomId: room.id, startAt: new Date(startAt).toISOString(), endAt: new Date(endAt).toISOString() },
+          {
+            roomId,
+            startAt: new Date(startAt).toISOString(),
+            endAt: new Date(endAt).toISOString(),
+            excludeMaintenanceBlockId: existingBlock?.id,
+          },
           token ?? undefined,
         );
         if (!cancelled) setAvailability(result);
@@ -1318,26 +1405,39 @@ function MaintenanceBlockPanel({
     return () => {
       cancelled = true;
     };
-  }, [room.id, startAt, endAt, token]);
+  }, [roomId, startAt, endAt, token, existingBlock?.id]);
 
   async function submit() {
     setSaving(true);
     setError(null);
     try {
-      await mutate(
-        'hotels.createMaintenanceBlock',
-        {
-          hotelId: room.hotelId,
-          roomId: room.id,
-          startAt: new Date(startAt).toISOString(),
-          endAt: new Date(endAt).toISOString(),
-          reason: reason.trim() || undefined,
-        },
-        token ?? undefined,
-      );
-      onCreated();
+      if (isEdit && existingBlock) {
+        await mutate(
+          'hotels.updateMaintenanceBlock',
+          {
+            maintenanceBlockId: existingBlock.id,
+            startAt: new Date(startAt).toISOString(),
+            endAt: new Date(endAt).toISOString(),
+            reason: reason.trim() || undefined,
+          },
+          token ?? undefined,
+        );
+      } else {
+        await mutate(
+          'hotels.createMaintenanceBlock',
+          {
+            hotelId,
+            roomId,
+            startAt: new Date(startAt).toISOString(),
+            endAt: new Date(endAt).toISOString(),
+            reason: reason.trim() || undefined,
+          },
+          token ?? undefined,
+        );
+      }
+      onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create maintenance block');
+      setError(err instanceof ApiError ? err.message : 'Failed to save maintenance block');
     } finally {
       setSaving(false);
     }
@@ -1348,8 +1448,8 @@ function MaintenanceBlockPanel({
       <div className="h-full w-full max-w-sm overflow-y-auto bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Room {room.roomNumber}</p>
-            <p className="mt-1 text-lg font-bold text-slate-900">Create Maintenance Block</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Room {roomNumber}</p>
+            <p className="mt-1 text-lg font-bold text-slate-900">{isEdit ? 'Edit Maintenance Block' : 'Create Maintenance Block'}</p>
           </div>
           <button onClick={() => !saving && onClose()} className="text-slate-400 hover:text-slate-600">
             ✕
@@ -1392,7 +1492,7 @@ function MaintenanceBlockPanel({
             Cancel
           </button>
           <Button type="button" onClick={() => void submit()} disabled={saving || checking || (availability ? !availability.available : false)}>
-            {saving ? 'Creating…' : 'Create Block'}
+            {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Block'}
           </Button>
         </div>
       </div>

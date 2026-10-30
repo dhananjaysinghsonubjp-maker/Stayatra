@@ -248,12 +248,16 @@ export function createHotelsRouter(hotels: HotelsService) {
 
     // §user request, matching a reference app's Calendar empty-cell "Add Maintenance Block" panel.
     checkRoomAvailability: frontDeskUp
-      .input(z.object({ roomId: z.string(), startAt: z.coerce.date(), endAt: z.coerce.date() }))
+      .input(z.object({ roomId: z.string(), startAt: z.coerce.date(), endAt: z.coerce.date(), excludeMaintenanceBlockId: z.string().optional() }))
       .query(({ input }) => hotels.checkRoomAvailability(input)),
 
     createMaintenanceBlock: frontDeskUp
       .input(z.object({ hotelId: z.string(), roomId: z.string(), startAt: z.coerce.date(), endAt: z.coerce.date(), reason: z.string().optional() }))
       .mutation(({ ctx, input }) => hotels.createMaintenanceBlock({ ...input, actorId: ctx.user.userId })),
+
+    updateMaintenanceBlock: frontDeskUp
+      .input(z.object({ maintenanceBlockId: z.string(), startAt: z.coerce.date(), endAt: z.coerce.date(), reason: z.string().optional() }))
+      .mutation(({ ctx, input }) => hotels.updateMaintenanceBlock({ ...input, actorId: ctx.user.userId })),
 
     releaseMaintenanceBlock: frontDeskUp
       .input(z.object({ maintenanceBlockId: z.string() }))

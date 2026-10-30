@@ -321,10 +321,14 @@ export class HotelsService {
     return null;
   }
 
-  /** The live confirmation message in the Create Maintenance Block panel — no mutation, just a read. */
-  async checkRoomAvailability(input: { roomId: string; startAt: Date; endAt: Date }) {
+  /**
+   * The live confirmation message in the Create/Edit Maintenance Block panel — no mutation, just
+   * a read. `excludeMaintenanceBlockId` is for editing an existing block: it shouldn't show as
+   * conflicting with its own, not-yet-saved current reservation of this room.
+   */
+  async checkRoomAvailability(input: { roomId: string; startAt: Date; endAt: Date; excludeMaintenanceBlockId?: string }) {
     if (input.endAt <= input.startAt) return { available: false, reason: 'End must be after start' };
-    const conflict = await this.findRoomConflict(input.roomId, input.startAt, input.endAt);
+    const conflict = await this.findRoomConflict(input.roomId, input.startAt, input.endAt, input.excludeMaintenanceBlockId);
     return conflict ? { available: false, reason: conflict } : { available: true, reason: null };
   }
 
@@ -359,6 +363,48 @@ export class HotelsService {
       delta: -1,
     });
     return block;
+  }
+
+  /**
+   * §user request — "block daalne ke baad edit karne ka bhi option aana chahiye": changes an
+   * existing block's dates/reason. Reverses the old range's -1 pool impact and applies the new
+   * range's -1 as two separate adjustAvailabilityForStay calls (simpler and just as correct as
+   * diffing the two ranges — the GREATEST(...,0) floor behind it means this never double-frees a
+   * room that's still blocked for part of the old range).
+   */
+  async updateMaintenanceBlock(input: { maintenanceBlockId: string; startAt: Date; endAt: Date; reason?: string; actorId: string }) {
+    if (input.endAt <= input.startAt) throw new BadRequestException('End must be after start');
+    const existing = await this.prisma.roomMaintenanceBlock.findUniqueOrThrow({
+      where: { id: input.maintenanceBlockId },
+      include: { room: true },
+    });
+    if (existing.releasedAt) throw new ConflictException('This block was already released');
+    const conflict = await this.findRoomConflict(existing.roomId, input.startAt, input.endAt, input.maintenanceBlockId);
+    if (conflict) throw new ConflictException(conflict);
+
+    if (existing.room.roomCategoryId) {
+      await this.rates.adjustAvailabilityForStay({
+        hotelId: existing.hotelId,
+        roomCategoryId: existing.room.roomCategoryId,
+        checkIn: existing.startAt,
+        checkOut: existing.endAt,
+        delta: 1,
+      });
+    }
+    const updated = await this.prisma.roomMaintenanceBlock.update({
+      where: { id: input.maintenanceBlockId },
+      data: { startAt: input.startAt, endAt: input.endAt, reason: input.reason },
+    });
+    if (existing.room.roomCategoryId) {
+      await this.rates.adjustAvailabilityForStay({
+        hotelId: existing.hotelId,
+        roomCategoryId: existing.room.roomCategoryId,
+        checkIn: input.startAt,
+        checkOut: input.endAt,
+        delta: -1,
+      });
+    }
+    return updated;
   }
 
   async releaseMaintenanceBlock(input: { maintenanceBlockId: string; actorId: string }) {
