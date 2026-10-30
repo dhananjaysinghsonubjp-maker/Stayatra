@@ -156,7 +156,7 @@ export function Calendar({
     async function load() {
       try {
         const [bookingRows, maintenanceRows] = await Promise.all([
-          query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate }, token ?? undefined),
+          query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate, overlapping: true }, token ?? undefined),
           query<RoomMaintenanceBlock[]>('hotels.listMaintenanceBlocks', { hotelId, from: startDate, to: endDate }, token ?? undefined),
         ]);
         setBookings(bookingRows);
@@ -192,7 +192,7 @@ export function Calendar({
   async function refreshBookings() {
     try {
       const [bookingRows, maintenanceRows] = await Promise.all([
-        query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate }, token ?? undefined),
+        query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate, overlapping: true }, token ?? undefined),
         query<RoomMaintenanceBlock[]>('hotels.listMaintenanceBlocks', { hotelId, from: startDate, to: endDate }, token ?? undefined),
       ]);
       setBookings(bookingRows);

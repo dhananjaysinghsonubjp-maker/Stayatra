@@ -302,7 +302,21 @@ export function createBookingsRouter(bookings: BookingsService) {
     getInvoice: anyPmsRole.input(z.object({ bookingId: z.string() })).query(({ input }) => bookings.getInvoice(input.bookingId)),
 
     listReservations: reservationsReader
-      .input(z.object({ hotelId: z.string(), from: z.coerce.date().optional(), to: z.coerce.date().optional(), otaConnectionId: z.string().optional() }))
+      .input(
+        z.object({
+          hotelId: z.string(),
+          from: z.coerce.date().optional(),
+          to: z.coerce.date().optional(),
+          otaConnectionId: z.string().optional(),
+          // §user request — "AB B guest already in-house hai, Calendar View mein kyun nahi dikh
+          // raha": Calendar's grid needs every STAY that overlaps [from,to], not just ones whose
+          // check-in date itself falls in that window — a guest who checked in before the
+          // visible range but is still staying through it used to vanish entirely once the
+          // calendar scrolled past their actual check-in date. Business Reports' own "bookings
+          // starting in this period" reading is legitimate and stays the default.
+          overlapping: z.boolean().optional(),
+        }),
+      )
       .query(async ({ ctx, input }) => {
         const rows = await bookings.listReservations(input);
         return isHousekeeping(ctx.user.roles.pms) ? rows.map(redactForHousekeeping) : rows;

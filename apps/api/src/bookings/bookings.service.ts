@@ -1373,13 +1373,19 @@ export class BookingsService {
   }
 
   /** §7 Phase 1 #5 — list + calendar of bookings pulled from every connected channel; otaConnectionId filters to one. */
-  async listReservations(input: { hotelId: string; from?: Date; to?: Date; otaConnectionId?: string }) {
+  async listReservations(input: { hotelId: string; from?: Date; to?: Date; otaConnectionId?: string; overlapping?: boolean }) {
     return this.prisma.booking.findMany({
       where: {
         hotelId: input.hotelId,
-        ...(input.from || input.to
-          ? { checkIn: { gte: input.from ?? undefined, lte: input.to ?? undefined } }
-          : {}),
+        ...(input.overlapping
+          ? // Stay-overlap, for Calendar's own grid — see the router's own comment on this flag.
+            {
+              ...(input.to ? { checkIn: { lt: input.to } } : {}),
+              ...(input.from ? { checkOut: { gt: input.from } } : {}),
+            }
+          : input.from || input.to
+            ? { checkIn: { gte: input.from ?? undefined, lte: input.to ?? undefined } }
+            : {}),
         ...(input.otaConnectionId ? { otaConnectionId: input.otaConnectionId } : {}),
       },
       include: { payments: true, lineItems: true, guests: true },
