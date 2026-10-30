@@ -87,16 +87,21 @@ export function createRatesRouter(rates: RatesService, sync: OtaSyncService) {
           otaConnectionId: z.string(),
           date: z.coerce.date(),
           tiers: z.array(overrideTierSetSchema).min(1),
+          fanOutAvailability: z.boolean().optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
         const result = await rates.setValueOverride({ ...input, changedBy: ctx.user.userId });
-        await sync.enqueueRatePush({
-          otaConnectionId: input.otaConnectionId,
-          ratePlanId: input.ratePlanId,
-          startDate: input.date,
-          endDate: input.date,
-        });
+        // §bugfix — see rates.service.ts's allConnectionIds for the full story: a pool-wide write
+        // (fanOutAvailability !== false, the default) touched every connection's row in our own
+        // DB, so every one of them needs its own real push too, not just the one this call named.
+        const pushTargets =
+          input.fanOutAvailability === false ? [input.otaConnectionId] : await rates.allConnectionIds(input.ratePlanId);
+        await Promise.all(
+          pushTargets.map((otaConnectionId) =>
+            sync.enqueueRatePush({ otaConnectionId, ratePlanId: input.ratePlanId, startDate: input.date, endDate: input.date }),
+          ),
+        );
         return result;
       }),
 

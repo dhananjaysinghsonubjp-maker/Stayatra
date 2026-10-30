@@ -453,12 +453,37 @@ export class RatesService {
     return connections.map((c) => c.id);
   }
 
+  // §bugfix — "sirf ek channel pe hi push ho raha hai, baaki OTA pe update hi nahi ja raha":
+  // setValueOverride's fan-out (above) correctly updates every sibling connection's row in our
+  // own database, but the router only ever enqueued a real push to the one otaConnectionId it was
+  // called with — every *other* channel's actual listing on the real OTA extranet silently never
+  // got the new price/availability at all. Used by the router to push to every connection once a
+  // pool-wide write (the common case: Calendar's editor, bulk tools) has actually touched them.
+  async allConnectionIds(ratePlanId: string): Promise<string[]> {
+    const ratePlan = await this.prisma.ratePlan.findUniqueOrThrow({
+      where: { id: ratePlanId },
+      select: { roomCategory: { select: { hotelId: true } } },
+    });
+    const connections = await this.prisma.otaConnection.findMany({
+      where: { hotelId: ratePlan.roomCategory.hotelId },
+      select: { id: true },
+    });
+    return connections.map((c) => c.id);
+  }
+
   async setValueOverride(input: {
     ratePlanId: string;
     otaConnectionId: string;
     date: Date;
     tiers: TierSet[];
     changedBy: string;
+    // §user request — "booking.com ko block karna hai, baaki channels pe sell hota rahe": the
+    // fan-out below is only correct when this write represents the real physical pool (the
+    // Calendar editor and bulk tools, where one typed-in number is meant for every channel).
+    // Advance Update's whole point is a DIFFERENT, single-channel-only override — stopping sale
+    // on just this one connection without touching what every other channel still has to sell —
+    // so it opts out here. Defaults to true so every existing pool-wide caller is unaffected.
+    fanOutAvailability?: boolean;
   }) {
     const result = await this.prisma.$transaction(
       input.tiers.map((tier) =>
@@ -502,21 +527,24 @@ export class RatesService {
     // differ) — only availability (a true physical-room count) fans out, and it overrides whatever
     // source a sibling channel's cell already had: a conflicting per-channel override is exactly
     // what breaks the pool, so the number just set here wins everywhere, no exceptions.
-    const siblingIds = await this.otherConnectionIds(input.ratePlanId, input.otaConnectionId);
-    for (const connId of siblingIds) {
-      const existingRows = await this.prisma.inventoryRate.findMany({
-        where: { ratePlanId: input.ratePlanId, otaConnectionId: connId, date: input.date },
-      });
-      const existingByTier = new Map(existingRows.map((r) => [r.occupancyTier, r]));
-      for (const tier of input.tiers) {
-        await this.upsertBulkCell(
-          input.ratePlanId,
-          connId,
-          input.date,
-          { occupancyTier: tier.occupancyTier, availability: tier.availability ?? 0 },
-          input.changedBy,
-          existingByTier.get(tier.occupancyTier),
-        );
+    // (Skipped entirely when fanOutAvailability === false — see this function's own param doc.)
+    if (input.fanOutAvailability !== false) {
+      const siblingIds = await this.otherConnectionIds(input.ratePlanId, input.otaConnectionId);
+      for (const connId of siblingIds) {
+        const existingRows = await this.prisma.inventoryRate.findMany({
+          where: { ratePlanId: input.ratePlanId, otaConnectionId: connId, date: input.date },
+        });
+        const existingByTier = new Map(existingRows.map((r) => [r.occupancyTier, r]));
+        for (const tier of input.tiers) {
+          await this.upsertBulkCell(
+            input.ratePlanId,
+            connId,
+            input.date,
+            { occupancyTier: tier.occupancyTier, availability: tier.availability ?? 0 },
+            input.changedBy,
+            existingByTier.get(tier.occupancyTier),
+          );
+        }
       }
     }
 

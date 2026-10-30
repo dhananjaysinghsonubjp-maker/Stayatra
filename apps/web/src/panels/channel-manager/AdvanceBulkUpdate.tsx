@@ -144,6 +144,12 @@ function PricingSection({ cm, date, token, onChanged }: { cm: CmSelection; date:
               availability,
             },
           ],
+          // §bugfix — "booking.com block karna hai, baaki OTA pe sell hota rahe": this whole
+          // screen's point is a SINGLE channel's own override, including setting its availability
+          // to 0 to stop-sell just that one — setValueOverride's default pool-wide fan-out would
+          // have silently zeroed every other connected channel's availability too. See that
+          // function's own comment for the full story.
+          fanOutAvailability: false,
         },
         token ?? undefined,
       );
