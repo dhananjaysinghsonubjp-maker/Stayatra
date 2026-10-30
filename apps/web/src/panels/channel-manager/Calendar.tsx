@@ -564,11 +564,20 @@ export function Calendar({
   // vertically centred in the row, reads lighter even though it's still the only thing in that
   // row's one grid cell. Only genuinely concurrent lanes (a same-day turnover, or a maintenance
   // block sharing the row with a booking) stack, each getting this same slim height.
+  // §user request — "cell ki space badhni nahi chahiye, restricted rahegi, koi changes nahi
+  // honge": the row's own height used to grow with its lane count (a booking plus a maintenance
+  // block together needed a taller row than a booking alone) — every other row around it then
+  // visibly jumped height too as its own lane count changed. The room row's height (ROW_HEIGHT,
+  // used for minHeight below) is now one constant no lane count ever touches; lanes instead share
+  // that fixed budget, shrinking to fit when there's more than one of them.
+  const ROW_HEIGHT = 64;
   const LANE_HEIGHT = 24;
   function laneStyle(laneIndex: number, totalLanes: number): CSSProperties {
     if (totalLanes <= 1) return { position: 'absolute', top: '50%', left: 4, right: 4, height: LANE_HEIGHT, marginTop: -LANE_HEIGHT / 2 };
-    const gap = 4;
-    return { position: 'absolute', top: gap + laneIndex * (LANE_HEIGHT + gap), left: 4, right: 4, height: LANE_HEIGHT };
+    const budget = ROW_HEIGHT - 8;
+    const gap = 3;
+    const height = Math.max(14, (budget - gap * (totalLanes - 1)) / totalLanes);
+    return { position: 'absolute', top: 4 + laneIndex * (height + gap), left: 4, right: 4, height };
   }
 
   function BookingBars({ rowBookings, laneOf, totalLanes }: { rowBookings: Booking[]; laneOf: Map<string, number>; totalLanes: number }) {
@@ -646,6 +655,12 @@ export function Calendar({
               className="group z-10"
               style={{ gridColumn: `${Math.max(1, colStart)} / ${Math.min(dates.length + 1, colEnd)}`, ...laneStyle(laneIndex, totalLanes) }}
             >
+              {/* §user request — "maintenance nahi likha aana chahiye, seedha blocked aur reason
+                  dikhe": this bar covers two different real situations (actually out of service,
+                  vs. just held back from OTA sale) under one record, and the fixed word
+                  "Maintenance" was wrong for the second one. The reason typed in (or the quick
+                  action's own default, "Blocked on OTA") is what's actually true here — show
+                  that, falling back to the generic "Blocked" only when none was given. */}
               <button
                 type="button"
                 onClick={(e) => {
@@ -654,14 +669,13 @@ export function Calendar({
                 }}
                 className="flex h-full w-full items-center gap-1 truncate rounded bg-slate-300 px-1.5 text-left text-[11px] font-semibold leading-none text-slate-700 shadow-sm hover:bg-slate-400"
               >
-                🔧 Maintenance
+                {m.reason || 'Blocked'}
               </button>
               <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-1 hidden w-56 rounded-lg bg-slate-900 p-3 text-xs text-white shadow-xl group-hover:block">
-                <p className="mb-1.5 font-bold">Maintenance block</p>
+                <p className="mb-1.5 font-bold">{m.reason || 'Blocked'}</p>
                 <p className="text-slate-300">
                   {istDateLabel(m.startAt.slice(0, 10))} → {istDateLabel(m.endAt.slice(0, 10))}
                 </p>
-                {m.reason && <p className="mt-1 text-slate-400">{m.reason}</p>}
               </div>
             </div>
           );
@@ -948,7 +962,7 @@ export function Calendar({
                           className="relative grid flex-1"
                           style={{
                             gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`,
-                            minHeight: viewMode === 'rates' || totalLanes <= 1 ? 64 : 64 + (totalLanes - 1) * (LANE_HEIGHT + 4),
+                            minHeight: ROW_HEIGHT,
                           }}
                         >
                           {/* §user request, matching a reference app's empty-cell click menu —
@@ -1004,7 +1018,7 @@ export function Calendar({
                         className="relative grid flex-1"
                         style={{
                           gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`,
-                          minHeight: unassignedLanes.laneCount <= 1 ? 64 : 64 + (unassignedLanes.laneCount - 1) * (LANE_HEIGHT + 4),
+                          minHeight: ROW_HEIGHT,
                         }}
                       >
                         {viewMode !== 'rates' && (
