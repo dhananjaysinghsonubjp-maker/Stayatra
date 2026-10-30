@@ -166,44 +166,14 @@ export function Calendar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId]);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [bookingRows, maintenanceRows] = await Promise.all([
-          query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate, overlapping: true }, token ?? undefined),
-          query<RoomMaintenanceBlock[]>('hotels.listMaintenanceBlocks', { hotelId, from: startDate, to: endDate }, token ?? undefined),
-        ]);
-        setBookings(bookingRows);
-        setMaintenanceBlocks(maintenanceRows);
-        if (!otaConnectionId || ratePlans.length === 0) {
-          setRatesByPlan({});
-          setRestrictionsByPlan({});
-          return;
-        }
-        const entries = await Promise.all(
-          ratePlans.map(async (rp) => {
-            const grid = await query<{ rates: InventoryRate[]; restrictions: Restriction[] }>(
-              'rates.getGrid',
-              { ratePlanId: rp.id, otaConnectionId, startDate, endDate },
-              token ?? undefined,
-            );
-            return [rp.id, grid.rates.filter((r) => r.occupancyTier === 1), grid.restrictions] as const;
-          }),
-        );
-        setRatesByPlan(Object.fromEntries(entries.map(([id, rates]) => [id, rates])));
-        setRestrictionsByPlan(Object.fromEntries(entries.map(([id, , restrictions]) => [id, restrictions])));
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'Failed to load calendar');
-      }
-    }
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hotelId, otaConnectionId, ratePlans.length, startDate, endDate]);
-
-  /** Re-fetches bookings + maintenance blocks (not the rate grid) — called after Edit
-   * reservation, Start check-in, or a new Maintenance Block finishes, so the row the action
-   * came from reflects the change immediately. */
-  async function refreshBookings() {
+  // §bugfix — "check-in ke baad OTA ka availability number change nahi ho raha": this used to
+  // only re-fetch bookings + maintenance blocks, never the rate grid itself — so a check-in's
+  // automatic -1 to pooled OTA availability (adjustAvailabilityForStay, backend) landed in the
+  // database fine, but the "Rooms on OTA" row kept showing the number from the page's last full
+  // load until it was refreshed. Every action that can move availability (check-in, maintenance
+  // block create/edit/release, reservation edit) needs the rate grid re-pulled too, so this is now
+  // the one function both the initial load and every "refresh after an action" call go through.
+  async function loadAll() {
     try {
       const [bookingRows, maintenanceRows] = await Promise.all([
         query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate, overlapping: true }, token ?? undefined),
@@ -211,9 +181,38 @@ export function Calendar({
       ]);
       setBookings(bookingRows);
       setMaintenanceBlocks(maintenanceRows);
+      if (!otaConnectionId || ratePlans.length === 0) {
+        setRatesByPlan({});
+        setRestrictionsByPlan({});
+        return;
+      }
+      const entries = await Promise.all(
+        ratePlans.map(async (rp) => {
+          const grid = await query<{ rates: InventoryRate[]; restrictions: Restriction[] }>(
+            'rates.getGrid',
+            { ratePlanId: rp.id, otaConnectionId, startDate, endDate },
+            token ?? undefined,
+          );
+          return [rp.id, grid.rates.filter((r) => r.occupancyTier === 1), grid.restrictions] as const;
+        }),
+      );
+      setRatesByPlan(Object.fromEntries(entries.map(([id, rates]) => [id, rates])));
+      setRestrictionsByPlan(Object.fromEntries(entries.map(([id, , restrictions]) => [id, restrictions])));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to refresh calendar');
+      setError(err instanceof ApiError ? err.message : 'Failed to load calendar');
     }
+  }
+
+  useEffect(() => {
+    void loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hotelId, otaConnectionId, ratePlans.length, startDate, endDate]);
+
+  /** Re-fetches bookings, maintenance blocks, and the rate grid — called after Edit reservation,
+   * Start check-in, or a new/edited/released Maintenance Block finishes, so the numbers the action
+   * can move (OTA availability included) reflect it immediately. */
+  async function refreshBookings() {
+    await loadAll();
   }
 
   // One primary rate plan per room category — every physical room in that category shows this rate (rooms of the same type share pricing).
@@ -412,7 +411,17 @@ export function Calendar({
   // the category's own "Rooms on OTA" row. Still computes per-room Blocked (see
   // unbookedRoomsByDate's own comment) since that distinction is genuinely useful to see at a
   // glance, it just no longer opens anything on click.
-  function RateCells({ ratePlanId, room, unbookedRoomsByDate }: { ratePlanId: string | undefined; room: Room | null; unbookedRoomsByDate: Map<string, Room[]> }) {
+  function RateCells({
+    ratePlanId,
+    room,
+    unbookedRoomsByDate,
+    coveredDates,
+  }: {
+    ratePlanId: string | undefined;
+    room: Room | null;
+    unbookedRoomsByDate: Map<string, Room[]>;
+    coveredDates: Set<string>;
+  }) {
     const rateRows = ratePlanId ? ratesByPlan[ratePlanId] ?? [] : [];
     const rateByDate = new Map(rateRows.map((r) => [r.date.slice(0, 10), r]));
     const restrictionRows = ratePlanId ? restrictionsByPlan[ratePlanId] ?? [] : [];
@@ -420,6 +429,18 @@ export function Calendar({
     return (
       <>
         {dates.map((d, i) => {
+          // §user request — "booking ho jaye toh uska particular room, usme se rates hat jaane
+          // chahiye": this room is actually booked/blocked on this date (the bar below already
+          // says so) — no rate/availability text to show alongside it.
+          if (coveredDates.has(d)) {
+            return (
+              <div
+                key={d}
+                className={`relative border-l border-slate-100 ${d === today ? 'bg-brand-50/70' : ''}`}
+                style={{ gridColumn: i + 1, gridRow: 1 }}
+              />
+            );
+          }
           const rate = rateByDate.get(d);
           const restriction = restrictionByDate.get(d);
           const unbooked = unbookedRoomsByDate.get(d) ?? [];
@@ -828,6 +849,18 @@ export function Calendar({
                   {rowRooms.map((room) => {
                     const rowBookings = room ? categoryBookings.filter((b) => b.assignedRoomId === room.id) : categoryBookings;
                     const rowMaintenanceBlocks = room ? maintenanceBlocks.filter((m) => m.roomId === room.id) : [];
+                    // §user request — "booking ho jaye toh uska particular room, usme se rates hat
+                    // jaane chahiye": this room's own rate/availability text used to keep showing
+                    // right alongside the guest-name bar on a date it's actually booked or
+                    // maintenance-blocked — shared once so both the rate cells below and the
+                    // empty-cell click layer agree on what counts as "covered" for this room.
+                    const coveredDates = new Set(
+                      dates.filter(
+                        (d) =>
+                          rowBookings.some((b) => effectiveStartKey(b) <= d && b.checkOut.slice(0, 10) > d) ||
+                          rowMaintenanceBlocks.some((m) => m.startAt.slice(0, 10) <= d && m.endAt.slice(0, 10) > d),
+                      ),
+                    );
                     const { laneOf, laneCount } = assignLanes(rowBookings);
                     const barsHeight = laneCount * 30;
                     const instanceKey = room ? room.id : categoryId;
@@ -858,10 +891,7 @@ export function Calendar({
                           {room && viewMode !== 'rates' && (
                             <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))` }}>
                               {dates.map((d, i) => {
-                                const covered =
-                                  rowBookings.some((b) => effectiveStartKey(b) <= d && b.checkOut.slice(0, 10) > d) ||
-                                  rowMaintenanceBlocks.some((m) => m.startAt.slice(0, 10) <= d && m.endAt.slice(0, 10) > d);
-                                if (covered) return <div key={d} />;
+                                if (coveredDates.has(d)) return <div key={d} />;
                                 return (
                                   <button
                                     key={d}
@@ -877,7 +907,7 @@ export function Calendar({
                             </div>
                           )}
                           {viewMode !== 'stays' && (
-                            <RateCells ratePlanId={ratePlanId} room={room} unbookedRoomsByDate={unbookedRoomsByDate} />
+                            <RateCells ratePlanId={ratePlanId} room={room} unbookedRoomsByDate={unbookedRoomsByDate} coveredDates={coveredDates} />
                           )}
                           {viewMode !== 'rates' && <BookingBars rowBookings={rowBookings} laneOf={laneOf} />}
                           {viewMode !== 'rates' && rowMaintenanceBlocks.length > 0 && <MaintenanceBars blocks={rowMaintenanceBlocks} laneCount={laneCount} />}
