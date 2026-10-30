@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button, Card, PageHeader, StatCard, inputClass } from '../../components/ui';
@@ -514,10 +514,24 @@ export function Calendar({
       }
       laneOf.set(b.id, lane);
     }
-    return { laneOf, laneCount: Math.max(1, laneEndDates.length) };
+    return { laneOf, laneCount: laneEndDates.length };
   }
 
-  function BookingBars({ rowBookings, laneOf }: { rowBookings: Booking[]; laneOf: Map<string, number> }) {
+  // §user request, with a reference app's own calendar as the target — "poora fit rahega, niche
+  // hokr koi dedicated space nahi banegi": a room row used to reserve a separate grid row for its
+  // rate text and another below it per lane, so a single booking (the common case — one physical
+  // room, one lane) always left dead space either above or below its bar. Every bar in a row now
+  // shares that row's single grid cell via absolute positioning instead of its own grid row: with
+  // only one lane in use it fills the cell edge to edge, and only actually-concurrent lanes (a
+  // same-day turnover, or a maintenance block sharing the row with a booking) stack within it.
+  function laneStyle(laneIndex: number, totalLanes: number): CSSProperties {
+    if (totalLanes <= 1) return { position: 'absolute', inset: '6px 3px' };
+    const laneHeight = 28;
+    const gap = 4;
+    return { position: 'absolute', top: gap + laneIndex * (laneHeight + gap), left: 3, right: 3, height: laneHeight };
+  }
+
+  function BookingBars({ rowBookings, laneOf, totalLanes }: { rowBookings: Booking[]; laneOf: Map<string, number>; totalLanes: number }) {
     return (
       <>
         {rowBookings.map((b) => {
@@ -538,8 +552,8 @@ export function Calendar({
             // anything, and a click no longer jumps straight to the read-only detail view.
             <div
               key={b.id}
-              className="group relative z-10"
-              style={{ gridColumn: `${Math.max(1, colStart)} / ${Math.min(dates.length + 1, colEnd)}`, gridRow: lane + 2, marginBottom: 2, marginTop: lane === 0 ? 6 : 2 }}
+              className="group z-10"
+              style={{ gridColumn: `${Math.max(1, colStart)} / ${Math.min(dates.length + 1, colEnd)}`, ...laneStyle(lane, totalLanes) }}
             >
               <button
                 type="button"
@@ -547,7 +561,7 @@ export function Calendar({
                   e.stopPropagation();
                   setMenuFor({ booking: b, x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 170) });
                 }}
-                className={`flex w-full items-center gap-1 truncate rounded-md px-2 py-1 text-left text-xs font-medium shadow-sm hover:opacity-90 ${meta.bg} ${meta.text}`}
+                className={`flex h-full w-full items-center gap-1 truncate rounded-md px-2 py-1 text-left text-xs font-medium shadow-sm hover:opacity-90 ${meta.bg} ${meta.text}`}
               >
                 <ChannelIcon source={b.source} className="h-4 w-4 shrink-0" />
                 {earlyCheckIn && <span className="shrink-0" aria-hidden="true">⏱</span>}
@@ -575,9 +589,9 @@ export function Calendar({
     );
   }
 
-  /** A room out of service for a date range — same spanning-bar layout as BookingBars, stacked
-   * in its own lane below whatever real bookings that room already has. */
-  function MaintenanceBars({ blocks, laneCount }: { blocks: RoomMaintenanceBlock[]; laneCount: number }) {
+  /** A room out of service for a date range — same spanning-bar layout as BookingBars, sharing
+   * the row's own lane stack (laneIndex is always right after every real booking's lane). */
+  function MaintenanceBars({ blocks, laneIndex, totalLanes }: { blocks: RoomMaintenanceBlock[]; laneIndex: number; totalLanes: number }) {
     return (
       <>
         {blocks.map((m) => {
@@ -589,13 +603,8 @@ export function Calendar({
           return (
             <div
               key={m.id}
-              className="group relative z-10"
-              style={{
-                gridColumn: `${Math.max(1, colStart)} / ${Math.min(dates.length + 1, colEnd)}`,
-                gridRow: laneCount + 2,
-                marginBottom: 2,
-                marginTop: laneCount === 0 ? 6 : 2,
-              }}
+              className="group z-10"
+              style={{ gridColumn: `${Math.max(1, colStart)} / ${Math.min(dates.length + 1, colEnd)}`, ...laneStyle(laneIndex, totalLanes) }}
             >
               <button
                 type="button"
@@ -603,7 +612,7 @@ export function Calendar({
                   e.stopPropagation();
                   setMaintenanceMenuFor({ block: m, x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 100) });
                 }}
-                className="flex w-full items-center gap-1 truncate rounded-md bg-slate-300 px-2 py-1 text-left text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-400"
+                className="flex h-full w-full items-center gap-1 truncate rounded-md bg-slate-300 px-2 py-1 text-left text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-400"
               >
                 🔧 Maintenance
               </button>
@@ -861,8 +870,9 @@ export function Calendar({
                           rowMaintenanceBlocks.some((m) => m.startAt.slice(0, 10) <= d && m.endAt.slice(0, 10) > d),
                       ),
                     );
-                    const { laneOf, laneCount } = assignLanes(rowBookings);
-                    const barsHeight = laneCount * 30;
+                    const { laneOf, laneCount: bookingLaneCount } = assignLanes(rowBookings);
+                    const maintenanceLaneIndex = bookingLaneCount;
+                    const totalLanes = bookingLaneCount + (rowMaintenanceBlocks.length > 0 ? 1 : 0);
                     const instanceKey = room ? room.id : categoryId;
                     return (
                       <div key={instanceKey} className="flex border-b border-slate-100 hover:bg-slate-50/60">
@@ -881,7 +891,10 @@ export function Calendar({
                         </div>
                         <div
                           className="relative grid flex-1"
-                          style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`, minHeight: viewMode === 'rates' ? 64 : Math.max(64, 40 + barsHeight) }}
+                          style={{
+                            gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`,
+                            minHeight: viewMode === 'rates' || totalLanes <= 1 ? 64 : 64 + (totalLanes - 1) * 32,
+                          }}
                         >
                           {/* §user request, matching a reference app's empty-cell click menu —
                               click a date on this specific room's row with nothing booked/blocked
@@ -909,8 +922,10 @@ export function Calendar({
                           {viewMode !== 'stays' && (
                             <RateCells ratePlanId={ratePlanId} room={room} unbookedRoomsByDate={unbookedRoomsByDate} coveredDates={coveredDates} />
                           )}
-                          {viewMode !== 'rates' && <BookingBars rowBookings={rowBookings} laneOf={laneOf} />}
-                          {viewMode !== 'rates' && rowMaintenanceBlocks.length > 0 && <MaintenanceBars blocks={rowMaintenanceBlocks} laneCount={laneCount} />}
+                          {viewMode !== 'rates' && <BookingBars rowBookings={rowBookings} laneOf={laneOf} totalLanes={totalLanes} />}
+                          {viewMode !== 'rates' && rowMaintenanceBlocks.length > 0 && (
+                            <MaintenanceBars blocks={rowMaintenanceBlocks} laneIndex={maintenanceLaneIndex} totalLanes={totalLanes} />
+                          )}
                         </div>
                       </div>
                     );
@@ -926,9 +941,14 @@ export function Calendar({
                       </div>
                       <div
                         className="relative grid flex-1"
-                        style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`, minHeight: Math.max(64, 40 + unassignedLanes.laneCount * 30) }}
+                        style={{
+                          gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`,
+                          minHeight: unassignedLanes.laneCount <= 1 ? 64 : 64 + (unassignedLanes.laneCount - 1) * 32,
+                        }}
                       >
-                        {viewMode !== 'rates' && <BookingBars rowBookings={unassignedBookings} laneOf={unassignedLanes.laneOf} />}
+                        {viewMode !== 'rates' && (
+                          <BookingBars rowBookings={unassignedBookings} laneOf={unassignedLanes.laneOf} totalLanes={unassignedLanes.laneCount} />
+                        )}
                       </div>
                     </div>
                   )}
