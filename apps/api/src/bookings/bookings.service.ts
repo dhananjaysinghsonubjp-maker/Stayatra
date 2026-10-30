@@ -307,16 +307,24 @@ export class BookingsService {
 
     // §user request — "rooms get automatically blocked on all OTA": every other booking-creation
     // path (createManualBooking, checkInWalkIn, ...) already calls this; this one was missing it,
-    // so a multi-room reservation never actually held its rooms against OTA sale. One call per
-    // category (grouped, since adjustAvailabilityForStay affects a whole category's pooled count).
-    const deltaByCategory = new Map<string, number>();
-    for (const r of rooms) {
-      if (!r.roomCategoryId) continue;
-      deltaByCategory.set(r.roomCategoryId, (deltaByCategory.get(r.roomCategoryId) ?? 0) - 1);
+    // so a multi-room reservation never actually held its rooms against OTA sale.
+    // §bugfix — grouped by category *and* date range, not just category: a bulk/wedding
+    // reservation can give individual rooms their own stay dates (roomStays above, the "per-room
+    // date chip" feature), but this used to always decrement the group-level input.checkIn/
+    // checkOut for every room regardless — so a room with its own different dates would adjust
+    // availability for the wrong nights entirely.
+    const deltaByCategoryStay = new Map<string, { roomCategoryId: string; checkIn: Date; checkOut: Date; delta: number }>();
+    for (const r of roomStays) {
+      const room = rooms.find((rm) => rm.id === r.roomId);
+      if (!room?.roomCategoryId) continue;
+      const key = `${room.roomCategoryId}|${r.checkIn.toISOString()}|${r.checkOut.toISOString()}`;
+      const existing = deltaByCategoryStay.get(key);
+      if (existing) existing.delta -= 1;
+      else deltaByCategoryStay.set(key, { roomCategoryId: room.roomCategoryId, checkIn: r.checkIn, checkOut: r.checkOut, delta: -1 });
     }
     await Promise.all(
-      [...deltaByCategory.entries()].map(([roomCategoryId, delta]) =>
-        this.rates.adjustAvailabilityForStay({ hotelId: input.hotelId, roomCategoryId, checkIn: input.checkIn, checkOut: input.checkOut, delta }),
+      [...deltaByCategoryStay.values()].map((d) =>
+        this.rates.adjustAvailabilityForStay({ hotelId: input.hotelId, roomCategoryId: d.roomCategoryId, checkIn: d.checkIn, checkOut: d.checkOut, delta: d.delta }),
       ),
     );
 

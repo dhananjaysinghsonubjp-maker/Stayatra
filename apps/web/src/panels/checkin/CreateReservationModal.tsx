@@ -3,6 +3,7 @@ import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { BOOKING_SOURCE_OPTIONS } from '../../bookingSource';
 import { Button, Card, Field, inputClass } from '../../components/ui';
+import { addDaysKey } from '../../components/DateRangePicker';
 import { formatDateShort } from '../../dateFormat';
 import { computeGstSlab } from '../../gst';
 import { computeInvoiceTotals } from '../../invoice';
@@ -53,6 +54,8 @@ export function CreateReservationModal({
   onClose,
   onDone,
   editGroup,
+  initialRoomId,
+  initialCheckIn,
 }: {
   hotelId: string;
   onClose: () => void;
@@ -61,6 +64,12 @@ export function CreateReservationModal({
    * every Booking row sharing one reservationGroupId, prefilling this same form instead of a
    * blank one and saving via bookings.updateReservationGroup instead of create. */
   editGroup?: Booking[];
+  /** §user request — Calendar's empty-cell menu on a future date: "Check In" only makes sense for
+   * a guest arriving right now, so a future date opens this form instead, with the room the click
+   * landed on and that date already picked — same one-less-step prefill CheckInModal's own `room`
+   * prop already gives the walk-in flow. */
+  initialRoomId?: string;
+  initialCheckIn?: string;
 }) {
   const { token } = useAuth();
   const isEditMode = Boolean(editGroup && editGroup.length > 0);
@@ -201,6 +210,34 @@ export function CreateReservationModal({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editGroup]);
+
+  // §user request — Calendar's empty-cell menu on a future date prefills this form instead of
+  // opening blank: the clicked date becomes check-in/check-out (one night, same as the form's own
+  // default), and the clicked room is pre-added to `picked` exactly like confirmPicker would add
+  // it (rate left at 0 — the owner still reviews/sets the price here, same as picking manually).
+  useEffect(() => {
+    if (editGroup && editGroup.length > 0) return; // edit mode's own effect above already wins
+    if (!initialRoomId || !initialCheckIn) return;
+    const effCheckIn = initialCheckIn;
+    const effCheckOut = addDaysKey(initialCheckIn, 1);
+    setCheckIn(effCheckIn);
+    setCheckOut(effCheckOut);
+    (async () => {
+      try {
+        const rooms = await query<(Room & { available: boolean })[]>(
+          'bookings.listRoomsWithAvailability',
+          { hotelId, checkIn: effCheckIn, checkOut: effCheckOut },
+          token ?? undefined,
+        );
+        setAvailableRooms(rooms);
+        const room = rooms.find((r) => r.id === initialRoomId);
+        if (room) setPicked([{ room, ratePerNight: 0, ratePlanId: '', lineItems: [] }]);
+      } catch {
+        // Room picker still opens empty and lets the room be added manually either way.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRoomId, initialCheckIn]);
 
   const nights = Math.max(1, Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000));
 

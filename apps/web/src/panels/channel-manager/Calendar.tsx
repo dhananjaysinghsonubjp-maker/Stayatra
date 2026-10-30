@@ -82,6 +82,11 @@ export function Calendar({
   // CheckInModal (walk-in, same as Room View's own "Check in") with this exact room prefilled,
   // not a blank future-reservation form.
   const [checkingInRoom, setCheckingInRoom] = useState<Room | null>(null);
+  // §user request — "aaj ki date pe Check In aayega, future date pe Reservation create hogi":
+  // a walk-in check-in only makes sense for a guest arriving today (or earlier — a backdated
+  // check-in); a future date opens the real multi-room reservation form instead, with this room
+  // and date already picked.
+  const [creatingReservationFor, setCreatingReservationFor] = useState<{ roomId: string; date: string } | null>(null);
   // §user request, with a reference app's own empty-cell click menu as the target — click a date
   // on a specific room's own row with nothing booked there and get Check In / Add Maintenance
   // Block, instead of nothing happening at all.
@@ -446,11 +451,13 @@ export function Calendar({
     room,
     unbookedRoomsByDate,
     coveredDates,
+    showRoomOwnRate,
   }: {
     ratePlanId: string | undefined;
     room: Room | null;
     unbookedRoomsByDate: Map<string, Room[]>;
     coveredDates: Set<string>;
+    showRoomOwnRate: boolean;
   }) {
     const rateRows = ratePlanId ? ratesByPlan[ratePlanId] ?? [] : [];
     const rateByDate = new Map(rateRows.map((r) => [r.date.slice(0, 10), r]));
@@ -495,7 +502,7 @@ export function Calendar({
               {rate ? (
                 blocked ? (
                   <p className="truncate text-[10px] font-medium text-red-500">Blocked</p>
-                ) : (
+                ) : showRoomOwnRate ? (
                   <>
                     <p className="truncate text-[10px] font-medium text-slate-500">₹{rate.price}</p>
                     <p
@@ -506,16 +513,16 @@ export function Calendar({
                       {rate.availability} left
                     </p>
                   </>
-                )
+                ) : null
               ) : restriction?.channelBlocked ? (
                 // A restriction (Advance Bulk Update) can exist on its own, with no rate ever
                 // set for this date — without this branch the cell fell through to the plain
                 // "—" empty state and the block was invisible on the one screen owners
                 // actually glance at (§ user request: a blocked date must show here automatically).
                 <p className="truncate text-[10px] font-medium text-red-500">Blocked</p>
-              ) : (
+              ) : showRoomOwnRate ? (
                 <p className="truncate text-[10px] text-slate-300">—</p>
-              )}
+              ) : null}
             </div>
           );
         })}
@@ -551,14 +558,17 @@ export function Calendar({
   // hokr koi dedicated space nahi banegi": a room row used to reserve a separate grid row for its
   // rate text and another below it per lane, so a single booking (the common case — one physical
   // room, one lane) always left dead space either above or below its bar. Every bar in a row now
-  // shares that row's single grid cell via absolute positioning instead of its own grid row: with
-  // only one lane in use it fills the cell edge to edge, and only actually-concurrent lanes (a
-  // same-day turnover, or a maintenance block sharing the row with a booking) stack within it.
+  // shares that row's single grid cell via absolute positioning instead of its own grid row.
+  // §user request — "thoda patla aur chota karo, sleek aur simple dikhe": filling the cell edge to
+  // edge (the first cut of this) still read as one big block — a fixed, slim pill height,
+  // vertically centred in the row, reads lighter even though it's still the only thing in that
+  // row's one grid cell. Only genuinely concurrent lanes (a same-day turnover, or a maintenance
+  // block sharing the row with a booking) stack, each getting this same slim height.
+  const LANE_HEIGHT = 24;
   function laneStyle(laneIndex: number, totalLanes: number): CSSProperties {
-    if (totalLanes <= 1) return { position: 'absolute', inset: '6px 3px' };
-    const laneHeight = 28;
+    if (totalLanes <= 1) return { position: 'absolute', top: '50%', left: 4, right: 4, height: LANE_HEIGHT, marginTop: -LANE_HEIGHT / 2 };
     const gap = 4;
-    return { position: 'absolute', top: gap + laneIndex * (laneHeight + gap), left: 3, right: 3, height: laneHeight };
+    return { position: 'absolute', top: gap + laneIndex * (LANE_HEIGHT + gap), left: 4, right: 4, height: LANE_HEIGHT };
   }
 
   function BookingBars({ rowBookings, laneOf, totalLanes }: { rowBookings: Booking[]; laneOf: Map<string, number>; totalLanes: number }) {
@@ -591,9 +601,9 @@ export function Calendar({
                   e.stopPropagation();
                   setMenuFor({ booking: b, x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 170) });
                 }}
-                className={`flex h-full w-full items-center gap-1 truncate rounded-md px-2 py-1 text-left text-xs font-medium shadow-sm hover:opacity-90 ${meta.bg} ${meta.text}`}
+                className={`flex h-full w-full items-center gap-1 truncate rounded px-1.5 text-left text-[11px] font-medium leading-none shadow-sm hover:opacity-90 ${meta.bg} ${meta.text}`}
               >
-                <ChannelIcon source={b.source} className="h-4 w-4 shrink-0" />
+                <ChannelIcon source={b.source} className="h-3 w-3 shrink-0" />
                 {earlyCheckIn && <span className="shrink-0" aria-hidden="true">⏱</span>}
                 <span className="truncate">{b.guestName}</span>
                 <span className="ml-auto shrink-0 opacity-80">₹{Number(b.totalAmount).toLocaleString('en-IN')}</span>
@@ -642,7 +652,7 @@ export function Calendar({
                   e.stopPropagation();
                   setMaintenanceMenuFor({ block: m, x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 100) });
                 }}
-                className="flex h-full w-full items-center gap-1 truncate rounded-md bg-slate-300 px-2 py-1 text-left text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-400"
+                className="flex h-full w-full items-center gap-1 truncate rounded bg-slate-300 px-1.5 text-left text-[11px] font-semibold leading-none text-slate-700 shadow-sm hover:bg-slate-400"
               >
                 🔧 Maintenance
               </button>
@@ -836,6 +846,15 @@ export function Calendar({
               // No rooms set up for this category yet — still show one row so its rates aren't invisible.
               const rowRooms: (Room | null)[] = categoryRooms.length > 0 ? categoryRooms : [null];
               const categoryRateRows = ratePlanId ? ratesByPlan[ratePlanId] ?? [] : [];
+              // §user request — "saare rooms ka ek hi rate karte hain to cell blank rahega, sirf
+              // particular room ka apna rate ho to hi likha aayega": a category's own rate plan is
+              // genuinely "one specific room's own rate" only when that room IS the whole category
+              // (e.g. a one-off room split into its own category/rate plan precisely so it can
+              // carry a different OTA price — the real, OTA-honest way to do that, since no OTA
+              // prices an individual room number). Otherwise the number is a blanket rate shared
+              // by every room here, already shown once in the "Rooms on OTA" row above — repeating
+              // it on every room's own row added nothing and just looked cluttered.
+              const showRoomOwnRate = categoryRooms.length <= 1;
               return (
                 <div key={categoryId}>
                   {/* §user request — "date ke niche ek row bana ke No. of Rooms on OTA dena
@@ -929,7 +948,7 @@ export function Calendar({
                           className="relative grid flex-1"
                           style={{
                             gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`,
-                            minHeight: viewMode === 'rates' || totalLanes <= 1 ? 64 : 64 + (totalLanes - 1) * 32,
+                            minHeight: viewMode === 'rates' || totalLanes <= 1 ? 64 : 64 + (totalLanes - 1) * (LANE_HEIGHT + 4),
                           }}
                         >
                           {/* §user request, matching a reference app's empty-cell click menu —
@@ -956,7 +975,13 @@ export function Calendar({
                             </div>
                           )}
                           {viewMode !== 'stays' && (
-                            <RateCells ratePlanId={ratePlanId} room={room} unbookedRoomsByDate={unbookedRoomsByDate} coveredDates={coveredDates} />
+                            <RateCells
+                              ratePlanId={ratePlanId}
+                              room={room}
+                              unbookedRoomsByDate={unbookedRoomsByDate}
+                              coveredDates={coveredDates}
+                              showRoomOwnRate={showRoomOwnRate}
+                            />
                           )}
                           {viewMode !== 'rates' && <BookingBars rowBookings={rowBookings} laneOf={laneOf} totalLanes={totalLanes} />}
                           {viewMode !== 'rates' && rowMaintenanceBlocks.length > 0 && (
@@ -979,7 +1004,7 @@ export function Calendar({
                         className="relative grid flex-1"
                         style={{
                           gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))`,
-                          minHeight: unassignedLanes.laneCount <= 1 ? 64 : 64 + (unassignedLanes.laneCount - 1) * 32,
+                          minHeight: unassignedLanes.laneCount <= 1 ? 64 : 64 + (unassignedLanes.laneCount - 1) * (LANE_HEIGHT + 4),
                         }}
                       >
                         {viewMode !== 'rates' && (
@@ -1302,12 +1327,16 @@ export function Calendar({
             <button
               type="button"
               onClick={() => {
-                setCheckingInRoom(emptyCellMenu.room);
+                if (emptyCellMenu.date <= today) {
+                  setCheckingInRoom(emptyCellMenu.room);
+                } else {
+                  setCreatingReservationFor({ roomId: emptyCellMenu.room.id, date: emptyCellMenu.date });
+                }
                 setEmptyCellMenu(null);
               }}
               className="block w-full px-3 py-2 text-left text-sm font-medium text-brand-600 hover:bg-brand-50"
             >
-              Check In
+              {emptyCellMenu.date <= today ? 'Check In' : 'Create Reservation'}
             </button>
             <button
               type="button"
@@ -1359,6 +1388,19 @@ export function Calendar({
           onClose={() => setCheckingInRoom(null)}
           onDone={() => {
             setCheckingInRoom(null);
+            void refreshBookings();
+          }}
+        />
+      )}
+
+      {creatingReservationFor && (
+        <CreateReservationModal
+          hotelId={hotelId}
+          initialRoomId={creatingReservationFor.roomId}
+          initialCheckIn={creatingReservationFor.date}
+          onClose={() => setCreatingReservationFor(null)}
+          onDone={() => {
+            setCreatingReservationFor(null);
             void refreshBookings();
           }}
         />
