@@ -215,6 +215,36 @@ export function Calendar({
     await loadAll();
   }
 
+  // §user request — "particular room ko OTA pe block kar sakein, bas ek quick single-date
+  // toggle": the full "Add Maintenance Block" panel (date range, reason) stays for planned/
+  // multi-day out-of-service blocks, but a one-click option on a single empty cell calls the same
+  // backend (a maintenance block is just "this room isn't sellable right now", OTA-wise identical
+  // whether the reason is upkeep or the owner holding it back) scoped to exactly that one calendar
+  // day. Once created it shows up as a normal maintenance bar — same Edit/Remove menu as any other.
+  async function quickBlockRoomForDate(room: Room, date: string) {
+    setEmptyCellMenu(null);
+    try {
+      // Noon-to-noon, not midnight-to-midnight — matches the Maintenance panel's own default
+      // (§bugfix precedent: a local midnight timestamp can cross into the previous UTC calendar
+      // date in a timezone ahead of UTC, like IST, and datesInRange would then decrement the wrong
+      // day). Exactly 24 hours apart at the same local hour always counts as exactly one night.
+      await mutate(
+        'hotels.createMaintenanceBlock',
+        {
+          hotelId,
+          roomId: room.id,
+          startAt: new Date(`${date}T12:00`).toISOString(),
+          endAt: new Date(`${addDaysKey(date, 1)}T12:00`).toISOString(),
+          reason: 'Blocked on OTA',
+        },
+        token ?? undefined,
+      );
+      await refreshBookings();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to block room');
+    }
+  }
+
   // One primary rate plan per room category — every physical room in that category shows this rate (rooms of the same type share pricing).
   const primaryPlanByCategory = new Map<string, string>();
   for (const rp of ratePlans) if (!primaryPlanByCategory.has(rp.roomCategoryId)) primaryPlanByCategory.set(rp.roomCategoryId, rp.id);
@@ -818,8 +848,11 @@ export function Calendar({
                       to have before they became plain display. */}
                   {viewMode !== 'stays' && ratePlanId && (
                     <div className="flex border-b border-slate-200 bg-slate-50">
-                      <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center bg-slate-50 px-3 py-2 sm:w-44">
+                      {/* §user request — "chota sa text, bada nahi, 'number of rooms available'
+                          dikhe": the bold label alone didn't say what the number below it meant. */}
+                      <div className="sticky left-0 z-20 flex w-24 shrink-0 flex-col justify-center bg-slate-50 px-3 py-2 sm:w-44">
                         <p className="truncate text-[10px] font-bold uppercase tracking-wide text-slate-500">Rooms on OTA</p>
+                        <p className="truncate text-[9px] text-slate-400">Rooms available, at price</p>
                       </div>
                       <div className="grid flex-1" style={{ gridTemplateColumns: `repeat(${dates.length}, minmax(56px, 1fr))` }}>
                         {dates.map((d, i) => {
@@ -835,16 +868,19 @@ export function Calendar({
                               onMouseDown={() => startDrag(categoryId, ratePlanId, categoryId, i)}
                               onMouseEnter={() => extendDrag(categoryId, i)}
                               title="Click to edit this date, or drag across several days to bulk-edit them"
-                              className={`flex items-center justify-center border-l border-slate-100 py-2 hover:bg-brand-50/60 ${inDragSelection ? 'bg-brand-100' : ''}`}
+                              className={`flex flex-col items-center justify-center border-l border-slate-100 py-2 hover:bg-brand-50/60 ${inDragSelection ? 'bg-brand-100' : ''}`}
                             >
                               {rate ? (
-                                <span
-                                  className={`text-xs font-bold ${
-                                    rate.availability === 0 ? 'text-red-500' : rate.availability <= 2 ? 'text-amber-600' : 'text-emerald-600'
-                                  }`}
-                                >
-                                  {rate.availability}
-                                </span>
+                                <>
+                                  <span
+                                    className={`text-xs font-bold ${
+                                      rate.availability === 0 ? 'text-red-500' : rate.availability <= 2 ? 'text-amber-600' : 'text-emerald-600'
+                                    }`}
+                                  >
+                                    {rate.availability}
+                                  </span>
+                                  <span className="truncate text-[9px] text-slate-400">@ ₹{rate.price}</span>
+                                </>
                               ) : (
                                 <span className="text-xs text-slate-400 hover:text-brand-600">+ Set</span>
                               )}
@@ -1272,6 +1308,13 @@ export function Calendar({
               className="block w-full px-3 py-2 text-left text-sm font-medium text-brand-600 hover:bg-brand-50"
             >
               Check In
+            </button>
+            <button
+              type="button"
+              onClick={() => void quickBlockRoomForDate(emptyCellMenu.room, emptyCellMenu.date)}
+              className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Block this room on OTA (this date)
             </button>
             <button
               type="button"
