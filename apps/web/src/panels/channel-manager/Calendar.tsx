@@ -430,7 +430,15 @@ export function Calendar({
           return (
             <div
               key={d}
-              className={`relative flex flex-col justify-center border-l border-slate-100 px-1.5 py-1.5 ${isToday ? 'bg-brand-50/70' : ''}`}
+              // §bugfix — "room 102 pe click karne se Check In option nahi aa raha": this div is
+              // purely display (see this component's own comment above — clicks don't do anything
+              // here any more), but once a rate/availability is set for a date it stretches to
+              // fill the whole grid cell and, being painted after the empty-cell click layer below,
+              // silently ate clicks meant for that layer's "Check In" button — only cells still
+              // showing "—" (nothing to paint) let the click fall through by accident.
+              // pointer-events-none makes every cell behave like the "—" ones, regardless of what's
+              // displayed in it.
+              className={`relative flex flex-col justify-center border-l border-slate-100 px-1.5 py-1.5 pointer-events-none ${isToday ? 'bg-brand-50/70' : ''}`}
               style={{ gridColumn: i + 1, gridRow: 1 }}
             >
               {rate ? (
