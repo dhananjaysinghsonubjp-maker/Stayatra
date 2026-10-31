@@ -837,6 +837,16 @@ export function Calendar({
               // sync or release: for each date, rooms with no overlapping booking are ranked by
               // room number, and whichever fall at or past the availability count are the ones
               // genuinely oversold — RateCells below renders those as "Blocked".
+              // §bugfix — "103 ko maine OTA block kiya, 101 apne aap Blocked kyun dikh raha hai":
+              // a specific room's own maintenance block (the "Block this room on OTA" quick
+              // action, or a full Maintenance Block) correctly takes 1 off this category's pooled
+              // availability, but this ranking never excluded that *specific* room from the
+              // "unbooked" pool the way an actual booking already did — so with availability now
+              // one lower but every room still in the unbooked list, the lowest room NUMBER (101)
+              // took the blame instead of the room actually blocked (103). Maintenance-blocked
+              // rooms are excluded here exactly like booked ones, so the room really responsible
+              // for the lower count (shown via its own bar already) is the only one marked for it.
+              const categoryMaintenanceBlocks = maintenanceBlocks.filter((m) => categoryRoomIds.has(m.roomId));
               const unbookedRoomsByDate = new Map<string, Room[]>();
               for (const d of dates) {
                 const bookedRoomIds = new Set(
@@ -845,9 +855,14 @@ export function Calendar({
                     .map((b) => b.assignedRoomId)
                     .filter((id): id is string => Boolean(id)),
                 );
+                const blockedRoomIds = new Set(
+                  categoryMaintenanceBlocks.filter((m) => m.startAt.slice(0, 10) <= d && m.endAt.slice(0, 10) > d).map((m) => m.roomId),
+                );
                 unbookedRoomsByDate.set(
                   d,
-                  categoryRooms.filter((r) => !bookedRoomIds.has(r.id)).sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })),
+                  categoryRooms
+                    .filter((r) => !bookedRoomIds.has(r.id) && !blockedRoomIds.has(r.id))
+                    .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })),
                 );
               }
               // A booking only shows on its own room's row once it has one (§user request — room-
