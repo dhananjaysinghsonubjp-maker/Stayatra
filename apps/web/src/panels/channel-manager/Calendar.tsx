@@ -178,15 +178,23 @@ export function Calendar({
   // load until it was refreshed. Every action that can move availability (check-in, maintenance
   // block create/edit/release, reservation edit) needs the rate grid re-pulled too, so this is now
   // the one function both the initial load and every "refresh after an action" call go through.
+  // §bugfix — "block remove karne ke baad ek second ke liye room 101 Blocked dikh jata hai": this
+  // used to set bookings/maintenanceBlocks as soon as THEIR fetch resolved, then await the rate
+  // grid's own separate fetch before setting that. For one render in between, maintenanceBlocks
+  // already reflected the just-released block (none) while ratesByPlan still held the OLD,
+  // pre-release availability number — and the ranking heuristic above (unbookedRoomsByDate) reads
+  // both together, so that single inconsistent render blamed room 101 for a count that, a moment
+  // later, resolved back to normal. Every fetch now finishes first; all four setStates happen
+  // together after, in one React batch, so there's never a render with only half the picture.
   async function loadAll() {
     try {
       const [bookingRows, maintenanceRows] = await Promise.all([
         query<Booking[]>('bookings.listReservations', { hotelId, from: startDate, to: endDate, overlapping: true }, token ?? undefined),
         query<RoomMaintenanceBlock[]>('hotels.listMaintenanceBlocks', { hotelId, from: startDate, to: endDate }, token ?? undefined),
       ]);
-      setBookings(bookingRows);
-      setMaintenanceBlocks(maintenanceRows);
       if (!otaConnectionId || ratePlans.length === 0) {
+        setBookings(bookingRows);
+        setMaintenanceBlocks(maintenanceRows);
         setRatesByPlan({});
         setRestrictionsByPlan({});
         return;
@@ -201,6 +209,8 @@ export function Calendar({
           return [rp.id, grid.rates.filter((r) => r.occupancyTier === 1), grid.restrictions] as const;
         }),
       );
+      setBookings(bookingRows);
+      setMaintenanceBlocks(maintenanceRows);
       setRatesByPlan(Object.fromEntries(entries.map(([id, rates]) => [id, rates])));
       setRestrictionsByPlan(Object.fromEntries(entries.map(([id, , restrictions]) => [id, restrictions])));
     } catch (err) {
