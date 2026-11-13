@@ -37,6 +37,7 @@ import type { AuditService } from '../common/audit.service.js';
 import type { LedgerService } from '../ledger/ledger.service.js';
 import type { StaffService } from '../staff/staff.service.js';
 import type { ContactsService } from '../contacts/contacts.service.js';
+import type { ErrorLogService } from '../common/error-log.service.js';
 
 export function createAppRouter(services: {
   auth: AuthService;
@@ -58,6 +59,7 @@ export function createAppRouter(services: {
   ledger: LedgerService;
   staff: StaffService;
   contacts: ContactsService;
+  errorLog: ErrorLogService;
 }) {
   return router({
     health: router({
@@ -76,7 +78,7 @@ export function createAppRouter(services: {
     ota: createOtaRouter(services.ota, services.sync),
     reports: createReportsRouter(services.reports),
     guests: createGuestsRouter(services.guests),
-    platformAdmin: createPlatformAdminRouter(services.platformAdmin),
+    platformAdmin: createPlatformAdminRouter(services.platformAdmin, services.errorLog),
     affiliate: createAffiliateRouter(services.affiliate),
     plans: createPlansRouter(services.plans),
     billing: createBillingRouter(services.plans),

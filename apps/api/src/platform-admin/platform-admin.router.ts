@@ -1,16 +1,23 @@
 import { z } from 'zod';
 import { publicProcedure, platformAdminProcedure, router } from '../trpc/trpc.js';
 import type { PlatformAdminService } from './platform-admin.service.js';
+import type { ErrorLogService } from '../common/error-log.service.js';
 
 const moduleTypeSchema = z.enum(['channel_manager', 'pms', 'theft_protection']);
 
-export function createPlatformAdminRouter(platformAdmin: PlatformAdminService) {
+export function createPlatformAdminRouter(platformAdmin: PlatformAdminService, errorLog: ErrorLogService) {
   return router({
     login: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
       .mutation(({ input }) => platformAdmin.login(input)),
 
     me: platformAdminProcedure.query(({ ctx }) => ctx.platformAdmin),
+
+    // §user request — "jo jo errors aa rahe hai live system me unka ek log create karte raho,
+    // jab main mangu tab dena": the running list main.ts's tRPC onError hook has been writing to.
+    listErrorLogs: platformAdminProcedure.input(z.object({ limit: z.number().int().positive().max(500).optional() })).query(({ input }) => errorLog.list(input.limit)),
+
+    clearErrorLogs: platformAdminProcedure.mutation(() => errorLog.clear()),
 
     listOrganizations: platformAdminProcedure.query(() => platformAdmin.listOrganizations()),
 

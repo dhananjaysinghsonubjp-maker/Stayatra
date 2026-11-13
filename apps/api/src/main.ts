@@ -1,3 +1,4 @@
+import { HttpException } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { type NestExpressApplication } from '@nestjs/platform-express';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
@@ -20,6 +21,7 @@ import { AffiliateService } from './platform-admin/affiliate.service.js';
 import { PlansService } from './plans/plans.service.js';
 import { NotificationsService } from './notifications/notifications.service.js';
 import { AuditService } from './common/audit.service.js';
+import { ErrorLogService } from './common/error-log.service.js';
 import { LedgerService } from './ledger/ledger.service.js';
 import { StaffService } from './staff/staff.service.js';
 import { ContactsService } from './contacts/contacts.service.js';
@@ -42,6 +44,7 @@ async function bootstrap() {
   const platformAdmin = app.get(PlatformAdminService);
   const affiliate = app.get(AffiliateService);
   const plans = app.get(PlansService);
+  const errorLog = app.get(ErrorLogService);
   await plans.seedDefaults();
   const appRouter = createAppRouter({
     auth,
@@ -63,6 +66,7 @@ async function bootstrap() {
     ledger: app.get(LedgerService),
     staff: app.get(StaffService),
     contacts: app.get(ContactsService),
+    errorLog,
   });
 
   app.use(
@@ -70,6 +74,27 @@ async function bootstrap() {
     createExpressMiddleware({
       router: appRouter,
       createContext: createContextFactory(prisma, auth, platformAdmin, affiliate),
+      // §user request — "jo jo errors aa rahe hai live system me unka ek log create karte raho":
+      // one place every procedure's thrown error passes through. A deliberate business-logic
+      // exception (BadRequestException, ConflictException, ...) is normal user-facing feedback,
+      // not a bug — those are HttpExceptions with a 4xx status, and tRPC always reports them as
+      // 'INTERNAL_SERVER_ERROR' regardless (it only has its own codes, not Nest's), so the status
+      // on the original cause is the only reliable way to tell "expected" apart from a genuine,
+      // unexpected crash (a null pointer, a bad query, a 5xx from somewhere). Only the latter get
+      // written — this must never be the noisy list of every wrong phone number typed in today.
+      onError({ error, path: procedurePath, input, ctx }) {
+        const cause = error.cause;
+        const isExpected = cause instanceof HttpException && cause.getStatus() < 500;
+        if (error.code !== 'INTERNAL_SERVER_ERROR' || isExpected) return;
+        void errorLog.log({
+          path: procedurePath,
+          message: error.message,
+          stack: error.stack,
+          hotelId: ctx?.user?.hotelId,
+          userId: ctx?.user?.userId,
+          input,
+        });
+      },
     }),
   );
 

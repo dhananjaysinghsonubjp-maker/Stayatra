@@ -1159,3 +1159,23 @@ model LoginAttempt {
   @@index([hotelId, deviceId, attemptedAt])
   @@map("login_attempts")
 }
+
+// §user request — "jo jo errors aa rahe hai live system me unka ek log create karte raho":
+// every genuinely unexpected server error (not a deliberate validation/conflict message, like
+// "Guest phone must be 10 digits" — those are normal, expected user feedback, not bugs) gets
+// caught once, centrally, in main.ts's tRPC onError hook and written here. No FK to Hotel/User —
+// logging a crash must never itself fail because the hotel/user row it mentions got deleted, and
+// a row here should outlive either anyway.
+model ErrorLog {
+  id        String   @id @default(cuid())
+  path      String? // tRPC procedure path, e.g. "bookings.checkInWalkIn" — null for a non-tRPC request
+  message   String
+  stack     String?
+  hotelId   String? @map("hotel_id")
+  userId    String? @map("user_id")
+  input     Json? // the request input that triggered it, for reproducing — never guest payment/ID fields (redacted before saving)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("error_logs")
+}
