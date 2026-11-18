@@ -12,10 +12,12 @@ const ThemeContext = createContext<ThemeState | null>(null);
 function initialTheme(): Theme {
   const saved = localStorage.getItem('theme');
   if (saved === 'light' || saved === 'dark') return saved;
-  // No saved preference yet — default to the device's own setting (§ user request:
-  // "depends on mood of the customer, he wants to choose" — their own toggle choice
-  // always wins once made, this is just the first-run default).
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  // §user request — "jab bhi login karta hoon dark theme mein khul jaata hai, isko day theme
+  // mein rakho": this used to default to the device's own OS/browser dark-mode setting on first
+  // run (so anyone whose phone/laptop is set to dark saw this app dark without ever choosing
+  // that) — now it's always light until the person explicitly toggles it themselves, same as
+  // before, their own choice still wins and still persists via the saved value above.
+  return 'light';
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
