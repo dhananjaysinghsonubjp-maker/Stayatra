@@ -1,6 +1,12 @@
 databases:
+  # §bugfix — "Error: P1001: Can't reach database server" persisting even at start time (not
+  # just build time): the web service below was pinned to `region: singapore` but this database
+  # had no region set, so it landed on Render's own default region — a different one, with no
+  # private-network route to the web service's region at all. Same region on both is required for
+  # the internal connection string to resolve.
   - name: stayyatra-db
     plan: free
+    region: singapore
     databaseName: stayyatra
     user: stayyatra
 
