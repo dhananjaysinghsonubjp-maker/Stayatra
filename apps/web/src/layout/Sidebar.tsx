@@ -185,17 +185,15 @@ function NavNode({
         <button
           onClick={() => setExpanded((prev) => ({ ...prev, [entry.label]: !open }))}
           className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            groupActive
-              ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
-              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+            groupActive ? 'bg-white/15 text-white ring-1 ring-inset ring-white/20' : 'text-blue-100 hover:bg-white/10 hover:text-white'
           }`}
         >
-          <entry.icon className={`h-[18px] w-[18px] ${groupActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500'}`} />
+          <entry.icon className={`h-[18px] w-[18px] ${groupActive ? 'text-white' : 'text-blue-200/70'}`} />
           <span className="flex-1 text-left">{entry.label}</span>
-          <CHEVRON className={`h-3.5 w-3.5 text-slate-400 transition-transform dark:text-slate-500 ${open ? 'rotate-90' : ''}`} />
+          <CHEVRON className={`h-3.5 w-3.5 text-blue-200/70 transition-transform ${open ? 'rotate-90' : ''}`} />
         </button>
         {open && (
-          <div className="ml-4 mt-0.5 space-y-0.5 border-l border-slate-100 pl-3 dark:border-slate-700">
+          <div className="ml-4 mt-0.5 space-y-0.5 border-l border-white/15 pl-3">
             {children.map((child) => (
               <NavNode
                 key={isGroup(child) ? child.label : child.id}
@@ -221,9 +219,7 @@ function NavNode({
       <button
         onClick={() => selectTab(entry.id)}
         className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-          active
-            ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
-            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
+          active ? 'bg-white/15 text-white ring-1 ring-inset ring-white/20' : 'text-blue-100 hover:bg-white/10 hover:text-white'
         }`}
       >
         {entry.label}
@@ -234,12 +230,10 @@ function NavNode({
     <button
       onClick={() => selectTab(entry.id)}
       className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-        active
-          ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-400/20'
-          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+        active ? 'bg-white/15 text-white ring-1 ring-inset ring-white/20' : 'text-blue-100 hover:bg-white/10 hover:text-white'
       }`}
     >
-      <entry.icon className={`h-[18px] w-[18px] ${active ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500'}`} />
+      <entry.icon className={`h-[18px] w-[18px] ${active ? 'text-white' : 'text-blue-200/70'}`} />
       {entry.label}
     </button>
   );
@@ -281,27 +275,31 @@ export function Sidebar({
         <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={onCloseMobile} aria-hidden="true" />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 -translate-x-full flex-col overflow-y-auto border-r border-slate-200 bg-white transition-transform duration-200 dark:border-slate-700 dark:bg-slate-900 lg:static lg:w-60 lg:translate-x-0 ${
+        // §user request, with a reference app's dark solid-colour sidebar as the target — "jo
+        // side me sara cheeze hai usko background blue color kardo and text white colour": a
+        // single blue (brand-700) fills the whole column regardless of light/dark mode, same as
+        // the reference's own sidebar stays one colour either way.
+        className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 -translate-x-full flex-col overflow-y-auto border-r border-black/10 bg-brand-700 transition-transform duration-200 lg:static lg:w-60 lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : ''
         }`}
       >
-      <div className="flex items-center gap-2.5 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+      <div className="flex items-center gap-2.5 border-b border-white/10 px-5 py-4">
         {hotel?.logoFilePath ? (
           <img
             src={assetUrl(hotel.logoFilePath)}
             alt={hotel.name}
-            className="h-9 w-9 shrink-0 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-600"
+            className="h-9 w-9 shrink-0 rounded-lg object-cover ring-1 ring-white/20"
           />
         ) : (
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold tracking-wide text-white shadow-sm">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15 text-sm font-bold tracking-wide text-white shadow-sm ring-1 ring-white/20">
             {hotel?.name?.[0]?.toUpperCase() ?? 'H'}
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{hotel?.name ?? 'StayYatra'}</p>
-          {hotel && <p className="truncate text-xs text-slate-400 dark:text-slate-500">ID: {hotel.shortCode}</p>}
+          <p className="truncate text-sm font-semibold text-white">{hotel?.name ?? 'StayYatra'}</p>
+          {hotel && <p className="truncate text-xs text-blue-200/70">ID: {hotel.shortCode}</p>}
         </div>
-        <button onClick={onCloseMobile} className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 lg:hidden" aria-label="Close menu">
+        <button onClick={onCloseMobile} className="shrink-0 rounded-md p-1 text-blue-200/70 hover:bg-white/10 hover:text-white lg:hidden" aria-label="Close menu">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
             <path d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -323,13 +321,13 @@ export function Sidebar({
         ))}
       </nav>
 
-      <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-700">
+      <div className="border-t border-white/10 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate text-xs font-medium text-slate-700 dark:text-slate-300">{userLabel}</p>
-            <p className="truncate text-xs text-slate-400 dark:text-slate-500">{roleLabel}</p>
+            <p className="truncate text-xs font-medium text-white">{userLabel}</p>
+            <p className="truncate text-xs text-blue-200/70">{roleLabel}</p>
           </div>
-          <button onClick={onLogout} className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+          <button onClick={onLogout} className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-blue-200/80 hover:bg-white/10 hover:text-white">
             Log out
           </button>
         </div>
