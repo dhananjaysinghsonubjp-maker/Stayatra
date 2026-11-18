@@ -15,7 +15,13 @@ services:
     # included) — only the deployed runtime container joins that private network. Migrations run
     # at start time instead, where the DB is actually reachable; `migrate deploy` only applies
     # pending migrations, so running it on every boot is harmless once it's already up to date.
-    buildCommand: npm install && npm run build --workspace=apps/api
+    # §bugfix — "error TS7006: Parameter 'c' implicitly has an 'any' type": reproduced only on
+    # Render, never locally with a fresh build — @prisma/client's own postinstall hook (which
+    # normally runs `prisma generate` after `npm install`) doesn't reliably fire inside this
+    # npm-workspaces monorepo on Render's build image, so the generated client's types were
+    # missing and every `this.prisma.<model>` call silently fell back to `any`. Generating
+    # explicitly here removes the dependency on postinstall actually firing.
+    buildCommand: npm install && npx prisma generate --schema apps/api/prisma/schema.prisma && npm run build --workspace=apps/api
     startCommand: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && npm run start:prod --workspace=apps/api
     envVars:
       - key: NODE_VERSION
