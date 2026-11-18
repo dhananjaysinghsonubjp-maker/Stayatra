@@ -1,0 +1,28 @@
+databases:
+  - name: stayyatra-db
+    plan: free
+    databaseName: stayyatra
+    user: stayyatra
+
+services:
+  - type: web
+    name: stayyatra-api
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install && npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && npm run build --workspace=apps/api
+    startCommand: npm run start:prod --workspace=apps/api
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stayyatra-db
+          property: connectionString
+      # Set by hand in the Render dashboard after the first deploy — see the chat
+      # instructions for the exact values (CORS_ORIGIN = the Vercel frontend URL,
+      # CREDENTIAL_VAULT_KEY = the generated key given there).
+      - key: CORS_ORIGIN
+        sync: false
+      - key: CREDENTIAL_VAULT_KEY
+        sync: false
