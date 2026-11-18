@@ -188,7 +188,10 @@ function NavNode({
             groupActive ? 'bg-white/15 text-white ring-1 ring-inset ring-white/20' : 'text-blue-100 hover:bg-white/10 hover:text-white'
           }`}
         >
-          <entry.icon className={`h-[18px] w-[18px] ${groupActive ? 'text-white' : 'text-blue-200/70'}`} />
+          {/* §user request, matching a reference app's own sidebar — "icons ka colour white
+              rakho": every nav icon stays solid white regardless of active state, not just the
+              active one (only the label/pill behind it still changes with active/hover). */}
+          <entry.icon className="h-[18px] w-[18px] text-white" />
           <span className="flex-1 text-left">{entry.label}</span>
           <CHEVRON className={`h-3.5 w-3.5 text-blue-200/70 transition-transform ${open ? 'rotate-90' : ''}`} />
         </button>
@@ -233,7 +236,7 @@ function NavNode({
         active ? 'bg-white/15 text-white ring-1 ring-inset ring-white/20' : 'text-blue-100 hover:bg-white/10 hover:text-white'
       }`}
     >
-      <entry.icon className={`h-[18px] w-[18px] ${active ? 'text-white' : 'text-blue-200/70'}`} />
+      <entry.icon className="h-[18px] w-[18px] text-white" />
       {entry.label}
     </button>
   );
