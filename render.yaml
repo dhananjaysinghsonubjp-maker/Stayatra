@@ -10,8 +10,13 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: npm install && npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && npm run build --workspace=apps/api
-    startCommand: npm run start:prod --workspace=apps/api
+    # §bugfix — "Error: P1001: Can't reach database server": Render's build step runs in an
+    # isolated container with no network route to other services in the project (the database
+    # included) — only the deployed runtime container joins that private network. Migrations run
+    # at start time instead, where the DB is actually reachable; `migrate deploy` only applies
+    # pending migrations, so running it on every boot is harmless once it's already up to date.
+    buildCommand: npm install && npm run build --workspace=apps/api
+    startCommand: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && npm run start:prod --workspace=apps/api
     envVars:
       - key: NODE_VERSION
         value: 22
