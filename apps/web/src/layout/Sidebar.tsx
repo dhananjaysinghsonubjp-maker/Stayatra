@@ -275,11 +275,13 @@ export function Sidebar({
         <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={onCloseMobile} aria-hidden="true" />
       )}
       <aside
-        // §user request, with a reference app's dark solid-colour sidebar as the target — "jo
-        // side me sara cheeze hai usko background blue color kardo and text white colour": a
-        // single blue (brand-700) fills the whole column regardless of light/dark mode, same as
-        // the reference's own sidebar stays one colour either way.
-        className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 -translate-x-full flex-col overflow-y-auto border-r border-black/10 bg-brand-700 transition-transform duration-200 lg:static lg:w-60 lg:translate-x-0 ${
+        // §bugfix/§user request — "ye vo blue colour nahi hai jo buttons ka hai": brand-700 reads
+        // as a different, darker navy than the buttons' own brand-600 (#0c2171) — the exact same
+        // hex Hotel Brand's colour picker writes into this token (brandColor.ts: "the picked
+        // colour becomes the 600 shade as-is"). bg-brand-600 here means the sidebar and every
+        // button share one literal colour, so changing the brand colour in Settings moves both
+        // together instead of the sidebar drifting to its own separate shade.
+        className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 -translate-x-full flex-col overflow-y-auto border-r border-black/10 bg-brand-600 transition-transform duration-200 lg:static lg:w-60 lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : ''
         }`}
       >
