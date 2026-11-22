@@ -161,6 +161,11 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
 
   return (
     <div className="relative">
+      {/* §user request — "itna stretch na kare, thoda mid tak rahega toh better rahega, kyunki
+          right side mein aisa table khulega": a reference app's own Reservations screen keeps
+          the list to roughly the left half, leaving the right side clean for whatever opens
+          alongside it (a detail/actions panel), instead of stretching cards edge-to-edge. */}
+      <div className="max-w-2xl">
       <PageHeader
         title="Reservations"
         subtitle={hasPms ? `${bookings.length} total — every channel, plus direct/walk-in bookings` : `${bookings.length} total — every connected channel, automatically`}
@@ -236,6 +241,7 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
           ))}
         </div>
       )}
+      </div>
 
       {/* §user request, with a reference app's own floating "+" as the visual target — opens the
           full multi-room Create Reservation flow (source → dates → guest details → pick specific
