@@ -260,7 +260,12 @@ export function MoreActionsPanel({
     // §bugfix — the print views (z-[80]) render as siblings in this same portal, so this panel
     // must sit below that — z-50 matches ReservationDetailModal's own "major modal" layer.
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40">
-      <div className="flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl dark:bg-slate-800">
+      {/* §bugfix — "3 no wala box [No Show/Void] rectangular nahi tha, text/buttons right side se
+          cut ho rahe the": flex children default to min-width:auto, so this panel refused to
+          shrink below its own content's natural width (the description paragraph) on a narrow
+          screen and overflowed past the viewport's right edge instead of wrapping — min-w-0 lets
+          it actually shrink to the available space so text wraps inside it instead. */}
+      <div className="flex h-full w-full min-w-0 max-w-md flex-col overflow-hidden bg-white shadow-2xl dark:bg-slate-800">
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
           <div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-white">{view === 'menu' ? 'More Actions' : MENU_ITEMS.find((m) => m.view === view)?.label}</h3>
