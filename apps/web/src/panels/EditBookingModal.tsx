@@ -87,6 +87,12 @@ export function EditBookingModal({ hotelId, bookingId, onClose, onDone }: { hote
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    // §user request — "jahan bhi phone number le rahe hain, hamesha 10 digit ka hona chahiye":
+    // caught here too, not just left to the API's own regex rejection.
+    if (guestPhone && guestPhone.length !== 10) {
+      setError('Mobile number must be exactly 10 digits');
+      return;
+    }
     setSaving(true);
     try {
       const nights = Math.max(1, Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000));
@@ -133,6 +139,10 @@ export function EditBookingModal({ hotelId, bookingId, onClose, onDone }: { hote
   async function addGuest(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (newGuestPhone && newGuestPhone.length !== 10) {
+      setError('Mobile number must be exactly 10 digits');
+      return;
+    }
     try {
       await mutate('bookings.addBookingGuest', { bookingId, name: newGuestName, phone: newGuestPhone || undefined }, token ?? undefined);
       setNewGuestName('');
@@ -192,7 +202,12 @@ export function EditBookingModal({ hotelId, bookingId, onClose, onDone }: { hote
                   </Field>
                 </div>
                 <Field label="Mobile number">
-                  <input className={inputClass} value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} placeholder="10-digit number" />
+                  <input
+                    className={inputClass}
+                    value={guestPhone}
+                    onChange={(e) => setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="10-digit number"
+                  />
                 </Field>
                 <Field label="Purpose of stay">
                   <input className={inputClass} value={purposeOfStay} onChange={(e) => setPurposeOfStay(e.target.value)} />
@@ -313,7 +328,12 @@ export function EditBookingModal({ hotelId, bookingId, onClose, onDone }: { hote
             {addingGuest && (
               <form onSubmit={addGuest} className="mb-3 grid grid-cols-3 gap-2">
                 <input className={inputClass} placeholder="Full name" value={newGuestName} onChange={(e) => setNewGuestName(e.target.value)} required />
-                <input className={inputClass} placeholder="Mobile (optional)" value={newGuestPhone} onChange={(e) => setNewGuestPhone(e.target.value)} />
+                <input
+                  className={inputClass}
+                  placeholder="Mobile (optional)"
+                  value={newGuestPhone}
+                  onChange={(e) => setNewGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                />
                 <div className="flex gap-2">
                   <Button type="submit" variant="secondary" className="flex-1 text-xs">
                     Add

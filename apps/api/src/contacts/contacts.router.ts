@@ -12,8 +12,10 @@ export function createContactsRouter(contacts: ContactsService) {
   return router({
     list: frontDeskUp.input(z.object({ hotelId: z.string() })).query(({ input }) => contacts.listContacts(input.hotelId)),
 
+    // §user request — "jahan bhi phone number le rahe hain, hamesha 10 digit ka hona chahiye":
+    // every phone field this API accepts now enforces the same exact-10-digit rule.
     create: frontDeskUp
-      .input(z.object({ hotelId: z.string(), name: z.string().min(1).max(100), category: z.string().min(1).max(60), phone: z.string().min(1).max(20) }))
+      .input(z.object({ hotelId: z.string(), name: z.string().min(1).max(100), category: z.string().min(1).max(60), phone: z.string().regex(/^\d{10}$/) }))
       .mutation(({ input }) => contacts.createContact(input)),
 
     delete: ownerOnly.input(z.object({ contactId: z.string() })).mutation(({ input }) => contacts.deleteContact(input.contactId)),

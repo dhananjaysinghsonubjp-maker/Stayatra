@@ -17,7 +17,9 @@ export function createStaffRouter(staff: StaffService) {
           role: z.enum(['manager', 'housekeeping']),
           designation: z.string().optional(),
           shift: z.string().optional(),
-          phone: z.string().optional(),
+          // §user request — "jahan bhi phone number le rahe hain, hamesha 10 digit ka hona
+          // chahiye": every phone field this API accepts now enforces the same rule.
+          phone: z.string().regex(/^\d{10}$/).optional(),
           photoPath: z.string().optional(),
           idNumber: z.string().optional(),
           idPhotoFrontPath: z.string().optional(),
@@ -45,7 +47,7 @@ export function createStaffRouter(staff: StaffService) {
         z.object({
           userId: z.string(),
           name: z.string().min(1).optional(),
-          phone: z.string().optional(),
+          phone: z.string().regex(/^\d{10}$/).optional(),
           photoPath: z.string().optional(),
           idNumber: z.string().optional(),
           idPhotoFrontPath: z.string().optional(),

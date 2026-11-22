@@ -70,7 +70,9 @@ const companyBillingSchema = {
   companyName: z.string().optional(),
   companyTaxIdType: z.string().optional(),
   companyGstin: z.string().optional(),
-  companyPhone: z.string().optional(),
+  // §user request — "jahan bhi phone number le rahe hain, hamesha 10 digit ka hona chahiye":
+  // every phone field this API accepts now enforces the same exact-10-digit rule.
+  companyPhone: z.string().regex(/^\d{10}$/).optional(),
   companyEmail: z.string().optional(),
   companyAddress: z.string().optional(),
   companyCountry: z.string().optional(),

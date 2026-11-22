@@ -383,6 +383,11 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
       setError('Company name is required for a corporate booking');
       return;
     }
+    // §user request — "jahan bhi phone number le rahe hain, hamesha 10 digit ka hona chahiye".
+    if (isCorporate && companyPhone && !/^\d{10}$/.test(companyPhone)) {
+      setError('Company phone must be exactly 10 digits');
+      return;
+    }
     if (mode === 'new' && !room) {
       setError('No room selected');
       return;
@@ -808,7 +813,7 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
                               className={`${inputClass} w-full`}
                               value={guestPhone}
                               onChange={(e) => {
-                                setGuestPhone(e.target.value);
+                                setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
                                 setGuestId(undefined);
                               }}
                               pattern="\d{10}"

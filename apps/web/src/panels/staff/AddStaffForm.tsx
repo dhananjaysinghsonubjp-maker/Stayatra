@@ -98,9 +98,14 @@ export function AddStaffForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitting(true);
     setError(null);
     setMessage(null);
+    // §user request — "jahan bhi phone number le rahe hain, hamesha 10 digit ka hona chahiye".
+    if (phone && phone.length !== 10) {
+      setError('Phone number must be exactly 10 digits');
+      return;
+    }
+    setSubmitting(true);
     const role = selectedRole;
     try {
       await mutate(

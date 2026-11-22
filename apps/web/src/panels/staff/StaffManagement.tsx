@@ -111,8 +111,13 @@ function StaffDetail({
   }
 
   async function saveProfile() {
-    setBusy(true);
     setError(null);
+    // §user request — "jahan bhi phone number le rahe hain, hamesha 10 digit ka hona chahiye".
+    if (phone && phone.length !== 10) {
+      setError('Phone number must be exactly 10 digits');
+      return;
+    }
+    setBusy(true);
     try {
       const role = DESIGNATION_OPTIONS.find((d) => d.designation === designation)?.role;
       await mutate(

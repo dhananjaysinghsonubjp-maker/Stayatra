@@ -443,6 +443,10 @@ export function CreateReservationModal({
       setError('Company name is required for a corporate booking');
       return;
     }
+    if (isCorporate && companyPhone && companyPhone.length !== 10) {
+      setError('Company phone must be exactly 10 digits');
+      return;
+    }
     setSubmitting(true);
     try {
       const shared = {

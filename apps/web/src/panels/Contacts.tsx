@@ -249,6 +249,11 @@ function AddContactRow({
       setError('Fill in all three fields');
       return;
     }
+    // §user request — "jahan bhi phone number le rahe hain, hamesha 10 digit ka hona chahiye".
+    if (phone.trim().length !== 10) {
+      setError('Phone number must be exactly 10 digits');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -320,7 +325,12 @@ function AddContactRow({
         </div>
         <div className="min-w-[160px] flex-1">
           <Field label="Phone">
-            <input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 9819392139" />
+            <input
+              className={inputClass}
+              value={phone}
+              onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+              placeholder="e.g. 9819392139"
+            />
           </Field>
         </div>
         <Button type="submit" disabled={saving}>
