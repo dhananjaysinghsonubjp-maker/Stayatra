@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mutate, uploadFile, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
@@ -205,7 +205,16 @@ export function MoreActionsPanel({
   const canEnd = group.some((b) => b.status === 'confirmed');
   const outstandingForScope = allocate === 'group' && group.length > 1 ? groupDue : (dues.get(targetBookingId) ?? 0);
 
+  // §user request — "ye pehli baar advance aaya hai toh ye 2 baar kyun hai": a fast double-click
+  // on a submit button fires two click events before React's `disabled={busy}` re-render has
+  // actually committed, so both calls still read the stale busy=false and both go through — a
+  // real second Record Payment/Cancel/etc, not a display bug. A ref (checked and set
+  // synchronously, unlike state) blocks the second one outright.
+  const submittingRef = useRef(false);
+
   async function run(action: () => Promise<unknown>, after: () => void = () => setView('menu')) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -215,6 +224,7 @@ export function MoreActionsPanel({
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Action failed');
     } finally {
+      submittingRef.current = false;
       setBusy(false);
     }
   }
@@ -241,6 +251,8 @@ export function MoreActionsPanel({
   }
 
   async function saveMealPlans() {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -251,6 +263,7 @@ export function MoreActionsPanel({
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update meal plan');
     } finally {
+      submittingRef.current = false;
       setBusy(false);
     }
   }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
@@ -185,6 +185,11 @@ export function CreateReservationModal({
   const [companyPincode, setCompanyPincode] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
+  // §user request — "pehli baar advance aaya hai toh ye 2 baar kyun hai": a fast double-click on
+  // Create Reservation fires two click events before React's disabled={submitting} re-render
+  // actually commits, so both still read the stale submitting=false and both submit — a real
+  // second reservation+payment, not a display bug. A ref (synchronous, unlike state) blocks it.
+  const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   // §user request, with a reference app's own slide-over as the target — opens as a right-side
@@ -428,6 +433,7 @@ export function CreateReservationModal({
   }
 
   async function submit() {
+    if (submittingRef.current) return;
     setError(null);
     if (!guestName.trim()) {
       setError('Guest name is required');
@@ -449,6 +455,7 @@ export function CreateReservationModal({
       setError('Company phone must be exactly 10 digits');
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const shared = {
@@ -548,6 +555,7 @@ export function CreateReservationModal({
     } catch (err) {
       setError(err instanceof ApiError ? err.message : `Failed to ${isEditMode ? 'save' : 'create'} reservation`);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }

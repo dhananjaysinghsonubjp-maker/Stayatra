@@ -105,7 +105,11 @@ export function AdvanceReceiptPrintView({ data, onClose }: { data: ReservationSu
                   </thead>
                   <tbody>
                     {sortedPayments.map((p, i) => {
-                      const isLatest = i === latestIndex;
+                      // §user request — "agar koi 2 payment advance aata hai toh vo highlight
+                      // honi chahiye": the highlight only means anything once there's more than
+                      // one row to tell apart — a single payment has no "earlier" one to be the
+                      // latest relative to.
+                      const isLatest = sortedPayments.length > 1 && i === latestIndex;
                       return (
                         <tr key={i} className={isLatest ? 'bg-emerald-50 font-bold text-emerald-700' : 'text-slate-700'}>
                           <td className="py-1.5 pl-1">{formatDateTimeShort(p.collectedAt ?? data.createdAt)}</td>
