@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { BOOKING_SOURCE_OPTIONS } from '../../bookingSource';
@@ -91,6 +92,7 @@ export function CreateReservationModal({
   const [applyRateToAll, setApplyRateToAll] = useState(false);
   const [masterRate, setMasterRate] = useState<number | ''>('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [stayPickerOpen, setStayPickerOpen] = useState(false);
   const [availableRooms, setAvailableRooms] = useState<(Room & { available: boolean })[]>([]);
   const [draftSelectedIds, setDraftSelectedIds] = useState<string[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
@@ -491,7 +493,16 @@ export function CreateReservationModal({
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
             <div className="flex flex-col gap-5">
             <div className="order-1">
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Stay Details</p>
+              {/* §user request, with a reference app's own Stay Details header as the target —
+                  icon chip + title + one-line subtitle, matching Check-in's own SectionHeader
+                  style elsewhere in this app. */}
+              <div className="mb-2 flex items-center gap-2.5">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-sm dark:bg-brand-500/10">🏠</span>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Stay Details</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">Stay dates and arrival details for availability and pricing.</p>
+                </div>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Field label="Source">
                   <select className={inputClass} value={source} onChange={(e) => setSource(e.target.value)}>
@@ -502,32 +513,25 @@ export function CreateReservationModal({
                     ))}
                   </select>
                 </Field>
-                {/* §user request — "jaise humne normal check-in mein properly simple boxes banaye
-                    hai, dates bhi aise hi bano": same Check In / Check Out box pair Check-in's own
-                    Stay Details card uses, here made editable in place since (unlike check-in,
-                    which defaults to today) a reservation's dates are always picked by hand. */}
-                <div className="flex items-center gap-2 sm:col-span-2">
+                {/* §user request — "iske click karne ke baad calendar khul jaaye and usse date
+                    select kar sake": same Check In / Check Out box pair Check-in's own Stay
+                    Details card uses, now opening a real calendar (StayDateRangeModal below)
+                    instead of the browser's bare native date inputs. */}
+                <button
+                  type="button"
+                  onClick={() => setStayPickerOpen(true)}
+                  className="flex items-center gap-2 rounded-lg text-left sm:col-span-2"
+                >
                   <div className="min-w-0 flex-1 rounded-lg bg-brand-50 px-3 py-2 dark:bg-brand-500/10">
-                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check In</label>
-                    <input
-                      type="date"
-                      className="block w-full bg-transparent text-sm font-bold text-slate-900 outline-none dark:text-white"
-                      value={checkIn}
-                      onChange={(e) => setCheckIn(e.target.value)}
-                    />
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check In</p>
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(checkIn)}</p>
                   </div>
                   <span className="shrink-0 text-slate-400">→</span>
                   <div className="min-w-0 flex-1 rounded-lg bg-amber-50 px-3 py-2 dark:bg-amber-500/10">
-                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Check Out</label>
-                    <input
-                      type="date"
-                      className="block w-full bg-transparent text-sm font-bold text-slate-900 outline-none dark:text-white"
-                      value={checkOut}
-                      min={checkIn}
-                      onChange={(e) => setCheckOut(e.target.value)}
-                    />
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Check Out</p>
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(checkOut)}</p>
                   </div>
-                </div>
+                </button>
               </div>
               <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">{nights} night{nights === 1 ? '' : 's'}</p>
             </div>
@@ -1063,6 +1067,169 @@ export function CreateReservationModal({
           onContinue={confirmPicker}
         />
       )}
+
+      {stayPickerOpen && (
+        <StayDateRangeModal
+          checkIn={checkIn}
+          checkOut={checkOut}
+          onApply={(ci, co) => {
+            setCheckIn(ci);
+            setCheckOut(co);
+            setStayPickerOpen(false);
+          }}
+          onClose={() => setStayPickerOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+const STAY_WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const STAY_MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** §user request, with a reference app's own "Select stay dates" calendar as the target — unlike
+ * Check-in's walk-in version (check-in day fixed to today), a reservation's check-in is also
+ * pickable: first tap sets check-in and clears check-out, the next later tap sets check-out —
+ * same two-tap range convention, just with both ends open. */
+function StayDateRangeModal({
+  checkIn,
+  checkOut,
+  onApply,
+  onClose,
+}: {
+  checkIn: string;
+  checkOut: string;
+  onApply: (checkIn: string, checkOut: string) => void;
+  onClose: () => void;
+}) {
+  const [draftCheckIn, setDraftCheckIn] = useState(checkIn);
+  const [draftCheckOut, setDraftCheckOut] = useState<string | null>(checkOut);
+  const [viewDate, setViewDate] = useState(() => {
+    const [y, m] = checkIn.split('-').map(Number);
+    return { year: y, month: m - 1 };
+  });
+
+  const nights = draftCheckOut
+    ? Math.max(1, Math.round((new Date(`${draftCheckOut}T00:00:00`).getTime() - new Date(`${draftCheckIn}T00:00:00`).getTime()) / 86400000))
+    : 0;
+
+  const firstWeekday = new Date(viewDate.year, viewDate.month, 1).getDay();
+  const daysInMonth = new Date(viewDate.year, viewDate.month + 1, 0).getDate();
+  const cells: (string | null)[] = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => `${viewDate.year}-${String(viewDate.month + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`),
+  ];
+
+  function changeMonth(delta: number) {
+    setViewDate((v) => {
+      const m = v.month + delta;
+      return { year: v.year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 };
+    });
+  }
+
+  function pickDay(iso: string) {
+    if (!draftCheckOut || iso <= draftCheckIn) {
+      setDraftCheckIn(iso);
+      setDraftCheckOut(null);
+    } else {
+      setDraftCheckOut(iso);
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[66] flex items-center justify-center bg-slate-900/60 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-800">
+        <div className="flex shrink-0 items-start justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+          <div>
+            <h4 className="text-base font-bold text-slate-900 dark:text-white">Select stay dates</h4>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Choose your check-in and check-out dates</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-4 flex items-center justify-between rounded-xl bg-[#F5F7FA] px-3 py-2.5 dark:bg-slate-900/40">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check In</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(draftCheckIn)}</p>
+            </div>
+            <span className="rounded-full bg-brand-600 px-2 py-1 text-xs font-bold text-white shadow-sm">
+              {draftCheckOut ? `${nights} night${nights === 1 ? '' : 's'}` : 'Pick check-out'}
+            </span>
+            <div className="text-right">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check Out</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">{draftCheckOut ? formatDateShort(draftCheckOut) : '—'}</p>
+            </div>
+          </div>
+
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-bold text-slate-900 dark:text-white">
+              {STAY_MONTH_LABELS[viewDate.month]} {viewDate.year}
+            </p>
+            <div className="flex gap-1">
+              <button type="button" onClick={() => changeMonth(-1)} className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">
+                ‹
+              </button>
+              <button type="button" onClick={() => changeMonth(1)} className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">
+                ›
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-1 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-400">
+            {STAY_WEEKDAY_LABELS.map((d) => (
+              <div key={d}>{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((iso, i) => {
+              if (!iso) return <div key={`blank-${i}`} />;
+              const isCheckIn = iso === draftCheckIn;
+              const isCheckOut = iso === draftCheckOut;
+              const inRange = Boolean(draftCheckOut) && iso > draftCheckIn && iso < (draftCheckOut as string);
+              return (
+                <button
+                  key={iso}
+                  type="button"
+                  onClick={() => pickDay(iso)}
+                  className={`flex h-9 items-center justify-center rounded-full text-sm transition-colors ${
+                    isCheckIn || isCheckOut
+                      ? 'bg-brand-600 font-bold text-white'
+                      : inRange
+                        ? 'bg-brand-50 text-slate-900 dark:bg-brand-500/10 dark:text-white'
+                        : 'text-slate-700 hover:bg-brand-50 dark:text-slate-300 dark:hover:bg-brand-500/10'
+                  }`}
+                >
+                  {Number(iso.slice(-2))}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 gap-2 border-t border-slate-100 px-5 py-4 dark:border-slate-700">
+          <Button type="button" variant="secondary" className="flex-1" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            className="flex-1"
+            disabled={!draftCheckOut}
+            onClick={() => draftCheckOut && onApply(draftCheckIn, draftCheckOut)}
+          >
+            {draftCheckOut ? `Apply dates · ${nights} night${nights === 1 ? '' : 's'}` : 'Select check-out'}
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
