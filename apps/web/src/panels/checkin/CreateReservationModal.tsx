@@ -438,10 +438,13 @@ export function CreateReservationModal({
   }
 
   return (
-    <div
-      className={`fixed inset-0 z-50 bg-black/30 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}
-      onClick={handleClose}
-    >
+    // §user request — "bahar click karne se draft lost ho jaata hai": the backdrop used to close
+    // this on click, same as a typical dialog, but a half-written multi-room reservation is
+    // expensive to lose to one stray click outside the panel. Only the ✕ button closes it now —
+    // no onClick here at all, not even a guarded one, since a guard would still need to pick some
+    // notion of "unsaved changes" to ask about, and the simplest, least surprising fix is this
+    // panel just never closes itself from an outside click, full stop.
+    <div className={`fixed inset-0 z-50 bg-black/30 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}>
       <Card
         onClick={(e) => e.stopPropagation()}
         className={`fixed inset-x-0 bottom-0 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-b-none rounded-t-2xl shadow-2xl transition-transform duration-300 ease-out sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-full sm:w-full sm:max-w-xl sm:rounded-none ${
