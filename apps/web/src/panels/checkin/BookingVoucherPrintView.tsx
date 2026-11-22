@@ -4,7 +4,6 @@ import { useAuth } from '../../AuthContext';
 import { Button } from '../../components/ui';
 import { formatDateShort } from '../../dateFormat';
 import { amountInWords } from '../../numberToWords';
-import { paymentMethodLabel } from '../../paymentMethods';
 import type { Hotel } from '../../types';
 import type { ReservationSuccessData } from './ReservationSuccessModal';
 
@@ -163,8 +162,8 @@ export function BookingVoucherPrintView({ data, onClose }: { data: ReservationSu
                   <tbody>
                     {data.payments.map((p, i) => (
                       <tr key={i} className="border-b border-slate-100 text-slate-700">
-                        <td className="py-2">{formatDateShort(data.createdAt)}</td>
-                        <td className="py-2">Advance Payment ({paymentMethodLabel(p.method)})</td>
+                        <td className="py-2">{formatDateShort(p.collectedAt ?? data.createdAt)}</td>
+                        <td className="py-2">Advance Payment ({p.modeLabel})</td>
                         <td className="py-2">{p.referenceNumber || 'NA'}</td>
                         <td className="py-2 text-right">₹{p.amount.toFixed(2)}</td>
                       </tr>

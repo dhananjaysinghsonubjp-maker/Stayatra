@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../components/ui';
 import { formatDateTimeShort } from '../../dateFormat';
-import type { PaymentMethod } from '../../types';
 import { AdvanceReceiptPrintView } from './AdvanceReceiptPrintView';
 import { BookingVoucherPrintView } from './BookingVoucherPrintView';
 
@@ -16,7 +15,10 @@ export interface ReservationSuccessRoom {
 }
 
 export interface ReservationSuccessPayment {
-  method: PaymentMethod;
+  /** Pre-formatted mode label (e.g. "Cash" or, for a transaction that was itself split across
+   * more than one mode, "Cash + UPI") — computed once wherever this array is built, not a raw
+   * PaymentMethod, since one logical transaction can cover more than one mode. */
+  modeLabel: string;
   amount: number;
   referenceNumber?: string;
   /** When this specific transaction was collected — lets the receipt show every payment as its

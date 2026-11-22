@@ -9,7 +9,7 @@ import { PAYMENT_METHODS, paymentMethodLabel } from '../paymentMethods';
 import { AdvanceReceiptPrintView } from './checkin/AdvanceReceiptPrintView';
 import { BookingVoucherPrintView } from './checkin/BookingVoucherPrintView';
 import type { ReservationSuccessData } from './checkin/ReservationSuccessModal';
-import type { Booking, IdType, PaymentMethod, PaymentType, RatePlan, Room, RoomCategory } from '../types';
+import type { Booking, IdType, Payment, PaymentMethod, PaymentType, RatePlan, Room, RoomCategory } from '../types';
 
 type View = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'payment' | 'identity' | 'receipts' | 'mealplan';
 
@@ -29,6 +29,35 @@ function bookingCode(id: string) {
 function formatDateLong(iso: string) {
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
+
+/**
+ * §user request — "itni saari payments kyun dikh rahi hain, sirf 2 baar payment hui hai": one
+ * advance/Record-Payment collection is stored as several Payment rows under the hood — one per
+ * room it got prorated across, occasionally per mode too — so the real ledger can track each
+ * room's own revenue. Shown straight to an FMO/guest, though, that reads as a dozen tiny random
+ * amounts instead of the two payments that actually happened. The backend now stamps every row
+ * from the same collection event with the exact same collectedAt, so grouping by that timestamp
+ * reconstructs the real logical transactions — summing amounts and combining modes/references
+ * back into one row per event, oldest first.
+ */
+function collapsePayments(raw: Payment[]): { modeLabel: string; amount: number; referenceNumber?: string; collectedAt: string }[] {
+  const groups = new Map<string, { modes: Set<string>; amount: number; refs: Set<string>; collectedAt: string }>();
+  for (const p of raw) {
+    const key = p.collectedAt;
+    const existing = groups.get(key);
+    const modeLabel = paymentMethodLabel(p.method);
+    if (existing) {
+      existing.amount += Number(p.amount);
+      existing.modes.add(modeLabel);
+      if (p.referenceNumber) existing.refs.add(p.referenceNumber);
+    } else {
+      groups.set(key, { modes: new Set([modeLabel]), amount: Number(p.amount), refs: new Set(p.referenceNumber ? [p.referenceNumber] : []), collectedAt: key });
+    }
+  }
+  return [...groups.values()]
+    .sort((a, b) => a.collectedAt.localeCompare(b.collectedAt))
+    .map((g) => ({ modeLabel: [...g.modes].join(' + '), amount: g.amount, referenceNumber: [...g.refs].join(', ') || undefined, collectedAt: g.collectedAt }));
 }
 
 /** Pre-builds a ReservationSuccessData-shaped object from a STORED reservation (any age), the
@@ -68,9 +97,7 @@ function buildReceiptData(hotelId: string, group: Booking[], roomsById: Map<stri
   });
   const paid = group.reduce((sum, b) => sum + Number(b.paidAmount ?? 0), 0);
   const due = Math.max(0, grandTotal - paid);
-  const payments = group.flatMap((b) =>
-    (b.payments ?? []).map((p) => ({ method: p.method as PaymentMethod, amount: Number(p.amount), referenceNumber: p.referenceNumber ?? undefined, collectedAt: p.collectedAt })),
-  );
+  const payments = collapsePayments(group.flatMap((b) => b.payments ?? []));
 
   return {
     hotelId,
@@ -610,22 +637,23 @@ export function MoreActionsPanel({
               </div>
               <div>
                 <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payments recorded</p>
-                {group.flatMap((b) => b.payments ?? []).length === 0 ? (
-                  <p className="text-sm text-slate-400 dark:text-slate-500">No payments recorded yet.</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {group
-                      .flatMap((b) => b.payments ?? [])
-                      .map((p) => (
-                        <div key={p.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900/40">
+                {(() => {
+                  const collected = collapsePayments(group.flatMap((b) => b.payments ?? []));
+                  return collected.length === 0 ? (
+                    <p className="text-sm text-slate-400 dark:text-slate-500">No payments recorded yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {collected.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900/40">
                           <span className="text-slate-600 dark:text-slate-300">
-                            {formatDateShort(p.collectedAt)} · {paymentMethodLabel(p.method)}
+                            {formatDateShort(p.collectedAt)} · {p.modeLabel}
                           </span>
-                          <span className="font-semibold text-slate-900 dark:text-white">₹{Number(p.amount).toFixed(2)}</span>
+                          <span className="font-semibold text-slate-900 dark:text-white">₹{p.amount.toFixed(2)}</span>
                         </div>
                       ))}
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}

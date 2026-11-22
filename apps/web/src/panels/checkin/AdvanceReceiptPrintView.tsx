@@ -4,7 +4,6 @@ import { useAuth } from '../../AuthContext';
 import { Button } from '../../components/ui';
 import { formatDateShort, formatDateTimeShort } from '../../dateFormat';
 import { amountInWords } from '../../numberToWords';
-import { paymentMethodLabel } from '../../paymentMethods';
 import type { Hotel } from '../../types';
 import type { ReservationSuccessData } from './ReservationSuccessModal';
 
@@ -26,7 +25,7 @@ export function AdvanceReceiptPrintView({ data, onClose }: { data: ReservationSu
   const addressParts = hotel ? [hotel.addressLine, hotel.apartmentOrFloor, hotel.city, hotel.state, hotel.pincode].filter(Boolean) : [];
   const roomNumbers = data.rooms.map((r) => r.roomNumber).join(', ');
   const roomTypes = [...new Set(data.rooms.map((r) => r.categoryName))].join(', ');
-  const paymentModes = [...new Set(data.payments.map((p) => paymentMethodLabel(p.method)))].join(', ') || '—';
+  const paymentModes = [...new Set(data.payments.map((p) => p.modeLabel))].join(', ') || '—';
   const refNumbers = data.payments.map((p) => p.referenceNumber).filter(Boolean).join(', ') || '—';
   const narration = data.due > 0 ? 'PARTIALLY PAID' : 'FULLY PAID';
   // §user request — "jo recent amount advance humne receive kiya ho vo thoda different colour
@@ -111,7 +110,7 @@ export function AdvanceReceiptPrintView({ data, onClose }: { data: ReservationSu
                         <tr key={i} className={isLatest ? 'bg-emerald-50 font-bold text-emerald-700' : 'text-slate-700'}>
                           <td className="py-1.5 pl-1">{formatDateTimeShort(p.collectedAt ?? data.createdAt)}</td>
                           <td className="py-1.5">
-                            {paymentMethodLabel(p.method)}
+                            {p.modeLabel}
                             {isLatest ? ' (Latest)' : ''}
                           </td>
                           <td className="py-1.5 pr-1 text-right">₹{p.amount.toFixed(2)}</td>

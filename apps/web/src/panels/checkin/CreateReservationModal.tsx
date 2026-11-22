@@ -496,6 +496,14 @@ export function CreateReservationModal({
       const payments = paymentRows
         .filter((r) => r.amount !== '' && r.amount > 0)
         .map((r) => ({ amount: r.amount as number, method: r.method, referenceNumber: r.referenceNumber.trim() || undefined, collectedAt: paymentTimestamp }));
+      // ReservationSuccessData's own payments need a display label, not the raw enum the API call
+      // above uses — kept as a separate array rather than changing `payments` itself.
+      const paymentsForReceipt = payments.map((p) => ({
+        modeLabel: PAYMENT_METHOD_OPTIONS.find((o) => o.value === p.method)?.label ?? p.method,
+        amount: p.amount,
+        referenceNumber: p.referenceNumber,
+        collectedAt: p.collectedAt,
+      }));
       const created = await mutate<Booking[]>(
         'bookings.createMultiRoomReservation',
         { ...shared, payments: payments.length > 0 ? payments : undefined },
@@ -535,7 +543,7 @@ export function CreateReservationModal({
         grandTotal,
         advanceAmount,
         due,
-        payments,
+        payments: paymentsForReceipt,
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : `Failed to ${isEditMode ? 'save' : 'create'} reservation`);

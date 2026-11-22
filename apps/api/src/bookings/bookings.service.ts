@@ -242,6 +242,13 @@ export class BookingsService {
     // §user request — "cash and UPI dono diya toh hum dono add kar sakein": `payments` (one entry
     // per mode) takes over from the single advanceAmount/paymentMethod pair whenever it's given.
     const totalAdvance = input.payments ? input.payments.reduce((sum, p) => sum + p.amount, 0) : (input.advanceAmount ?? 0);
+    // §user request — "itni saari payments kyun dikh rahi hain, sirf 2 baar payment hui hai":
+    // one advance split across N rooms (and possibly multiple modes) becomes N×M individual
+    // Payment rows under the hood — a real per-room ledger needs that, but a receipt/voucher
+    // needs to show ONE line per actual collection event. A single shared timestamp for every row
+    // this call creates is what lets the receipt later re-group them back into that one event by
+    // exact-match collectedAt, instead of each row getting its own now() a few ms apart.
+    const paymentsCollectedAt = new Date();
 
     const bookings = await this.prisma.$transaction(async (tx) => {
       const created = [];
@@ -305,12 +312,12 @@ export class BookingsService {
             const amount = Math.round(roomShareRatio * p.amount * 100) / 100;
             if (amount <= 0) continue;
             await tx.payment.create({
-              data: { bookingId: booking.id, amount, method: p.method, referenceNumber: p.referenceNumber, collectedBy: input.actorId },
+              data: { bookingId: booking.id, amount, method: p.method, referenceNumber: p.referenceNumber, collectedBy: input.actorId, collectedAt: paymentsCollectedAt },
             });
           }
         } else if (share > 0 && input.paymentMethod) {
           await tx.payment.create({
-            data: { bookingId: booking.id, amount: share, method: input.paymentMethod, collectedBy: input.actorId },
+            data: { bookingId: booking.id, amount: share, method: input.paymentMethod, collectedBy: input.actorId, collectedAt: paymentsCollectedAt },
           });
         }
         created.push(booking);
@@ -1088,6 +1095,10 @@ export class BookingsService {
       const owing = dues.filter((d) => d.due > 0);
       let remaining = input.amount;
       const payments = [];
+      // §user request — "itni saari payments kyun dikh rahi hain, sirf 2 baar payment hui hai":
+      // one shared timestamp for every room's own split row, so a receipt/voucher can re-group
+      // them back into the one real collection event they actually were.
+      const collectedAt = new Date();
       for (let i = 0; i < owing.length; i++) {
         const { booking, due } = owing[i];
         const isLast = i === owing.length - 1;
@@ -1096,7 +1107,7 @@ export class BookingsService {
         remaining -= share;
 
         const payment = await tx.payment.create({
-          data: { bookingId: booking.id, amount: share, method: input.method, type: input.type, referenceNumber: input.referenceNumber, collectedBy: input.collectedBy },
+          data: { bookingId: booking.id, amount: share, method: input.method, type: input.type, referenceNumber: input.referenceNumber, collectedBy: input.collectedBy, collectedAt },
         });
         await tx.booking.update({
           where: { id: booking.id },
