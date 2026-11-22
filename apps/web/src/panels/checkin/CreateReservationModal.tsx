@@ -533,7 +533,11 @@ export function CreateReservationModal({
 
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
             <div className="flex flex-col gap-5">
-            <div className="order-1">
+            {/* §user request — "jaise humne stay details, guest details, rooms section har
+                selection ek ek box banaya hai with little shadow, vese hi reservation ki process
+                mein bhi karo": each top-level section is now its own shadowed Card instead of
+                just floating text + controls, matching Check-in's own section cards. */}
+            <Card className="order-1 p-4">
               {/* §user request, with a reference app's own Stay Details header as the target —
                   icon chip + title + one-line subtitle, matching Check-in's own SectionHeader
                   style elsewhere in this app. */}
@@ -560,9 +564,9 @@ export function CreateReservationModal({
                 </div>
               </button>
               <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">{nights} night{nights === 1 ? '' : 's'}</p>
-            </div>
+            </Card>
 
-            <div className="order-3">
+            <Card className="order-3 p-4">
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Guest Details</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Name">
@@ -650,9 +654,9 @@ export function CreateReservationModal({
                   </div>
                 </div>
               )}
-            </div>
+            </Card>
 
-            <div className="order-2">
+            <Card className="order-2 p-4">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Rooms</p>
               </div>
@@ -855,11 +859,12 @@ export function CreateReservationModal({
                   {loadingRooms ? 'Loading rooms…' : '+ Add Room'}
                 </button>
               </div>
-            </div>
+            </Card>
 
             {picked.length > 0 && (
-              <>
-                <div className="order-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Card className="order-4 p-4">
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Pricing &amp; Discount</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
                     <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">GST & Tax</p>
                     <div className="flex rounded-lg bg-slate-100 p-1 dark:bg-slate-700">
@@ -947,7 +952,7 @@ export function CreateReservationModal({
                     sidebar instead — kept here (hidden on lg+) so phones/tablets, which stack the
                     sidebar below everything else, still see it right next to the controls that
                     produce it. */}
-                <div className="order-4 space-y-1.5 rounded-xl border border-slate-200 p-3.5 text-sm dark:border-slate-700 lg:hidden">
+                <div className="mt-3 space-y-1.5 rounded-xl border border-slate-200 p-3.5 text-sm dark:border-slate-700 lg:hidden">
                   <div className="flex justify-between text-slate-500 dark:text-slate-400">
                     <span>Room charges</span>
                     <span>₹{baseTotal.toFixed(2)}</span>
@@ -973,13 +978,13 @@ export function CreateReservationModal({
                     <span>₹{grandTotal.toFixed(2)}</span>
                   </div>
                 </div>
-              </>
+              </Card>
             )}
 
             {/* Edit mode never records a new payment through this form — that's Add Payment's
                 job, kept untouched so the group's existing ledger isn't duplicated. */}
             {!isEditMode && (
-              <div className="order-5">
+              <Card className="order-5 p-4">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-sm dark:bg-brand-500/10">💳</span>
@@ -1045,7 +1050,7 @@ export function CreateReservationModal({
                     </div>
                   ))}
                 </div>
-              </div>
+              </Card>
             )}
             </div>
 
