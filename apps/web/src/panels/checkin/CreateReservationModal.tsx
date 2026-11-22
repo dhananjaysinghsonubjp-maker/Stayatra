@@ -837,53 +837,60 @@ export function CreateReservationModal({
                         </div>
                       )}
 
+                      {/* §user request — "ye Add wala bar hatao, side mein + wala button daalo,
+                          same UX/UI jaisa ss mein diya": one single row (description, qty
+                          stepper, price, a small round + to submit, a plain ✕ to cancel) instead
+                          of a stacked form with a full-width Add button. */}
                       {addingChargeFor === p.room.id && (
-                        <form onSubmit={(e) => addCharge(e, p.room.id)} className="mt-2.5 space-y-2">
+                        <form onSubmit={(e) => addCharge(e, p.room.id)} className="mt-2.5 flex flex-wrap items-center gap-2">
                           <input
-                            className={inputClass}
-                            placeholder="e.g. Extra mattress"
+                            className="min-w-[160px] flex-1 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm italic text-slate-900 outline-none placeholder:text-slate-400 focus:border-brand-400 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                            placeholder="Eg.   Extra Mattress"
                             value={chargeDesc}
                             onChange={(e) => setChargeDesc(e.target.value)}
                             required
                             autoFocus
                           />
-                          <div className="grid grid-cols-2 gap-2">
-                            {/* §user request, with a reference app's own −/+ quantity stepper as
-                                the target, in place of a bare number input. */}
-                            <div className="flex items-center justify-between rounded-lg bg-slate-100 px-1.5 dark:bg-slate-700">
-                              <button
-                                type="button"
-                                onClick={() => setChargeQty((q) => Math.max(1, (q === '' ? 1 : q) - 1))}
-                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-lg font-bold text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-600"
-                              >
-                                −
-                              </button>
-                              <span className="text-sm font-semibold text-slate-900 dark:text-white">{chargeQty === '' ? 1 : chargeQty}</span>
-                              <button
-                                type="button"
-                                onClick={() => setChargeQty((q) => (q === '' ? 1 : q) + 1)}
-                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-lg font-bold text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-600"
-                              >
-                                +
-                              </button>
-                            </div>
-                            <input
-                              className={inputClass}
-                              type="number"
-                              placeholder="₹ price"
-                              value={chargeUnitPrice}
-                              onChange={(e) => setChargeUnitPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                              min={0}
-                            />
+                          <div className="flex shrink-0 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setChargeQty((q) => Math.max(1, (q === '' ? 1 : q) - 1))}
+                              className="text-lg font-bold leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                            >
+                              −
+                            </button>
+                            <span className="text-sm font-semibold text-slate-900 dark:text-white">{chargeQty === '' ? 1 : chargeQty}</span>
+                            <button
+                              type="button"
+                              onClick={() => setChargeQty((q) => (q === '' ? 1 : q) + 1)}
+                              className="text-lg font-bold leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                            >
+                              +
+                            </button>
                           </div>
-                          <div className="flex gap-2">
-                            <Button type="submit" variant="secondary" className="flex-1">
-                              Add
-                            </Button>
-                            <Button type="button" variant="ghost" onClick={() => setAddingChargeFor(null)}>
-                              ✕
-                            </Button>
-                          </div>
+                          <input
+                            className="w-28 shrink-0 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm italic text-slate-900 outline-none placeholder:text-slate-400 focus:border-brand-400 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                            type="number"
+                            placeholder="Price"
+                            value={chargeUnitPrice}
+                            onChange={(e) => setChargeUnitPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                            min={0}
+                          />
+                          <button
+                            type="submit"
+                            title="Add charge"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-lg font-bold text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-brand-500/10"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAddingChargeFor(null)}
+                            title="Cancel"
+                            className="shrink-0 px-1 text-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                          >
+                            ✕
+                          </button>
                         </form>
                       )}
                     </div>
