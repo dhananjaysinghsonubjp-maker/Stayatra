@@ -670,33 +670,36 @@ export function CreateReservationModal({
                   pushed into every room's own field below while the box stays checked; each room's
                   own figure in the summary stays editable afterward for a one-off override. Only
                   worth showing once there's more than one room to spread a rate across. */}
+              {/* §user request, with a reference app's own master-rate bar as the target — label +
+                  date badge on top, then the rate input and "Apply to all" checkbox always in one
+                  row (not stacking on narrow widths) with a highlighted brand-colored input. */}
               {picked.length > 1 && (
-                <div className="mb-3 flex flex-col gap-2.5 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="flex-1">
-                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
-                      <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Rate /night for all rooms (₹)</label>
-                      <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-400">
-                        📅 {formatDateShort(checkIn)} – {formatDateShort(checkOut)} · {nights} night{nights === 1 ? '' : 's'}
-                      </span>
-                    </div>
+                <div className="mb-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/40">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
+                    <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">Rate /night for all rooms (₹)</label>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-400">
+                      📅 {formatDateShort(checkIn)} – {formatDateShort(checkOut)} · {nights} night{nights === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
                     <input
-                      className={inputClass}
+                      className="flex-1 rounded-lg border border-brand-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-brand-500/40 dark:bg-slate-800 dark:text-white"
                       type="number"
                       min={0}
                       placeholder="e.g. 3500"
                       value={masterRate}
                       onChange={(e) => applyMasterRate(e.target.value === '' ? '' : Number(e.target.value))}
                     />
+                    <label className="flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={applyRateToAll}
+                        onChange={(e) => toggleApplyRateToAll(e.target.checked)}
+                        className="h-5 w-5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                      />
+                      Apply to all
+                    </label>
                   </div>
-                  <label className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-slate-600 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={applyRateToAll}
-                      onChange={(e) => toggleApplyRateToAll(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                    />
-                    Apply to all
-                  </label>
                 </div>
               )}
               <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
