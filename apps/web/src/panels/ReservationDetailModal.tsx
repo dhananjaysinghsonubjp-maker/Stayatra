@@ -19,6 +19,8 @@ const STATUS_LABEL: Record<Booking['status'], string> = {
   checked_in: 'Checked In',
   checked_out: 'Checked Out',
   cancelled: 'Cancelled',
+  no_show: 'No Show',
+  void: 'Voided',
 };
 
 function groupStatus(bookings: Booking[]): Booking['status'] | 'partial' {

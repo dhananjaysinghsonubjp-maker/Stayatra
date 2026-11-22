@@ -1544,6 +1544,107 @@ export class BookingsService {
     return updated;
   }
 
+  /**
+   * §user request — Reservations list's "More Actions" menu: "Cancel entire reservation" / "Mark
+   * as No Show" / "Void Reservation" all generalize cancelBooking above to every room in a group
+   * reservation at once (the menu is opened from one room's card, but a wedding booking's 7 rooms
+   * should all end together, not just the one the menu happened to be on). Each lands on its own
+   * distinct BookingStatus so cancellation/no-show/void reporting stays separable later — same
+   * confirmed-only rule as cancelBooking (an already-checked-in room keeps its own status,
+   * untouched, exactly like cancelBooking already left it alone).
+   */
+  async endReservationGroup(input: { bookingId: string; status: BookingStatus; actorId: string }) {
+    const first = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    const rows = first.reservationGroupId ? await this.prisma.booking.findMany({ where: { reservationGroupId: first.reservationGroupId } }) : [first];
+    const targets = rows.filter((b) => b.status === BookingStatus.confirmed);
+    if (targets.length === 0) throw new ConflictException('Only a confirmed (not yet arrived) reservation can be ended this way');
+
+    await this.prisma.booking.updateMany({ where: { id: { in: targets.map((b) => b.id) } }, data: { status: input.status } });
+    await Promise.all(
+      targets.map((b) =>
+        this.rates.adjustAvailabilityForStay({ hotelId: b.hotelId, roomCategoryId: b.roomCategoryId, checkIn: b.checkIn, checkOut: b.checkOut, delta: 1 }),
+      ),
+    );
+
+    const label = input.status === BookingStatus.cancelled ? 'cancelled' : input.status === BookingStatus.no_show ? 'marked as no-show' : 'voided';
+    await this.notifications.create({
+      hotelId: first.hotelId,
+      type: 'booking_cancelled',
+      title: `Reservation ${label} — ${first.source}`,
+      body: `${first.guestName}, ${dateLabel(first.checkIn)} → ${dateLabel(first.checkOut)}`,
+      link: 'bookings',
+    });
+
+    return this.prisma.booking.findMany({ where: { id: { in: targets.map((b) => b.id) } } });
+  }
+
+  /** Shared by setVip/updateInternalNotes/updateExpectedTimes/updateSpecialRequest below — each
+   * is a reservation-level fact (one VIP flag, one note, one arrival estimate, one request),
+   * written onto every room in the group the same way specialRequest already is at creation,
+   * not just the one row the menu happened to be opened from. */
+  private async updateReservationGroupFields(bookingId: string, data: Record<string, string | boolean | null>, actorId: string) {
+    const first = await this.prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+    const ids = first.reservationGroupId
+      ? (await this.prisma.booking.findMany({ where: { reservationGroupId: first.reservationGroupId }, select: { id: true } })).map((b) => b.id)
+      : [first.id];
+    await this.prisma.booking.updateMany({ where: { id: { in: ids } }, data });
+    await this.audit.log({ hotelId: first.hotelId, eventType: 'STAY_EDITED', actorId, subjectId: first.reservationGroupId ?? first.id, detail: data });
+    return this.prisma.booking.findMany({ where: { id: { in: ids } } });
+  }
+
+  async setVip(input: { bookingId: string; isVip: boolean; actorId: string }) {
+    return this.updateReservationGroupFields(input.bookingId, { isVip: input.isVip }, input.actorId);
+  }
+
+  async updateInternalNotes(input: { bookingId: string; internalNotes: string | null; actorId: string }) {
+    return this.updateReservationGroupFields(input.bookingId, { internalNotes: input.internalNotes }, input.actorId);
+  }
+
+  async updateExpectedTimes(input: { bookingId: string; expectedArrivalTime?: string | null; expectedDepartureTime?: string | null; actorId: string }) {
+    return this.updateReservationGroupFields(
+      input.bookingId,
+      { expectedArrivalTime: input.expectedArrivalTime ?? null, expectedDepartureTime: input.expectedDepartureTime ?? null },
+      input.actorId,
+    );
+  }
+
+  async updateSpecialRequest(input: { bookingId: string; specialRequest: string | null; actorId: string }) {
+    return this.updateReservationGroupFields(input.bookingId, { specialRequest: input.specialRequest }, input.actorId);
+  }
+
+  /** The lead guest's own ID, verifiable ahead of arrival — unlike Guest's idPhotoFrontPath/
+   * idPhotoBackPath, this has no Guest/check-in record to attach to yet, so it lives on the
+   * booking itself (same idType/idNumber fields a later actual check-in would also set). Scoped
+   * to just the one booking the menu was opened from, not the whole group — a 7-room wedding
+   * booking's lead guest is still one person, not seven. */
+  async updateIdentityDocs(input: { bookingId: string; idType?: IdType | null; idNumber?: string | null; idPhotoFrontPath?: string | null; idPhotoBackPath?: string | null; actorId: string }) {
+    const booking = await this.prisma.booking.update({
+      where: { id: input.bookingId },
+      data: {
+        idType: input.idType ?? undefined,
+        idNumber: input.idNumber ?? undefined,
+        idPhotoFrontPath: input.idPhotoFrontPath ?? undefined,
+        idPhotoBackPath: input.idPhotoBackPath ?? undefined,
+      },
+    });
+    await this.audit.log({ hotelId: booking.hotelId, eventType: 'STAY_EDITED', actorId: input.actorId, subjectId: booking.id, detail: { identityVerified: true } });
+    return booking;
+  }
+
+  /** "Change meal plan" — a lighter, single-field action than the full Edit Reservation wizard
+   * (updateReservationGroup), which would otherwise force re-submitting every other field just to
+   * swap one room's rate plan. Confirmed-only, like the other quick actions here — an already
+   * checked-in room's billing correction belongs to updateBooking's own 1-hour edit window. */
+  async updateRatePlan(input: { bookingId: string; ratePlanId: string | null; actorId: string }) {
+    const existing = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    if (existing.status !== BookingStatus.confirmed) {
+      throw new ConflictException('Only a confirmed (not yet arrived) reservation can have its rate plan changed here');
+    }
+    const booking = await this.prisma.booking.update({ where: { id: input.bookingId }, data: { ratePlanId: input.ratePlanId } });
+    await this.audit.log({ hotelId: booking.hotelId, eventType: 'STAY_EDITED', actorId: input.actorId, subjectId: booking.id, detail: { ratePlanId: input.ratePlanId } });
+    return booking;
+  }
+
   /** Confirmed reservations not yet arrived — the "check in an existing booking" search list (§8.3/§8.4). */
   async listUpcomingReservations(input: { hotelId: string; roomCategoryId?: string }) {
     return this.prisma.booking.findMany({

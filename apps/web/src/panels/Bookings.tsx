@@ -11,7 +11,8 @@ import { computeInvoiceTotals } from '../invoice';
 import { SOURCE_LABEL } from './channel-manager/ota-labels';
 import { ChannelBadge } from './channel-manager/ChannelBadge';
 import { formatDateShort } from '../dateFormat';
-import type { Booking, Room, RoomCategory } from '../types';
+import { MoreActionsPanel } from './MoreActionsPanel';
+import type { Booking, RatePlan, Room, RoomCategory } from '../types';
 
 type ListTab = 'upcoming' | 'checked_in' | 'history';
 const TAB_LABEL: Record<ListTab, string> = { upcoming: 'Upcoming', checked_in: 'Checked In', history: 'History' };
@@ -20,6 +21,8 @@ const STATUS_LABEL: Record<Booking['status'], string> = {
   checked_in: 'Checked In',
   checked_out: 'Checked Out',
   cancelled: 'Cancelled',
+  no_show: 'No Show',
+  void: 'Voided',
 };
 
 /** "23 Nov" — the date-section header above a day's run of reservations, no year (this list
@@ -35,11 +38,13 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [categories, setCategories] = useState<RoomCategory[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [ratePlans, setRatePlans] = useState<RatePlan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [payingBooking, setPayingBooking] = useState<Booking | null>(null);
   const [checkingInBooking, setCheckingInBooking] = useState<Booking | null>(null);
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
   const [viewingGroupKey, setViewingGroupKey] = useState<string | null>(null);
+  const [actionsGroupKey, setActionsGroupKey] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [sourceFilter, setSourceFilter] = useState('all');
   const [listTab, setListTab] = useState<ListTab>('upcoming');
@@ -47,14 +52,16 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
 
   async function refresh() {
     try {
-      const [b, c, r] = await Promise.all([
+      const [b, c, r, rp] = await Promise.all([
         query<Booking[]>('bookings.listReservations', { hotelId }, token ?? undefined),
         query<RoomCategory[]>('hotels.listRoomCategories', { hotelId }, token ?? undefined),
         query<Room[]>('hotels.listRooms', { hotelId }, token ?? undefined),
+        query<RatePlan[]>('rates.listAllRatePlansForHotel', { hotelId }, token ?? undefined),
       ]);
       setBookings(b);
       setCategories(c);
       setRooms(r);
+      setRatePlans(rp);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load reservations');
     }
@@ -74,14 +81,18 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
     () => ({
       upcoming: filtered.filter((b) => b.status === 'confirmed').length,
       checked_in: filtered.filter((b) => b.status === 'checked_in').length,
-      history: filtered.filter((b) => b.status === 'checked_out' || b.status === 'cancelled').length,
+      history: filtered.filter((b) => b.status === 'checked_out' || b.status === 'cancelled' || b.status === 'no_show' || b.status === 'void').length,
     }),
     [filtered],
   );
   const tabFiltered = useMemo(
     () =>
       filtered.filter((b) =>
-        listTab === 'upcoming' ? b.status === 'confirmed' : listTab === 'checked_in' ? b.status === 'checked_in' : b.status === 'checked_out' || b.status === 'cancelled',
+        listTab === 'upcoming'
+          ? b.status === 'confirmed'
+          : listTab === 'checked_in'
+            ? b.status === 'checked_in'
+            : b.status === 'checked_out' || b.status === 'cancelled' || b.status === 'no_show' || b.status === 'void',
       ),
     [filtered, listTab],
   );
@@ -146,6 +157,10 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
   const viewingGroup = useMemo(
     () => (viewingGroupKey ? bookings.filter((row) => (row.reservationGroupId ?? row.id) === viewingGroupKey) : null),
     [viewingGroupKey, bookings],
+  );
+  const actionsGroup = useMemo(
+    () => (actionsGroupKey ? bookings.filter((row) => (row.reservationGroupId ?? row.id) === actionsGroupKey) : null),
+    [actionsGroupKey, bookings],
   );
 
   async function cancelBooking(bookingId: string) {
@@ -234,6 +249,7 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
                     categories={categories}
                     roomsById={roomsById}
                     onClick={() => (group.length > 1 ? setViewingGroupKey(group[0].reservationGroupId ?? group[0].id) : setViewingBooking(group[0]))}
+                    onMoreActions={() => setActionsGroupKey(group[0].reservationGroupId ?? group[0].id)}
                   />
                 ))}
               </div>
@@ -283,6 +299,19 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
           }}
         />
       )}
+      {actionsGroup && actionsGroup.length > 0 && (
+        <MoreActionsPanel
+          hotelId={hotelId}
+          group={actionsGroup}
+          roomsById={roomsById}
+          categories={categories}
+          ratePlans={ratePlans}
+          onClose={() => setActionsGroupKey(null)}
+          onChanged={() => {
+            void refresh();
+          }}
+        />
+      )}
       {viewingBooking && (
         <BookingViewModal
           booking={viewingBooking}
@@ -322,11 +351,13 @@ function ReservationCard({
   categories,
   roomsById,
   onClick,
+  onMoreActions,
 }: {
   group: Booking[];
   categories: RoomCategory[];
   roomsById: Map<string, Room>;
   onClick: () => void;
+  onMoreActions: () => void;
 }) {
   const b = group[0];
   const grandTotal = group.reduce((sum, row) => {
@@ -342,7 +373,7 @@ function ReservationCard({
   const due = Math.max(0, grandTotal - paid);
   const statuses = new Set(group.map((row) => row.status));
   const groupLabel = statuses.size === 1 ? STATUS_LABEL[b.status] : 'Partially Checked In';
-  const activeCount = group.filter((row) => row.status !== 'cancelled').length;
+  const activeCount = group.filter((row) => row.status !== 'cancelled' && row.status !== 'no_show' && row.status !== 'void').length;
 
   const categoryCounts = new Map<string, number>();
   for (const row of group) {
@@ -353,13 +384,21 @@ function ReservationCard({
   const roomNumbers = group.map((row) => roomsById.get(row.assignedRoomId ?? '')?.roomNumber).filter((n): n is string => Boolean(n));
 
   return (
-    <button
+    <div
       onClick={onClick}
-      className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-sm transition-shadow hover:shadow dark:border-slate-700 dark:bg-slate-800"
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick()}
+      className="w-full cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-sm transition-shadow hover:shadow dark:border-slate-700 dark:bg-slate-800"
     >
       <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-slate-500 dark:text-slate-400">#{b.id.slice(-6).toUpperCase()}</span>
+          {b.isVip && (
+            <span className="shrink-0 text-amber-500" title="VIP guest">
+              👑
+            </span>
+          )}
           <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-400 shadow-sm dark:bg-slate-800 dark:text-slate-500">
             Booked: {formatDateShort(b.createdAt)}
           </span>
@@ -367,6 +406,20 @@ function ReservationCard({
         <div className="flex items-center gap-2">
           <ChannelBadge source={b.source} />
           <Badge tone={statuses.size === 1 ? b.status : 'checked_in'}>{groupLabel}</Badge>
+          {/* §user request — "har booking ke upar 3 dots chahiye jispe click karte hi ye saare
+              options khule": opens MoreActionsPanel without triggering the card's own onClick
+              (stopPropagation), since the card itself is one big clickable surface. */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onMoreActions();
+            }}
+            aria-label="More actions"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
+          >
+            ⋯
+          </button>
         </div>
       </div>
 
@@ -437,7 +490,7 @@ function ReservationCard({
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-400 dark:border-slate-600">→</span>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 

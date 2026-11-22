@@ -376,6 +376,49 @@ export function createBookingsRouter(bookings: BookingsService) {
       .input(z.object({ bookingId: z.string() }))
       .mutation(({ ctx, input }) => bookings.cancelBooking({ ...input, actorId: ctx.user.userId })),
 
+    // §user request — Reservations list's "More Actions" menu.
+    endReservationGroup: reservationsManager
+      .input(z.object({ bookingId: z.string(), status: z.enum(['cancelled', 'no_show', 'void']) }))
+      .mutation(({ ctx, input }) => bookings.endReservationGroup({ ...input, actorId: ctx.user.userId })),
+
+    setVip: frontDeskUp
+      .input(z.object({ bookingId: z.string(), isVip: z.boolean() }))
+      .mutation(({ ctx, input }) => bookings.setVip({ ...input, actorId: ctx.user.userId })),
+
+    updateInternalNotes: frontDeskUp
+      .input(z.object({ bookingId: z.string(), internalNotes: z.string().max(2000).nullable() }))
+      .mutation(({ ctx, input }) => bookings.updateInternalNotes({ ...input, actorId: ctx.user.userId })),
+
+    updateExpectedTimes: frontDeskUp
+      .input(
+        z.object({
+          bookingId: z.string(),
+          expectedArrivalTime: z.string().regex(/^\d{2}:\d{2}$/).optional().nullable(),
+          expectedDepartureTime: z.string().regex(/^\d{2}:\d{2}$/).optional().nullable(),
+        }),
+      )
+      .mutation(({ ctx, input }) => bookings.updateExpectedTimes({ ...input, actorId: ctx.user.userId })),
+
+    updateSpecialRequest: frontDeskUp
+      .input(z.object({ bookingId: z.string(), specialRequest: z.string().max(1000).nullable() }))
+      .mutation(({ ctx, input }) => bookings.updateSpecialRequest({ ...input, actorId: ctx.user.userId })),
+
+    updateIdentityDocs: frontDeskUp
+      .input(
+        z.object({
+          bookingId: z.string(),
+          idType: idTypeSchema.optional().nullable(),
+          idNumber: z.string().optional().nullable(),
+          idPhotoFrontPath: z.string().optional().nullable(),
+          idPhotoBackPath: z.string().optional().nullable(),
+        }),
+      )
+      .mutation(({ ctx, input }) => bookings.updateIdentityDocs({ ...input, actorId: ctx.user.userId })),
+
+    updateRatePlan: frontDeskUp
+      .input(z.object({ bookingId: z.string(), ratePlanId: z.string().nullable() }))
+      .mutation(({ ctx, input }) => bookings.updateRatePlan({ ...input, actorId: ctx.user.userId })),
+
     getBooking: anyPmsRole.input(z.object({ bookingId: z.string() })).query(async ({ ctx, input }) => {
       const row = await bookings.getBooking(input.bookingId);
       return isHousekeeping(ctx.user.roles.pms) ? redactForHousekeeping(row) : row;

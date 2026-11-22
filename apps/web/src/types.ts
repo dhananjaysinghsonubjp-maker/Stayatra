@@ -168,7 +168,7 @@ export interface Booking {
   checkIn: string;
   checkOut: string;
   nights: number;
-  status: 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled';
+  status: 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show' | 'void';
   source: BookingSource;
   paidAmount: string | null;
   paymentMethod?: string | null;
@@ -200,6 +200,16 @@ export interface Booking {
   billToCompanyState: string | null;
   billToCompanyCity: string | null;
   billToCompanyPincode: string | null;
+  /** Reservations list's "More Actions" menu — shared across every room in a group reservation,
+   * same as specialRequest. */
+  isVip: boolean;
+  internalNotes: string | null;
+  expectedArrivalTime: string | null;
+  expectedDepartureTime: string | null;
+  /** Lead guest's ID, verifiable ahead of arrival — see idType/idNumber above, which this menu
+   * also writes to. */
+  idPhotoFrontPath: string | null;
+  idPhotoBackPath: string | null;
   payments?: Payment[];
   lineItems?: InvoiceLineItem[];
   /** Co-occupants sharing this room (not separate bookings) — "Total Guests" is 1 (the primary

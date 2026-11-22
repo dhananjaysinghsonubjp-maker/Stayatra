@@ -116,4 +116,16 @@ export class UploadsController {
     const filePath = await this.save('staff-ids', file);
     return { filePath };
   }
+
+  /** Reservations list's "More Actions" → Identity Verification — a reservation's lead guest ID,
+   * verifiable ahead of arrival, before there's any Guest/check-in record to run OCR extraction
+   * against yet. No AI extraction (unlike id-scan) — storage only, same as receipts; front and
+   * back are two separate calls, same pattern as staff-id. */
+  @Post('booking-id')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  async uploadBookingId(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    await this.requireUser(authHeader);
+    const filePath = await this.save('booking-ids', file);
+    return { filePath };
+  }
 }

@@ -648,6 +648,12 @@ enum BookingStatus {
   checked_in
   checked_out
   cancelled
+  // §user request — Reservations list's "More Actions" menu: distinct from a guest-initiated
+  // cancellation (refund/reporting implications differ) and from an outright void (created in
+  // error, no stay was ever expected) — both end the reservation but mean different things on
+  // cancellation/no-show reports.
+  no_show
+  void
 }
 
 // added beyond the MD spec's schema sketch — guest ID capture at check-in (§8.3)
@@ -804,6 +810,20 @@ model Booking {
   billToCompanyState   String? @map("bill_to_company_state")
   billToCompanyCity    String? @map("bill_to_company_city")
   billToCompanyPincode String? @map("bill_to_company_pincode")
+
+  // §user request — Reservations list's "More Actions" menu (Mark as VIP, Add internal notes,
+  // Update Expected Times, Identity Verification): all shared across every room in a group
+  // reservation the same way specialRequest already is, not per-room — a group reservation has
+  // one VIP flag / one internal note / one expected-arrival estimate / one lead guest's ID, not a
+  // separate one per booked room.
+  isVip                 Boolean  @default(false) @map("is_vip")
+  internalNotes         String?  @map("internal_notes")
+  expectedArrivalTime   String?  @map("expected_arrival_time") // "HH:MM", 24h — a plan, not the real checkedInAt timestamp
+  expectedDepartureTime String?  @map("expected_departure_time")
+  // Same pattern as Guest's own idPhotoFrontPath/idPhotoBackPath — captured here too so ID can be
+  // verified ahead of arrival, before there's any Guest/check-in record to attach it to yet.
+  idPhotoFrontPath      String?  @map("id_photo_front_path")
+  idPhotoBackPath       String?  @map("id_photo_back_path")
 
   hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   otaConnection OtaConnection? @relation(fields: [otaConnectionId], references: [id])
