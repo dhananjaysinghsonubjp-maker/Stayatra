@@ -1,8 +1,11 @@
-// Mirrors apps/api/src/common/gst.ts — §5.1/§11 GST slabs, for live display only
-// (the API is the source of truth on write; this is just so the check-in form
-// can show the slab before submitting).
-export function computeGstSlab(price: number): { rate: number; label: string } {
-  if (price < 1000) return { rate: 0, label: '0%' };
-  if (price < 7500) return { rate: 5, label: '5% (no ITC)' };
-  return { rate: 18, label: '18% (with ITC)' };
+// Mirrors apps/api/src/common/gst.ts — for live display only (the API is the source of truth on
+// write; this is just so the check-in form can show the rate before submitting).
+//
+// §user request — "GST ko update karo new policy ke hisab se which is 5%": the GST Council's
+// 56th meeting (effective 2025-09-22) replaced the old ₹1,000/₹7,500 tariff-slab system (0% /
+// 5% no-ITC / 18% with-ITC) with one flat 5% no-ITC rate on hotel accommodation, regardless of
+// room price. `price` is kept as a parameter (unused now) so every existing call site keeps
+// compiling unchanged.
+export function computeGstSlab(_price: number): { rate: number; label: string } {
+  return { rate: 5, label: '5% (no ITC)' };
 }
