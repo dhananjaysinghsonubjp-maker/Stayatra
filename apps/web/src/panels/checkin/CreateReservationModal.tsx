@@ -283,6 +283,26 @@ export function CreateReservationModal({
   const alreadyPaid = isEditMode ? (editGroup ?? []).reduce((sum, b) => sum + Number(b.paidAmount ?? 0), 0) : 0;
   const due = Math.max(0, grandTotal - (isEditMode ? alreadyPaid : advanceAmount));
 
+  // §user request, with a reference app's own Booking Summary sidebar as the target — "Room
+  // Charges" there groups by room TYPE, not by the specific physical rooms picked; grouping
+  // roomsWithBase (already computed, pre-discount/pre-GST) by category here is purely a display
+  // reshape for the sidebar, no new pricing logic.
+  const roomChargesByCategory = (() => {
+    const byCategory = new Map<string, { name: string; count: number; amount: number }>();
+    for (const p of roomsWithBase) {
+      const key = p.room.roomCategoryId ?? p.room.id;
+      const name = p.room.roomCategory?.name ?? p.room.roomNumber;
+      const existing = byCategory.get(key);
+      if (existing) {
+        existing.count += 1;
+        existing.amount += p.base;
+      } else {
+        byCategory.set(key, { name, count: 1, amount: p.base });
+      }
+    }
+    return [...byCategory.values()];
+  })();
+
   async function openPicker() {
     setError(null);
     setLoadingRooms(true);
@@ -447,7 +467,7 @@ export function CreateReservationModal({
     <div className={`fixed inset-0 z-50 bg-black/30 transition-opacity duration-300 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}>
       <Card
         onClick={(e) => e.stopPropagation()}
-        className={`fixed inset-x-0 bottom-0 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-b-none rounded-t-2xl shadow-2xl transition-transform duration-300 ease-out sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-full sm:w-full sm:max-w-xl sm:rounded-none ${
+        className={`fixed inset-x-0 bottom-0 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-b-none rounded-t-2xl shadow-2xl transition-transform duration-300 ease-out sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-full sm:w-full sm:max-w-6xl sm:rounded-none ${
           entered && !closing ? 'translate-y-0 sm:translate-x-0' : 'translate-y-full sm:translate-y-0 sm:translate-x-full'
         }`}
       >
@@ -458,11 +478,20 @@ export function CreateReservationModal({
             </button>
           </div>
 
-          <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
-            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+          {/* §user request, with a reference app's own wide two-column Create Reservation screen
+              as the target — "slider bada banega, dates > Rooms > Guest Details > Payment Details
+              order mein ho, aur side mein Booking Summary bane": the panel itself is much wider
+              now (sm:max-w-6xl above) to fit a sticky summary sidebar alongside the form, and the
+              form's own sections reorder via a plain CSS `order` on each (flex-col below) rather
+              than physically moving ~300 lines of JSX around — every section's own content and
+              handlers are completely untouched, only their visual position changes. */}
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            {error && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Reservation Details</p>
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
+            <div className="flex flex-col gap-5">
+            <div className="order-1">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Stay Details</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Field label="Source">
                   <select className={inputClass} value={source} onChange={(e) => setSource(e.target.value)}>
@@ -483,7 +512,7 @@ export function CreateReservationModal({
               <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{nights} night{nights === 1 ? '' : 's'}</p>
             </div>
 
-            <div>
+            <div className="order-3">
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Guest Details</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Name">
@@ -567,7 +596,7 @@ export function CreateReservationModal({
               )}
             </div>
 
-            <div>
+            <div className="order-2">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Rooms</p>
               </div>
@@ -768,7 +797,7 @@ export function CreateReservationModal({
 
             {picked.length > 0 && (
               <>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="order-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
                     <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">GST & Tax</p>
                     <div className="flex rounded-lg bg-slate-100 p-1 dark:bg-slate-700">
@@ -852,7 +881,11 @@ export function CreateReservationModal({
                   </div>
                 </div>
 
-                <div className="space-y-1.5 rounded-xl border border-slate-200 p-3.5 text-sm dark:border-slate-700">
+                {/* lg+ screens show this same breakdown inside the sticky Booking Summary
+                    sidebar instead — kept here (hidden on lg+) so phones/tablets, which stack the
+                    sidebar below everything else, still see it right next to the controls that
+                    produce it. */}
+                <div className="order-4 space-y-1.5 rounded-xl border border-slate-200 p-3.5 text-sm dark:border-slate-700 lg:hidden">
                   <div className="flex justify-between text-slate-500 dark:text-slate-400">
                     <span>Room charges</span>
                     <span>₹{baseTotal.toFixed(2)}</span>
@@ -884,7 +917,7 @@ export function CreateReservationModal({
             {/* Edit mode never records a new payment through this form — that's Add Payment's
                 job, kept untouched so the group's existing ledger isn't duplicated. */}
             {!isEditMode && (
-              <div>
+              <div className="order-5">
                 <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment Details</p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label="Advance (₹)">
@@ -902,9 +935,87 @@ export function CreateReservationModal({
                 </div>
               </div>
             )}
+            </div>
+
+            <aside className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/40 lg:sticky lg:top-0 lg:self-start">
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Booking Summary</p>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-lg bg-white p-2 dark:bg-slate-900/40">
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500">Check-in</p>
+                    <p className="font-semibold text-slate-900 dark:text-white">{formatDateShort(checkIn)}</p>
+                  </div>
+                  <div className="rounded-lg bg-white p-2 dark:bg-slate-900/40">
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500">Check-out</p>
+                    <p className="font-semibold text-slate-900 dark:text-white">{formatDateShort(checkOut)}</p>
+                  </div>
+                  <div className="rounded-lg bg-white p-2 dark:bg-slate-900/40">
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500">Nights</p>
+                    <p className="font-semibold text-slate-900 dark:text-white">{nights}</p>
+                  </div>
+                  <div className="rounded-lg bg-white p-2 dark:bg-slate-900/40">
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500">Rooms</p>
+                    <p className="font-semibold text-slate-900 dark:text-white">{picked.length}</p>
+                  </div>
+                </div>
+              </div>
+
+              {picked.length > 0 && (
+                <div className="space-y-1.5 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
+                  <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Room Charges</p>
+                  {roomChargesByCategory.map((c) => (
+                    <div key={c.name} className="flex justify-between text-slate-500 dark:text-slate-400">
+                      <span>{c.name} × {c.count}</span>
+                      <span>₹{c.amount.toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {picked.length > 0 && (
+                <div className="space-y-1.5 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
+                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                    <span>Room charges</span>
+                    <span>₹{baseTotal.toFixed(2)}</span>
+                  </div>
+                  {totals.extraCharges > 0 && (
+                    <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                      <span>Add-ons</span>
+                      <span>₹{totals.extraCharges.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {totals.discount > 0 && (
+                    <div className="flex justify-between text-amber-600 dark:text-amber-400">
+                      <span>Discount</span>
+                      <span>−₹{totals.discount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                    <span>GST ({totals.gst.label}{gstMode === 'inclusive' ? ' · included' : ''})</span>
+                    <span>₹{totals.gst.amount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-100 pt-1.5 text-sm font-bold text-slate-900 dark:border-slate-700 dark:text-white">
+                    <span>Grand Total</span>
+                    <span>₹{grandTotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold text-amber-600 dark:text-amber-400">
+                    <span>Balance Payable</span>
+                    <span>₹{due.toFixed(2)}</span>
+                  </div>
+                  {isEditMode && alreadyPaid > 0 && (
+                    <p className="text-xs text-slate-400 dark:text-slate-500">₹{alreadyPaid.toFixed(2)} already paid</p>
+                  )}
+                </div>
+              )}
+
+              <Button type="button" onClick={submit} disabled={submitting || picked.length === 0} className="w-full">
+                {isEditMode ? (submitting ? 'Saving…' : 'Save Changes') : submitting ? 'Creating…' : 'Create Reservation'}
+              </Button>
+            </aside>
+            </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 dark:border-slate-700">
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 dark:border-slate-700 lg:hidden">
             <div className="text-sm">
               <span className="font-bold text-amber-600 dark:text-amber-400">₹{due.toFixed(2)}</span>
               <span className="text-slate-400 dark:text-slate-500"> due of ₹{grandTotal.toFixed(2)}{isEditMode && alreadyPaid > 0 ? ` (₹${alreadyPaid.toFixed(2)} already paid)` : ''}</span>
