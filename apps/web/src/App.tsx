@@ -28,6 +28,7 @@ import { NotificationBell } from './components/NotificationBell';
 import { SubscriptionBanner } from './components/SubscriptionBanner';
 import { ThemeToggle } from './components/ThemeToggle';
 import { HelpDesk } from './components/HelpDesk';
+import { BannerWaves } from './components/BannerWaves';
 import { applyBrandColor, isColorDark } from './brandColor';
 import { applyBrandFont } from './brandFont';
 import type { Hotel } from './types';
@@ -261,6 +262,9 @@ function Shell() {
               <HelpDesk tone={bannerTone} />
               <NotificationBell hotelId={hotel.id} onNavigate={setTab} tone={bannerTone} />
             </div>
+            {/* §user request — wave strip + swimming shark fin, pinned to the very bottom edge of
+                the banner. */}
+            <BannerWaves />
           </div>
         ) : (
           <div className="flex items-center justify-between gap-1 border-b border-slate-100 bg-white px-2 py-2.5 dark:border-slate-700 dark:bg-slate-900 sm:justify-end sm:px-8">

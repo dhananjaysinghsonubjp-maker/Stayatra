@@ -150,6 +150,70 @@ body {
   background-image: linear-gradient(#1e293b, #1e293b), linear-gradient(90deg, #a17f1a, #ffe68a, #a17f1a, #ffe68a, #a17f1a);
 }
 
+/* §user request — an ocean-wave strip along the very bottom of the hotel banner, with a shark fin
+   that surfaces and swims across every 20s. Pure CSS (background-position scroll for the waves,
+   a keyframed `left` for the fin) rather than JS/rAF — smoother, and nothing here changes between
+   cycles the way the earlier plane's random flight path did, so there's no need to recompute
+   anything in script. */
+@keyframes banner-wave-back {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: -100px;
+  }
+}
+@keyframes banner-wave-front {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: 120px;
+  }
+}
+.banner-wave-back {
+  animation: banner-wave-back 9s linear infinite;
+}
+.banner-wave-front {
+  animation: banner-wave-front 6s linear infinite;
+}
+@keyframes banner-shark-swim {
+  0%,
+  74% {
+    left: -8%;
+    opacity: 0;
+    transform: translateY(2px) rotate(-6deg);
+  }
+  76% {
+    opacity: 1;
+  }
+  80% {
+    left: 15%;
+    transform: translateY(-1px) rotate(4deg);
+  }
+  85% {
+    left: 40%;
+    transform: translateY(1px) rotate(-4deg);
+  }
+  90% {
+    left: 65%;
+    transform: translateY(-1px) rotate(4deg);
+  }
+  94% {
+    left: 92%;
+    opacity: 1;
+    transform: translateY(1px) rotate(-4deg);
+  }
+  96%,
+  100% {
+    left: 108%;
+    opacity: 0;
+  }
+}
+.banner-shark-fin {
+  animation: banner-shark-swim 20s ease-in-out infinite;
+}
+
 /* Plain amount fields, no spinner arrows — every number input in the app. */
 input[type='number'] {
   -moz-appearance: textfield;
