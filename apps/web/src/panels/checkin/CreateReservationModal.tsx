@@ -657,8 +657,13 @@ export function CreateReservationModal({
             </Card>
 
             <Card className="order-2 p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Rooms</p>
+              {/* §user request, with a reference app's own Rooms Selection table as the target —
+                  icon+title header, a master-rate bar with a date/nights badge next to it, then
+                  one bordered list of compact zebra-striped rows (not a stack of big per-room
+                  cards) so room no./plan/price read like a real table while staying editable. */}
+              <div className="mb-3 flex items-center gap-2.5">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-sm dark:bg-brand-500/10">🛏️</span>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Rooms Selection</p>
               </div>
               {/* §user request — "ek simple per room rent daalu aur side mein checkbox 'apply to
                   all', to automatically niche sab rooms mein rent likha aa jaaye": one master rate,
@@ -666,20 +671,24 @@ export function CreateReservationModal({
                   own figure in the summary stays editable afterward for a one-off override. Only
                   worth showing once there's more than one room to spread a rate across. */}
               {picked.length > 1 && (
-                <div className="mb-2.5 flex items-end gap-2.5 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40">
+                <div className="mb-3 flex flex-col gap-2.5 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40 sm:flex-row sm:items-end sm:justify-between">
                   <div className="flex-1">
-                    <Field label="Rate /night for all rooms (₹)">
-                      <input
-                        className={inputClass}
-                        type="number"
-                        min={0}
-                        placeholder="e.g. 3500"
-                        value={masterRate}
-                        onChange={(e) => applyMasterRate(e.target.value === '' ? '' : Number(e.target.value))}
-                      />
-                    </Field>
+                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
+                      <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Rate /night for all rooms (₹)</label>
+                      <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-400">
+                        📅 {formatDateShort(checkIn)} – {formatDateShort(checkOut)} · {nights} night{nights === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <input
+                      className={inputClass}
+                      type="number"
+                      min={0}
+                      placeholder="e.g. 3500"
+                      value={masterRate}
+                      onChange={(e) => applyMasterRate(e.target.value === '' ? '' : Number(e.target.value))}
+                    />
                   </div>
-                  <label className="mb-2.5 flex shrink-0 items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                  <label className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-slate-600 dark:text-slate-300">
                     <input
                       type="checkbox"
                       checked={applyRateToAll}
@@ -690,36 +699,95 @@ export function CreateReservationModal({
                   </label>
                 </div>
               )}
-              <div className="space-y-2.5">
-                {roomsWithBase.map((p) => {
+              <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
+                {roomsWithBase.map((p, i) => {
                   const roomRatePlans = ratePlans.filter((rp) => rp.roomCategoryId === p.room.roomCategoryId);
                   const hasCustomDates = Boolean(p.checkIn || p.checkOut);
                   return (
-                    <div key={p.room.id} className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
-                      <div className="flex items-start justify-between gap-2">
-                        {/* §user request — same icon-chip Room box Check-in's own form uses, so a
-                            picked room reads the same way everywhere in the app. */}
-                        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-base shadow-sm dark:bg-slate-800">🛏️</span>
+                    <div
+                      key={p.room.id}
+                      className={`p-3 ${i > 0 ? 'border-t border-slate-100 dark:border-slate-700' : ''} ${i % 2 === 1 ? 'bg-slate-50/70 dark:bg-slate-900/30' : ''}`}
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <div className="flex min-w-0 flex-1 items-center gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-base shadow-sm dark:bg-slate-800">🛏️</span>
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-bold text-slate-900 dark:text-white">
-                              {p.room.roomNumber} · {p.room.roomCategory?.name ?? '—'}
-                            </p>
-                            {/* §user request — bulk/wedding reservations can need different dates per room; this
-                                chip defaults to the reservation's own dates and only diverges when edited. */}
-                            <button
-                              type="button"
-                              onClick={() => setEditingDatesFor(editingDatesFor === p.room.id ? null : p.room.id)}
-                              className="mt-0.5 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-                            >
-                              📅 {formatDateShort(p.checkIn || checkIn)} – {formatDateShort(p.checkOut || checkOut)} · {p.roomStayNights} night{p.roomStayNights === 1 ? '' : 's'}
-                              {hasCustomDates && <span className="text-brand-600 dark:text-brand-400">(custom)</span>}
-                            </button>
+                            <p className="truncate text-sm font-bold text-slate-900 dark:text-white">Room {p.room.roomNumber}</p>
+                            <p className="truncate text-xs text-slate-400 dark:text-slate-500">{p.room.roomCategory?.name ?? '—'}</p>
                           </div>
                         </div>
-                        <button type="button" onClick={() => removeRoom(p.room.id)} className="shrink-0 text-red-500 hover:text-red-700 dark:text-red-400">
-                          🗑
+
+                        <div className="flex flex-wrap shrink-0 items-end gap-2.5">
+                          <div className="w-32">
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Meal Plan</p>
+                            <select
+                              className="w-full truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600 outline-none dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                              value={p.ratePlanId}
+                              onChange={(e) => updateRatePlan(p.room.id, e.target.value)}
+                            >
+                              <option value="">— none —</option>
+                              {roomRatePlans.map((rp) => (
+                                <option key={rp.id} value={rp.id}>
+                                  {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* §user request — "Base Price" column, still the same ratePerNight field
+                              (per the active GST mode), just styled as a compact editable pill with
+                              a pencil hint instead of a full labelled Field block. */}
+                          <div className="w-28">
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Base Price</p>
+                            <div className="relative">
+                              <input
+                                className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-2.5 pr-6 text-sm font-semibold text-slate-900 outline-none focus:border-brand-400 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                                type="number"
+                                min={0}
+                                value={p.ratePerNight}
+                                onChange={(e) => updateRate(p.room.id, Number(e.target.value))}
+                              />
+                              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-300 dark:text-slate-600">✎</span>
+                            </div>
+                          </div>
+
+                          {/* §user request — "+ icon jisme hum room ADD ON ke extra charges le sake, jaise extra
+                              mattress and others": same InvoiceLineItem mechanism check-in's "+ Add Extra Charges"
+                              already uses, one line-item list per room. */}
+                          <button
+                            type="button"
+                            onClick={() => setAddingChargeFor(addingChargeFor === p.room.id ? null : p.room.id)}
+                            title="Add-on / extra charge"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-base font-bold text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-brand-500/10"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeRoom(p.room.id)}
+                            title="Remove room"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-red-500 hover:bg-red-50 dark:border-slate-600 dark:hover:bg-red-500/10"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-2 sm:pl-[52px]">
+                        {/* §user request — bulk/wedding reservations can need different dates per room; this
+                            chip defaults to the reservation's own dates and only diverges when edited. */}
+                        <button
+                          type="button"
+                          onClick={() => setEditingDatesFor(editingDatesFor === p.room.id ? null : p.room.id)}
+                          className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                        >
+                          📅 {formatDateShort(p.checkIn || checkIn)} – {formatDateShort(p.checkOut || checkOut)} · {p.roomStayNights} night{p.roomStayNights === 1 ? '' : 's'}
+                          {hasCustomDates && <span className="text-brand-600 dark:text-brand-400">(custom)</span>}
                         </button>
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                          ₹{p.ratePerNight || 0} × {p.roomStayNights} night{p.roomStayNights === 1 ? '' : 's'} ={' '}
+                          <span className="font-semibold text-slate-600 dark:text-slate-300">₹{p.totalAmount.toFixed(2)}</span>
+                        </span>
                       </div>
 
                       {editingDatesFor === p.room.id && (
@@ -750,48 +818,6 @@ export function CreateReservationModal({
                           )}
                         </div>
                       )}
-
-                      <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                        <Field label="Rate Plan">
-                          <select className={inputClass} value={p.ratePlanId} onChange={(e) => updateRatePlan(p.room.id, e.target.value)}>
-                            <option value="">— none —</option>
-                            {roomRatePlans.map((rp) => (
-                              <option key={rp.id} value={rp.id}>
-                                {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <div className="flex items-end gap-1.5">
-                          <div className="flex-1">
-                            <Field
-                              label={`Rate /night (₹, ${gstMode === 'inclusive' ? 'incl. GST' : gstMode === 'exempt' ? 'GST exempt' : 'excl. GST'})`}
-                            >
-                              <input
-                                className={inputClass}
-                                type="number"
-                                min={0}
-                                value={p.ratePerNight}
-                                onChange={(e) => updateRate(p.room.id, Number(e.target.value))}
-                              />
-                            </Field>
-                            <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                              ₹{p.ratePerNight || 0} × {p.roomStayNights} night{p.roomStayNights === 1 ? '' : 's'} = <span className="font-semibold text-slate-600 dark:text-slate-300">₹{p.totalAmount.toFixed(2)}</span>
-                            </p>
-                          </div>
-                          {/* §user request — "+ icon jisme hum room ADD ON ke extra charges le sake, jaise extra
-                              mattress and others": same InvoiceLineItem mechanism check-in's "+ Add Extra Charges"
-                              already uses, one line-item list per room. */}
-                          <button
-                            type="button"
-                            onClick={() => setAddingChargeFor(addingChargeFor === p.room.id ? null : p.room.id)}
-                            title="Add-on / extra charge"
-                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 text-lg font-bold text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-brand-500/10"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
 
                       {p.lineItems.length > 0 && (
                         <div className="mt-2.5 space-y-1.5">
@@ -850,15 +876,15 @@ export function CreateReservationModal({
                     </div>
                   );
                 })}
-                <button
-                  type="button"
-                  onClick={openPicker}
-                  disabled={loadingRooms}
-                  className="w-full rounded-xl border border-dashed border-slate-300 py-3 text-sm font-semibold text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 disabled:opacity-50 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-brand-500/10"
-                >
-                  {loadingRooms ? 'Loading rooms…' : '+ Add Room'}
-                </button>
               </div>
+              <button
+                type="button"
+                onClick={openPicker}
+                disabled={loadingRooms}
+                className="mt-2.5 w-full rounded-xl border border-dashed border-slate-300 py-3 text-sm font-semibold text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 disabled:opacity-50 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-brand-500/10"
+              >
+                {loadingRooms ? 'Loading rooms…' : '+ Add Room'}
+              </button>
             </Card>
 
             {picked.length > 0 && (
