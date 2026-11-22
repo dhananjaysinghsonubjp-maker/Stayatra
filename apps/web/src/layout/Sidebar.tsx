@@ -284,7 +284,7 @@ export function Sidebar({
         // colour becomes the 600 shade as-is"). bg-brand-600 here means the sidebar and every
         // button share one literal colour, so changing the brand colour in Settings moves both
         // together instead of the sidebar drifting to its own separate shade.
-        className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 -translate-x-full flex-col overflow-y-auto border-r border-black/10 bg-brand-600 transition-transform duration-200 lg:static lg:w-60 lg:translate-x-0 ${
+        className={`sidebar-scroll fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 -translate-x-full flex-col overflow-y-auto border-r border-black/10 bg-brand-600 transition-transform duration-200 lg:static lg:w-60 lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : ''
         }`}
       >
