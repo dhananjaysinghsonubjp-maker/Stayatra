@@ -9,6 +9,7 @@ import { formatDateShort } from '../../dateFormat';
 import { computeGstSlab } from '../../gst';
 import { computeInvoiceTotals } from '../../invoice';
 import { RoomPickerModal } from './RoomPickerModal';
+import { ReservationSuccessModal, type ReservationSuccessData } from './ReservationSuccessModal';
 import type { Booking, PaymentMethod, RatePlan, Room } from '../../types';
 
 type GstMode = 'exclusive' | 'inclusive' | 'exempt';
@@ -115,6 +116,7 @@ export function CreateReservationModal({
   const [masterRate, setMasterRate] = useState<number | ''>('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [stayPickerOpen, setStayPickerOpen] = useState(false);
+  const [successData, setSuccessData] = useState<ReservationSuccessData | null>(null);
   const [availableRooms, setAvailableRooms] = useState<(Room & { available: boolean })[]>([]);
   const [draftSelectedIds, setDraftSelectedIds] = useState<string[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
@@ -485,18 +487,51 @@ export function CreateReservationModal({
       if (isEditMode) {
         const reservationGroupId = editGroup![0].reservationGroupId ?? editGroup![0].id;
         await mutate('bookings.updateReservationGroup', { ...shared, reservationGroupId }, token ?? undefined);
-      } else {
-        const payments = paymentRows
-          .filter((r) => r.amount !== '' && r.amount > 0)
-          .map((r) => ({ amount: r.amount as number, method: r.method, referenceNumber: r.referenceNumber.trim() || undefined }));
-        await mutate(
-          'bookings.createMultiRoomReservation',
-          { ...shared, payments: payments.length > 0 ? payments : undefined },
-          token ?? undefined,
-        );
+        onDone();
+        onClose();
+        return;
       }
+
+      const payments = paymentRows
+        .filter((r) => r.amount !== '' && r.amount > 0)
+        .map((r) => ({ amount: r.amount as number, method: r.method, referenceNumber: r.referenceNumber.trim() || undefined }));
+      const created = await mutate<Booking[]>(
+        'bookings.createMultiRoomReservation',
+        { ...shared, payments: payments.length > 0 ? payments : undefined },
+        token ?? undefined,
+      );
       onDone();
-      onClose();
+      // §user request — "reservation create karne ke baad ek popup aana chahiye jisme Advance
+      // Receipt aur Booking Voucher ki PDF ban sake": shown instead of closing immediately —
+      // closing the whole panel is deferred to the popup's own Close button.
+      setSuccessData({
+        hotelId,
+        bookingCode: `BK-${(created[0]?.id ?? '').slice(-6).toUpperCase()}`,
+        createdAt: new Date().toISOString(),
+        guestName,
+        guestPhone: guestPhone || undefined,
+        companyName: isCorporate ? companyName.trim() || undefined : undefined,
+        companyGstin: isCorporate ? companyGstin.trim() || undefined : undefined,
+        checkIn,
+        checkOut,
+        nights,
+        rooms: roomsWithBase.map((p) => ({
+          roomNumber: p.room.roomNumber,
+          categoryName: p.room.roomCategory?.name ?? '—',
+          ratePlanName: ratePlans.find((rp) => rp.id === p.ratePlanId)?.name,
+          ratePerNight: p.ratePerNight,
+          nights: p.roomStayNights,
+          total: p.base,
+        })),
+        extraCharges: totals.extraCharges,
+        discount: totals.discount,
+        gstAmount: totals.gst.amount,
+        gstLabel: totals.gst.label,
+        grandTotal,
+        advanceAmount,
+        due,
+        payments,
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : `Failed to ${isEditMode ? 'save' : 'create'} reservation`);
     } finally {
@@ -1279,6 +1314,16 @@ export function CreateReservationModal({
             setStayPickerOpen(false);
           }}
           onClose={() => setStayPickerOpen(false)}
+        />
+      )}
+
+      {successData && (
+        <ReservationSuccessModal
+          data={successData}
+          onClose={() => {
+            setSuccessData(null);
+            handleClose();
+          }}
         />
       )}
     </div>
