@@ -502,14 +502,34 @@ export function CreateReservationModal({
                     ))}
                   </select>
                 </Field>
-                <Field label="Check-in">
-                  <input className={inputClass} type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
-                </Field>
-                <Field label="Check-out">
-                  <input className={inputClass} type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} min={checkIn} />
-                </Field>
+                {/* §user request — "jaise humne normal check-in mein properly simple boxes banaye
+                    hai, dates bhi aise hi bano": same Check In / Check Out box pair Check-in's own
+                    Stay Details card uses, here made editable in place since (unlike check-in,
+                    which defaults to today) a reservation's dates are always picked by hand. */}
+                <div className="flex items-center gap-2 sm:col-span-2">
+                  <div className="min-w-0 flex-1 rounded-lg bg-brand-50 px-3 py-2 dark:bg-brand-500/10">
+                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check In</label>
+                    <input
+                      type="date"
+                      className="block w-full bg-transparent text-sm font-bold text-slate-900 outline-none dark:text-white"
+                      value={checkIn}
+                      onChange={(e) => setCheckIn(e.target.value)}
+                    />
+                  </div>
+                  <span className="shrink-0 text-slate-400">→</span>
+                  <div className="min-w-0 flex-1 rounded-lg bg-amber-50 px-3 py-2 dark:bg-amber-500/10">
+                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Check Out</label>
+                    <input
+                      type="date"
+                      className="block w-full bg-transparent text-sm font-bold text-slate-900 outline-none dark:text-white"
+                      value={checkOut}
+                      min={checkIn}
+                      onChange={(e) => setCheckOut(e.target.value)}
+                    />
+                  </div>
+                </div>
               </div>
-              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{nights} night{nights === 1 ? '' : 's'}</p>
+              <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">{nights} night{nights === 1 ? '' : 's'}</p>
             </div>
 
             <div className="order-3">
@@ -637,21 +657,27 @@ export function CreateReservationModal({
                   return (
                     <div key={p.room.id} className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
                       <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-bold text-slate-900 dark:text-white">Room: {p.room.roomNumber}</p>
-                          <p className="text-xs text-slate-400 dark:text-slate-500">{p.room.roomCategory?.name ?? '—'}</p>
-                          {/* §user request — bulk/wedding reservations can need different dates per room; this
-                              chip defaults to the reservation's own dates and only diverges when edited. */}
-                          <button
-                            type="button"
-                            onClick={() => setEditingDatesFor(editingDatesFor === p.room.id ? null : p.room.id)}
-                            className="mt-1 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-                          >
-                            📅 {formatDateShort(p.checkIn || checkIn)} – {formatDateShort(p.checkOut || checkOut)} · {p.roomStayNights} night{p.roomStayNights === 1 ? '' : 's'}
-                            {hasCustomDates && <span className="text-brand-600 dark:text-brand-400">(custom)</span>}
-                          </button>
+                        {/* §user request — same icon-chip Room box Check-in's own form uses, so a
+                            picked room reads the same way everywhere in the app. */}
+                        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-base shadow-sm dark:bg-slate-800">🛏️</span>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-slate-900 dark:text-white">
+                              {p.room.roomNumber} · {p.room.roomCategory?.name ?? '—'}
+                            </p>
+                            {/* §user request — bulk/wedding reservations can need different dates per room; this
+                                chip defaults to the reservation's own dates and only diverges when edited. */}
+                            <button
+                              type="button"
+                              onClick={() => setEditingDatesFor(editingDatesFor === p.room.id ? null : p.room.id)}
+                              className="mt-0.5 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                            >
+                              📅 {formatDateShort(p.checkIn || checkIn)} – {formatDateShort(p.checkOut || checkOut)} · {p.roomStayNights} night{p.roomStayNights === 1 ? '' : 's'}
+                              {hasCustomDates && <span className="text-brand-600 dark:text-brand-400">(custom)</span>}
+                            </button>
+                          </div>
                         </div>
-                        <button type="button" onClick={() => removeRoom(p.room.id)} className="text-red-500 hover:text-red-700 dark:text-red-400">
+                        <button type="button" onClick={() => removeRoom(p.room.id)} className="shrink-0 text-red-500 hover:text-red-700 dark:text-red-400">
                           🗑
                         </button>
                       </div>
