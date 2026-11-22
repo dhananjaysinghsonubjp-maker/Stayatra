@@ -500,7 +500,11 @@ export function CreateReservationModal({
         { ...shared, payments: payments.length > 0 ? payments : undefined },
         token ?? undefined,
       );
-      onDone();
+      // §bugfix — every caller's own `onDone` prop both refreshes ITS data AND immediately
+      // unmounts this whole modal (e.g. Bookings.tsx's `setShowCreate(false)`), so calling it
+      // here (like the old single `onDone(); onClose();` tail used to) destroyed the success
+      // popup's own state before React ever got to render it. `onDone` is now deferred to the
+      // popup's own Close button instead — see the <ReservationSuccessModal> render below.
       // §user request — "reservation create karne ke baad ek popup aana chahiye jisme Advance
       // Receipt aur Booking Voucher ki PDF ban sake": shown instead of closing immediately —
       // closing the whole panel is deferred to the popup's own Close button.
@@ -1322,7 +1326,7 @@ export function CreateReservationModal({
           data={successData}
           onClose={() => {
             setSuccessData(null);
-            handleClose();
+            onDone();
           }}
         />
       )}
