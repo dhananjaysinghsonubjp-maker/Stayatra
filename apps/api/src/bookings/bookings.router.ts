@@ -48,9 +48,11 @@ const paymentMethodSchema = z.enum([
   'cheque',
   'cash_deposit',
 ]);
+const paymentTypeSchema = z.enum(['advance', 'partial', 'full']);
 const paymentDetailsSchema = z.object({
   amount: z.number().positive(),
   method: paymentMethodSchema,
+  type: paymentTypeSchema.optional(),
   referenceNumber: z.string().optional(),
   receiptPhotoPath: z.string().optional(),
   collectedAt: z.coerce.date().optional(),
@@ -378,11 +380,11 @@ export function createBookingsRouter(bookings: BookingsService) {
 
     // §user request — Reservations list's "More Actions" menu.
     endReservationGroup: reservationsManager
-      .input(z.object({ bookingId: z.string(), status: z.enum(['cancelled', 'no_show', 'void']) }))
+      .input(z.object({ bookingId: z.string(), status: z.enum(['cancelled', 'no_show', 'void']), reason: z.string().optional(), cancellationCharge: z.number().nonnegative().optional() }))
       .mutation(({ ctx, input }) => bookings.endReservationGroup({ ...input, actorId: ctx.user.userId })),
 
     setVip: frontDeskUp
-      .input(z.object({ bookingId: z.string(), isVip: z.boolean() }))
+      .input(z.object({ bookingId: z.string(), isVip: z.boolean(), notes: z.string().optional() }))
       .mutation(({ ctx, input }) => bookings.setVip({ ...input, actorId: ctx.user.userId })),
 
     updateInternalNotes: frontDeskUp

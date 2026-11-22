@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { BOOKING_SOURCE_OPTIONS } from '../../bookingSource';
-import { Button, Card, Field, inputClass } from '../../components/ui';
+import { Button, Card, Combobox, Field, inputClass } from '../../components/ui';
 import { addDaysKey } from '../../components/DateRangePicker';
 import { formatDateShort } from '../../dateFormat';
 import { computeGstSlab } from '../../gst';
@@ -706,7 +706,12 @@ export function CreateReservationModal({
                   cards) so room no./plan/price read like a real table while staying editable. */}
               <div className="mb-3 flex items-center gap-2.5">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-sm dark:bg-brand-500/10">🛏️</span>
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Rooms Selection</p>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Rooms Selection</p>
+                  {isEditMode && (
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500">Rate/meal plan are locked — use Discount, an add-on charge, or More Actions → Change meal plan.</p>
+                  )}
+                </div>
               </div>
               {/* §user request — "ek simple per room rent daalu aur side mein checkbox 'apply to
                   all', to automatically niche sab rooms mein rent likha aa jaaye": one master rate,
@@ -716,7 +721,13 @@ export function CreateReservationModal({
               {/* §user request, with a reference app's own master-rate bar as the target — label +
                   date badge on top, then the rate input and "Apply to all" checkbox always in one
                   row (not stacking on narrow widths) with a highlighted brand-colored input. */}
-              {picked.length > 1 && (
+              {/* §user request — "edit karni ho toh price mein jo tha vo change nahi hoga, sirf
+                  discount ya add-on charges": the agreed rate is locked once a reservation
+                  exists — a genuinely different rate means cancelling and creating a new one, not
+                  editing this one. Rate/meal-plan inputs below are disabled in edit mode;
+                  Discount and the per-room "+" add-on charge stay the only things that can still
+                  move the total. */}
+              {picked.length > 1 && !isEditMode && (
                 <div className="mb-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/40">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
                     <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">Rate /night for all rooms (₹)</label>
@@ -767,7 +778,9 @@ export function CreateReservationModal({
                           <div className="w-32">
                             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Meal Plan</p>
                             <select
-                              className="w-full truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600 outline-none dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                              disabled={isEditMode}
+                              title={isEditMode ? 'Use More Actions → Change meal plan instead' : undefined}
+                              className="w-full truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600 outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
                               value={p.ratePlanId}
                               onChange={(e) => updateRatePlan(p.room.id, e.target.value)}
                             >
@@ -787,13 +800,17 @@ export function CreateReservationModal({
                             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Base Price</p>
                             <div className="relative">
                               <input
-                                className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-2.5 pr-6 text-sm font-semibold text-slate-900 outline-none focus:border-brand-400 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                                disabled={isEditMode}
+                                title={isEditMode ? 'The agreed rate is locked once a reservation exists — use Discount or an add-on charge instead' : undefined}
+                                className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-2.5 pr-6 text-sm font-semibold text-slate-900 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:disabled:bg-slate-900/60"
                                 type="number"
                                 min={0}
                                 value={p.ratePerNight}
                                 onChange={(e) => updateRate(p.room.id, Number(e.target.value))}
                               />
-                              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-300 dark:text-slate-600">✎</span>
+                              {!isEditMode && (
+                                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-300 dark:text-slate-600">✎</span>
+                              )}
                             </div>
                           </div>
 
@@ -1498,88 +1515,5 @@ function StayDateRangeModal({
       </div>
     </div>,
     document.body,
-  );
-}
-
-/** §user request, with a reference app's own Booking Source / Payment Mode dropdowns as the
- * target — a click-to-open list (selected row highlighted, radio dot on the right) instead of a
- * bare native `<select>`. `description`/`icon` are optional per option so the same component
- * covers both the plain label-only list (Booking Source) and the icon+subtitle one (Payment
- * Mode). */
-function Combobox<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T;
-  options: { value: T; label: string; description?: string; icon?: string }[];
-  onChange: (value: T) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  // §user request — "ye payment vala dropdown upward ki taraf khulega, ye niche chhup gaya hai":
-  // this sits near the bottom of a scrollable panel, so opening downward can push the list past
-  // the visible area. Flip to open upward whenever there isn't enough room below the trigger.
-  const [openUp, setOpenUp] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const selected = options.find((o) => o.value === value);
-
-  function toggle() {
-    if (!open && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      const estimatedListHeight = Math.min(288, 56 * options.length + 12);
-      setOpenUp(window.innerHeight - rect.bottom < estimatedListHeight && rect.top > estimatedListHeight);
-    }
-    setOpen((o) => !o);
-  }
-
-  return (
-    <div className="relative">
-      <button ref={triggerRef} type="button" onClick={toggle} className={`${inputClass} flex w-full items-center justify-between gap-2 text-left`}>
-        <span className="truncate">{selected ? selected.label : 'Select…'}</span>
-        <span className="shrink-0 text-xs text-slate-400">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            className={`absolute left-0 right-0 z-50 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800 ${
-              openUp ? 'bottom-full mb-1' : 'top-full mt-1'
-            }`}
-          >
-            {options.map((o) => {
-              const isSelected = o.value === value;
-              return (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(false);
-                  }}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
-                    isSelected ? 'bg-brand-50 dark:bg-brand-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                  }`}
-                >
-                  {o.icon && (
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base dark:bg-slate-700">{o.icon}</span>
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-slate-900 dark:text-white">{o.label}</span>
-                    {o.description && <span className="block text-xs text-slate-400 dark:text-slate-500">{o.description}</span>}
-                  </span>
-                  <span
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
-                      isSelected ? 'border-brand-600 bg-brand-600' : 'border-slate-300 dark:border-slate-600'
-                    }`}
-                  >
-                    {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </div>
   );
 }

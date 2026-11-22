@@ -2,19 +2,34 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mutate, uploadFile, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
-import { Button, Field, inputClass } from '../components/ui';
+import { Button, Combobox, Field, inputClass } from '../components/ui';
 import { computeInvoiceTotals } from '../invoice';
 import { formatDateShort } from '../dateFormat';
-import { paymentMethodLabel } from '../paymentMethods';
-import { AddPaymentModal } from './AddPaymentModal';
+import { PAYMENT_METHODS, paymentMethodLabel } from '../paymentMethods';
 import { AdvanceReceiptPrintView } from './checkin/AdvanceReceiptPrintView';
 import { BookingVoucherPrintView } from './checkin/BookingVoucherPrintView';
 import type { ReservationSuccessData } from './checkin/ReservationSuccessModal';
-import type { Booking, IdType, PaymentMethod, RatePlan, Room, RoomCategory } from '../types';
+import type { Booking, IdType, PaymentMethod, PaymentType, RatePlan, Room, RoomCategory } from '../types';
 
-type View = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'notes' | 'payment' | 'times' | 'identity' | 'receipts' | 'mealplan';
+type View = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'payment' | 'identity' | 'receipts' | 'mealplan';
 
 const ID_TYPE_OPTIONS: IdType[] = ['aadhaar', 'passport', 'driving_license', 'voter_id', 'other'];
+const PAYMENT_TYPE_OPTIONS: { value: PaymentType; label: string; description: string }[] = [
+  { value: 'advance', label: 'Advance Payment', description: 'An upfront payment before the stay' },
+  { value: 'partial', label: 'Part Payment', description: 'A partial payment against the outstanding balance' },
+  { value: 'full', label: 'Full Payment', description: 'Settles the outstanding balance in full' },
+];
+
+function bookingCode(id: string) {
+  return `BK-${id.slice(-6).toUpperCase()}`;
+}
+
+/** "Nov 24, 2026" — the Cancel confirmation's own date style, distinct from this app's usual
+ * DD/MM/YY (formatDateShort) since that reads badly next to prose like "Are you sure…". */
+function formatDateLong(iso: string) {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
 
 /** Pre-builds a ReservationSuccessData-shaped object from a STORED reservation (any age), the
  * way CreateReservationModal's own success popup builds one fresh right after creating one —
@@ -59,7 +74,7 @@ function buildReceiptData(hotelId: string, group: Booking[], roomsById: Map<stri
 
   return {
     hotelId,
-    bookingCode: `BK-${lead.id.slice(-6).toUpperCase()}`,
+    bookingCode: bookingCode(lead.id),
     createdAt: lead.createdAt,
     guestName: lead.guestName,
     guestPhone: lead.guestPhone ?? undefined,
@@ -82,12 +97,11 @@ function buildReceiptData(hotelId: string, group: Booking[], roomsById: Map<stri
 
 /**
  * §user request, with a reference app's own "More Actions" slide-over as the target — every
- * action it lists, either wired to a real backend field/endpoint (Cancel/No Show/Void/Special
- * Request/VIP/Internal Notes/Record Payment/Expected Times/Identity Verification/Meal Plan — all
- * new, added specifically for this menu) or reusing one this app already had (Record Payment →
- * the existing AddPaymentModal, Receipt Management → the Advance Receipt/Booking Voucher
- * CreateReservationModal's own success popup already prints, rebuilt here from the stored booking
- * instead of fresh creation-time state).
+ * action it lists wired to a real backend field/endpoint, or reusing one this app already had
+ * (Receipt Management → the Advance Receipt/Booking Voucher CreateReservationModal's own success
+ * popup already prints, rebuilt here from the stored booking instead of fresh creation-time
+ * state). Internal Notes and Update Expected Times were dropped as their own menu entries per
+ * follow-up feedback — internalNotes still backs the VIP reason below, nothing deleted there.
  */
 export function MoreActionsPanel({
   hotelId,
@@ -108,24 +122,58 @@ export function MoreActionsPanel({
 }) {
   const { token } = useAuth();
   const lead = group[0];
+
+  // Per-room + group outstanding, used by the Cancel confirmation's total and the Record
+  // Payment view's Outstanding box/scope switch.
+  const dues = new Map<string, number>();
+  let groupGrandTotal = 0;
+  let groupDue = 0;
+  for (const b of group) {
+    const totals = computeInvoiceTotals({
+      totalAmount: Number(b.totalAmount),
+      lineItems: b.lineItems ?? [],
+      discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+      gstExempt: b.gstExempt,
+    });
+    const due = Math.max(0, totals.grandTotal - Number(b.paidAmount ?? 0));
+    dues.set(b.id, due);
+    groupGrandTotal += totals.grandTotal;
+    groupDue += due;
+  }
+  const roomSummary = (() => {
+    const counts = new Map<string, number>();
+    for (const b of group) {
+      const name = roomsById.get(b.assignedRoomId ?? '')?.roomCategory?.name ?? categories.find((c) => c.id === b.roomCategoryId)?.name ?? '—';
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts.entries()].map(([name, count]) => `${count} ${name}`).join(' · ');
+  })();
+
   const [view, setView] = useState<View>('menu');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [specialRequest, setSpecialRequest] = useState(lead.specialRequest ?? '');
-  const [notes, setNotes] = useState(lead.internalNotes ?? '');
-  const [arrivalTime, setArrivalTime] = useState(lead.expectedArrivalTime ?? '');
-  const [departureTime, setDepartureTime] = useState(lead.expectedDepartureTime ?? '');
+  const [endReason, setEndReason] = useState('');
+  const [cancellationCharge, setCancellationCharge] = useState(0);
+  const [vipReason, setVipReason] = useState('');
   const [idType, setIdType] = useState<IdType | ''>(lead.idType ?? '');
   const [idNumber, setIdNumber] = useState(lead.idNumber ?? '');
   const [frontPath, setFrontPath] = useState(lead.idPhotoFrontPath ?? '');
   const [backPath, setBackPath] = useState(lead.idPhotoBackPath ?? '');
   const [uploadingSide, setUploadingSide] = useState<'front' | 'back' | null>(null);
   const [mealPlans, setMealPlans] = useState<Record<string, string>>(() => Object.fromEntries(group.map((b) => [b.id, b.ratePlanId ?? ''])));
-  const [payingBooking, setPayingBooking] = useState<Booking | null>(null);
   const [printing, setPrinting] = useState<'receipt' | 'voucher' | null>(null);
 
+  const [allocate, setAllocate] = useState<'group' | 'room'>('group');
+  const [targetBookingId, setTargetBookingId] = useState(lead.id);
+  const [amount, setAmount] = useState(group.length > 1 ? groupDue : (dues.get(lead.id) ?? 0));
+  const [method, setMethod] = useState<PaymentMethod>('cash');
+  const [paymentType, setPaymentType] = useState<PaymentType>('advance');
+  const [referenceNumber, setReferenceNumber] = useState('');
+
   const canEnd = group.some((b) => b.status === 'confirmed');
+  const outstandingForScope = allocate === 'group' && group.length > 1 ? groupDue : (dues.get(targetBookingId) ?? 0);
 
   async function run(action: () => Promise<unknown>, after: () => void = () => setView('menu')) {
     setBusy(true);
@@ -142,7 +190,10 @@ export function MoreActionsPanel({
   }
 
   async function endGroup(status: 'cancelled' | 'no_show' | 'void') {
-    await run(() => mutate('bookings.endReservationGroup', { bookingId: lead.id, status }, token ?? undefined), onClose);
+    await run(
+      () => mutate('bookings.endReservationGroup', { bookingId: lead.id, status, reason: endReason.trim() || undefined, cancellationCharge: status === 'cancelled' ? cancellationCharge : undefined }, token ?? undefined),
+      onClose,
+    );
   }
 
   async function uploadIdSide(side: 'front' | 'back', file: File) {
@@ -174,25 +225,37 @@ export function MoreActionsPanel({
     }
   }
 
+  async function recordPayment() {
+    await run(() =>
+      allocate === 'group' && group.length > 1 && lead.reservationGroupId
+        ? mutate(
+            'bookings.addGroupPayment',
+            { reservationGroupId: lead.reservationGroupId, amount, method, type: paymentType, referenceNumber: referenceNumber || undefined },
+            token ?? undefined,
+          )
+        : mutate(
+            'bookings.addPayment',
+            { bookingId: targetBookingId, amount, method, type: paymentType, referenceNumber: referenceNumber || undefined },
+            token ?? undefined,
+          ),
+    );
+  }
+
   const MENU_ITEMS: { view: View; icon: string; label: string; disabled?: boolean }[] = [
     { view: 'cancel', icon: '✕', label: 'Cancel entire reservation', disabled: !canEnd },
-    { view: 'noshow', icon: '✉️', label: 'Mark as No Show', disabled: !canEnd },
-    { view: 'void', icon: '✉️', label: 'Void Reservation', disabled: !canEnd },
+    { view: 'noshow', icon: '🧳', label: 'Mark as No Show', disabled: !canEnd },
+    { view: 'void', icon: '🚫', label: 'Void Reservation', disabled: !canEnd },
     { view: 'special', icon: '📋', label: 'Add special request' },
-    { view: 'vip', icon: '👑', label: 'Mark as VIP' },
-    { view: 'notes', icon: '📝', label: 'Add internal notes' },
+    { view: 'vip', icon: '👑', label: lead.isVip ? 'Remove VIP status' : 'Mark as VIP' },
     { view: 'payment', icon: '💰', label: 'Record Payment' },
-    { view: 'times', icon: '🕐', label: 'Update Expected Times' },
     { view: 'identity', icon: '🪪', label: 'Identity Verification' },
     { view: 'receipts', icon: '🧾', label: 'Receipt Management' },
     { view: 'mealplan', icon: '🍽️', label: 'Change meal plan' },
   ];
 
   return createPortal(
-    // §bugfix — AddPaymentModal (z-[60]) and the print views (z-[80]) both render as siblings in
-    // this same portal, so this panel itself must sit BELOW z-60 or it would stack on top of and
-    // hide the payment form behind its own backdrop — z-50 matches ReservationDetailModal's own
-    // "major modal" layer, same reasoning as that modal's own z-50/AddPaymentModal z-60 pairing.
+    // §bugfix — the print views (z-[80]) render as siblings in this same portal, so this panel
+    // must sit below that — z-50 matches ReservationDetailModal's own "major modal" layer.
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40">
       <div className="flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl dark:bg-slate-800">
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
@@ -220,7 +283,7 @@ export function MoreActionsPanel({
                   key={item.view}
                   type="button"
                   disabled={item.disabled}
-                  onClick={() => (item.view === 'payment' ? setPayingBooking(lead) : setView(item.view))}
+                  onClick={() => setView(item.view)}
                   className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-700/50"
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-base dark:bg-brand-500/10">{item.icon}</span>
@@ -231,22 +294,88 @@ export function MoreActionsPanel({
             </div>
           )}
 
-          {(view === 'cancel' || view === 'noshow' || view === 'void') && (
-            <div className="space-y-4 p-5">
-              <p className="text-sm text-slate-600 dark:text-slate-300">
-                {view === 'cancel' && 'This cancels every confirmed room in this reservation. This cannot be undone.'}
-                {view === 'noshow' && 'Marks every confirmed room in this reservation as a no-show. This cannot be undone.'}
-                {view === 'void' && 'Voids every confirmed room in this reservation, as if it were never made. This cannot be undone.'}
+          {/* §user request, with a reference app's own Confirm Cancellation screen as the target —
+              stay dates, booking id, a required reason, and a Total/Charge/Refund breakdown
+              instead of a bare confirm button. cancellationCharge/Refund are informational only
+              (no real refund transaction fires — same as the rest of this app's cash movements
+              staying manual). */}
+          {view === 'cancel' && (
+            <div className="p-5">
+              <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+                Are you sure you want to cancel this reservation? The status will be updated to 'Cancelled', and all assigned rooms will be released.
               </p>
-              <Button
-                type="button"
-                variant="danger"
-                disabled={busy}
-                onClick={() => endGroup(view === 'cancel' ? 'cancelled' : view === 'noshow' ? 'no_show' : 'void')}
-                className="w-full"
-              >
-                {busy ? 'Working…' : view === 'cancel' ? 'Cancel entire reservation' : view === 'noshow' ? 'Mark as No Show' : 'Void Reservation'}
-              </Button>
+              <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-4 dark:bg-slate-900/40">
+                <div>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">Check-in</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDateLong(lead.checkIn)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">Check-out</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDateLong(lead.checkOut)}</p>
+                </div>
+              </div>
+              <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 p-3 text-sm dark:border-slate-700">
+                <span className="font-semibold text-slate-900 dark:text-white">Booking ID</span>
+                <span className="font-mono font-bold text-brand-600 dark:text-brand-400">Confirmation #: {bookingCode(lead.id)}</span>
+              </div>
+              <Field label="Reason For Cancellation *">
+                <textarea className={`${inputClass} min-h-20`} value={endReason} onChange={(e) => setEndReason(e.target.value)} placeholder="Enter reason" />
+              </Field>
+              <div className="my-4 space-y-2 rounded-xl bg-slate-50 p-4 dark:bg-slate-900/40">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600 dark:text-slate-300">Total Booking Amount</span>
+                  <span className="font-bold text-slate-900 dark:text-white">₹{groupGrandTotal.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600 dark:text-slate-300">Cancellation Charge</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={groupGrandTotal}
+                    className="w-32 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-semibold text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                    value={cancellationCharge}
+                    onChange={(e) => setCancellationCharge(Math.max(0, Math.min(groupGrandTotal, Number(e.target.value))))}
+                  />
+                </div>
+                <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-sm dark:border-slate-700">
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">Refund Amount</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">₹{Math.max(0, groupGrandTotal - cancellationCharge).toFixed(2)}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Button type="button" variant="secondary" className="w-full" onClick={() => setView('menu')}>
+                  No, Keep Reservation
+                </Button>
+                <Button type="button" variant="danger" className="w-full" disabled={busy || !endReason.trim()} onClick={() => endGroup('cancelled')}>
+                  {busy ? 'Cancelling…' : 'Yes, Cancel Reservation'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {(view === 'noshow' || view === 'void') && (
+            <div className="p-5 text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-3xl dark:bg-red-500/10">{view === 'noshow' ? '🧳' : '🚫'}</div>
+              <h4 className="mb-2 text-base font-bold text-slate-900 dark:text-white">{view === 'noshow' ? 'Mark as No Show' : 'Void Reservation'}</h4>
+              <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+                {view === 'noshow'
+                  ? "The guest did not arrive for the scheduled check-in. Marking this reservation as No Show will update the reservation status and release the room based on your property's policy."
+                  : 'This voids the reservation entirely, as if it were never made — use this only for a booking created by mistake, not a guest who simply cancelled.'}
+              </p>
+              <textarea
+                className={`${inputClass} min-h-28 text-left`}
+                value={endReason}
+                onChange={(e) => setEndReason(e.target.value)}
+                placeholder={view === 'noshow' ? 'Reason (optional)' : 'Reason for voiding (optional)'}
+              />
+              <div className="mt-4 flex gap-2">
+                <Button type="button" variant="secondary" className="flex-1" onClick={() => setView('menu')}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="danger" className="flex-1" disabled={busy} onClick={() => endGroup(view === 'noshow' ? 'no_show' : 'void')}>
+                  {busy ? 'Working…' : view === 'noshow' ? 'Mark as No Show' : 'Void Reservation'}
+                </Button>
+              </div>
             </div>
           )}
 
@@ -261,56 +390,145 @@ export function MoreActionsPanel({
             </div>
           )}
 
+          {/* §user request, with a reference app's own "Mark Room as VIP" confirmation as the
+              target — a reason/notes field (stored in internalNotes, since that's no longer its
+              own menu entry) instead of a bare toggle; the card itself picks up a golden shine and
+              the crown icon once isVip is true (see Bookings.tsx's ReservationCard). */}
           {view === 'vip' && (
-            <div className="space-y-4 p-5">
-              <label className="flex items-center justify-between rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-                <span className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">👑 VIP guest</span>
-                <input
-                  type="checkbox"
-                  className="h-5 w-5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                  defaultChecked={lead.isVip}
-                  onChange={(e) => run(() => mutate('bookings.setVip', { bookingId: lead.id, isVip: e.target.checked }, token ?? undefined), () => {})}
-                />
-              </label>
-            </div>
-          )}
-
-          {view === 'notes' && (
-            <div className="space-y-3 p-5">
-              <Field label="Internal notes (staff only, not shown to the guest)">
-                <textarea className={`${inputClass} min-h-24`} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Repeat guest, prefers higher floor" />
-              </Field>
-              <Button type="button" disabled={busy} onClick={() => run(() => mutate('bookings.updateInternalNotes', { bookingId: lead.id, internalNotes: notes.trim() || null }, token ?? undefined))} className="w-full">
-                {busy ? 'Saving…' : 'Save'}
-              </Button>
-            </div>
-          )}
-
-          {view === 'times' && (
-            <div className="space-y-3 p-5">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Expected arrival">
-                  <input className={inputClass} type="time" value={arrivalTime} onChange={(e) => setArrivalTime(e.target.value)} />
+            <div className="p-5">
+              <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+                {lead.isVip
+                  ? `Remove VIP status from ${roomSummary}? It will no longer be highlighted across the Stay View and related modules.`
+                  : `Are you sure you want to mark ${roomSummary} as a VIP room? The room will be highlighted across the Stay View and related modules.`}
+              </p>
+              {!lead.isVip && (
+                <Field label="Reason / Notes">
+                  <textarea
+                    className={`${inputClass} min-h-24`}
+                    value={vipReason}
+                    onChange={(e) => setVipReason(e.target.value)}
+                    placeholder="e.g., Returning guest, Corporate client, Honeymoon guest."
+                  />
                 </Field>
-                <Field label="Expected departure">
-                  <input className={inputClass} type="time" value={departureTime} onChange={(e) => setDepartureTime(e.target.value)} />
-                </Field>
+              )}
+              <div className="mt-4 flex gap-2">
+                <Button type="button" variant="secondary" className="flex-1" onClick={() => setView('menu')}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1"
+                  disabled={busy}
+                  onClick={() =>
+                    run(() =>
+                      mutate('bookings.setVip', { bookingId: lead.id, isVip: !lead.isVip, notes: lead.isVip ? undefined : vipReason.trim() || undefined }, token ?? undefined),
+                    )
+                  }
+                >
+                  {busy ? 'Saving…' : lead.isVip ? 'Remove VIP' : 'Mark as VIP'}
+                </Button>
               </div>
-              <Button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  run(() =>
-                    mutate(
-                      'bookings.updateExpectedTimes',
-                      { bookingId: lead.id, expectedArrivalTime: arrivalTime || null, expectedDepartureTime: departureTime || null },
-                      token ?? undefined,
-                    ),
-                  )
-                }
-                className="w-full"
-              >
-                {busy ? 'Saving…' : 'Save'}
+            </div>
+          )}
+
+          {/* §user request, with a reference app's own Record Payment screen as the target —
+              Outstanding box, an Entire Reservation/Specific Room allocation choice (only shown
+              for an actual multi-room group), and Payment Method/Payment Type as the same
+              click-to-open Combobox list this app already uses elsewhere, instead of
+              AddPaymentModal's plain pill buttons. */}
+          {view === 'payment' && (
+            <div className="space-y-4 p-5">
+              <div>
+                <h4 className="text-base font-bold text-slate-900 dark:text-white">Record payment</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Post an interim payment any time during the stay. Amount is editable for part-payments.</p>
+              </div>
+
+              <div className="rounded-xl bg-amber-50 p-3 dark:bg-amber-500/10">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-900 dark:text-white">Outstanding</span>
+                  <span className="text-lg font-bold text-slate-900 dark:text-white">₹{outstandingForScope.toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+
+              {group.length > 1 && (
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">Allocate Payment</p>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-200">
+                      <input
+                        type="radio"
+                        checked={allocate === 'group'}
+                        onChange={() => {
+                          setAllocate('group');
+                          setAmount(groupDue);
+                        }}
+                        className="h-4 w-4 text-brand-600 focus:ring-brand-500"
+                      />
+                      Entire Reservation
+                    </label>
+                    <label className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-200">
+                      <input
+                        type="radio"
+                        checked={allocate === 'room'}
+                        onChange={() => {
+                          setAllocate('room');
+                          setAmount(dues.get(targetBookingId) ?? 0);
+                        }}
+                        className="h-4 w-4 text-brand-600 focus:ring-brand-500"
+                      />
+                      Specific Room
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {allocate === 'room' && group.length > 1 && (
+                <Field label="Room">
+                  <select
+                    className={inputClass}
+                    value={targetBookingId}
+                    onChange={(e) => {
+                      setTargetBookingId(e.target.value);
+                      setAmount(dues.get(e.target.value) ?? 0);
+                    }}
+                  >
+                    {group.map((b) => {
+                      const room = roomsById.get(b.assignedRoomId ?? '');
+                      return (
+                        <option key={b.id} value={b.id}>
+                          Room {room?.roomNumber ?? '—'} · Due ₹{(dues.get(b.id) ?? 0).toFixed(2)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </Field>
+              )}
+
+              <Field label="Amount to pay">
+                <input className={inputClass} type="number" min={1} max={outstandingForScope} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
+              </Field>
+
+              <Field label="Payment Method">
+                <Combobox value={method} options={PAYMENT_METHODS} onChange={setMethod} />
+              </Field>
+
+              <Field label="Payment Type">
+                <Combobox
+                  value={paymentType}
+                  options={PAYMENT_TYPE_OPTIONS}
+                  onChange={(t) => {
+                    setPaymentType(t);
+                    if (t === 'full') setAmount(outstandingForScope);
+                  }}
+                />
+              </Field>
+
+              <Field label="Reference number (optional)">
+                <input className={inputClass} value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
+              </Field>
+
+              <Button type="button" className="w-full" disabled={busy || amount <= 0} onClick={recordPayment}>
+                {busy ? 'Recording…' : 'Record Payment'}
               </Button>
             </div>
           )}
@@ -413,7 +631,6 @@ export function MoreActionsPanel({
         </div>
       </div>
 
-      {payingBooking && <AddPaymentModal booking={payingBooking} onClose={() => setPayingBooking(null)} onDone={onChanged} />}
       {printing === 'receipt' && <AdvanceReceiptPrintView data={buildReceiptData(hotelId, group, roomsById, categories, ratePlans)} onClose={() => setPrinting(null)} />}
       {printing === 'voucher' && <BookingVoucherPrintView data={buildReceiptData(hotelId, group, roomsById, categories, ratePlans)} onClose={() => setPrinting(null)} />}
     </div>,

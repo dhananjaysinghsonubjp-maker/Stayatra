@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { BookingSource, BookingStatus, Gender, IdType, PaymentMethod } from '@prisma/client';
+import { BookingSource, BookingStatus, Gender, IdType, PaymentMethod, PaymentType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { computeCleaningDeadline, isDelayed } from '../common/delay.js';
@@ -990,6 +990,7 @@ export class BookingsService {
     bookingId: string;
     amount: number;
     method: PaymentMethod;
+    type?: PaymentType;
     referenceNumber?: string;
     receiptPhotoPath?: string;
     collectedAt?: Date;
@@ -1016,6 +1017,7 @@ export class BookingsService {
           bookingId: input.bookingId,
           amount: input.amount,
           method: input.method,
+          type: input.type,
           referenceNumber: input.referenceNumber,
           receiptPhotoPath: input.receiptPhotoPath,
           collectedAt: input.collectedAt,
@@ -1052,6 +1054,7 @@ export class BookingsService {
     reservationGroupId: string;
     amount: number;
     method: PaymentMethod;
+    type?: PaymentType;
     referenceNumber?: string;
     collectedBy: string;
   }) {
@@ -1093,7 +1096,7 @@ export class BookingsService {
         remaining -= share;
 
         const payment = await tx.payment.create({
-          data: { bookingId: booking.id, amount: share, method: input.method, referenceNumber: input.referenceNumber, collectedBy: input.collectedBy },
+          data: { bookingId: booking.id, amount: share, method: input.method, type: input.type, referenceNumber: input.referenceNumber, collectedBy: input.collectedBy },
         });
         await tx.booking.update({
           where: { id: booking.id },
@@ -1553,13 +1556,22 @@ export class BookingsService {
    * confirmed-only rule as cancelBooking (an already-checked-in room keeps its own status,
    * untouched, exactly like cancelBooking already left it alone).
    */
-  async endReservationGroup(input: { bookingId: string; status: BookingStatus; actorId: string }) {
+  async endReservationGroup(input: { bookingId: string; status: BookingStatus; reason?: string; cancellationCharge?: number; actorId: string }) {
     const first = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
     const rows = first.reservationGroupId ? await this.prisma.booking.findMany({ where: { reservationGroupId: first.reservationGroupId } }) : [first];
     const targets = rows.filter((b) => b.status === BookingStatus.confirmed);
     if (targets.length === 0) throw new ConflictException('Only a confirmed (not yet arrived) reservation can be ended this way');
 
-    await this.prisma.booking.updateMany({ where: { id: { in: targets.map((b) => b.id) } }, data: { status: input.status } });
+    await this.prisma.booking.updateMany({
+      where: { id: { in: targets.map((b) => b.id) } },
+      data: {
+        status: input.status,
+        endReason: input.reason,
+        // Only cancel carries a fee — a no-show/void never had money collected against a
+        // cancellation policy, so there's nothing to "charge" there.
+        cancellationCharge: input.status === BookingStatus.cancelled ? input.cancellationCharge : undefined,
+      },
+    });
     await Promise.all(
       targets.map((b) =>
         this.rates.adjustAvailabilityForStay({ hotelId: b.hotelId, roomCategoryId: b.roomCategoryId, checkIn: b.checkIn, checkOut: b.checkOut, delta: 1 }),
@@ -1592,8 +1604,12 @@ export class BookingsService {
     return this.prisma.booking.findMany({ where: { id: { in: ids } } });
   }
 
-  async setVip(input: { bookingId: string; isVip: boolean; actorId: string }) {
-    return this.updateReservationGroupFields(input.bookingId, { isVip: input.isVip }, input.actorId);
+  async setVip(input: { bookingId: string; isVip: boolean; notes?: string; actorId: string }) {
+    return this.updateReservationGroupFields(
+      input.bookingId,
+      input.isVip ? { isVip: true, internalNotes: input.notes || null } : { isVip: false },
+      input.actorId,
+    );
   }
 
   async updateInternalNotes(input: { bookingId: string; internalNotes: string | null; actorId: string }) {

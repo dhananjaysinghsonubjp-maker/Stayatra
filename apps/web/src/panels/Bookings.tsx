@@ -389,7 +389,9 @@ function ReservationCard({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick()}
-      className="w-full cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-sm transition-shadow hover:shadow dark:border-slate-700 dark:bg-slate-800"
+      className={`w-full cursor-pointer overflow-hidden rounded-xl text-left shadow-sm transition-shadow hover:shadow ${
+        b.isVip ? 'vip-card' : 'border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'
+      }`}
     >
       <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
         <div className="flex items-center gap-2">

@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 export function Card({ children, className = '', ...rest }: React.HTMLAttributes<HTMLDivElement> & { children: ReactNode; className?: string }) {
@@ -143,5 +144,89 @@ export function StatCard({ label, value, hint, tone = 'slate' }: { label: string
       <p className={`mt-1.5 text-2xl font-semibold tabular-nums ${toneClass[tone]}`}>{value}</p>
       {hint && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{hint}</p>}
     </Card>
+  );
+}
+
+/** §user request, with a reference app's own Booking Source / Payment Mode dropdowns as the
+ * target — a click-to-open list (selected row highlighted, radio dot on the right) instead of a
+ * bare native `<select>`. `description`/`icon` are optional per option so the same component
+ * covers both the plain label-only list (Booking Source) and the icon+subtitle one (Payment
+ * Mode). Shared (originally built inside CreateReservationModal) so Record Payment's own method/
+ * type pickers can reuse the exact same look instead of a second copy. */
+export function Combobox<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string; description?: string; icon?: string }[];
+  onChange: (value: T) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // §user request — "ye payment vala dropdown upward ki taraf khulega, ye niche chhup gaya hai":
+  // this sits near the bottom of a scrollable panel, so opening downward can push the list past
+  // the visible area. Flip to open upward whenever there isn't enough room below the trigger.
+  const [openUp, setOpenUp] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selected = options.find((o) => o.value === value);
+
+  function toggle() {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const estimatedListHeight = Math.min(288, 56 * options.length + 12);
+      setOpenUp(window.innerHeight - rect.bottom < estimatedListHeight && rect.top > estimatedListHeight);
+    }
+    setOpen((o) => !o);
+  }
+
+  return (
+    <div className="relative">
+      <button ref={triggerRef} type="button" onClick={toggle} className={`${inputClass} flex w-full items-center justify-between gap-2 text-left`}>
+        <span className="truncate">{selected ? selected.label : 'Select…'}</span>
+        <span className="shrink-0 text-xs text-slate-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className={`absolute left-0 right-0 z-50 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800 ${
+              openUp ? 'bottom-full mb-1' : 'top-full mt-1'
+            }`}
+          >
+            {options.map((o) => {
+              const isSelected = o.value === value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
+                    isSelected ? 'bg-brand-50 dark:bg-brand-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  }`}
+                >
+                  {o.icon && (
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base dark:bg-slate-700">{o.icon}</span>
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-slate-900 dark:text-white">{o.label}</span>
+                    {o.description && <span className="block text-xs text-slate-400 dark:text-slate-500">{o.description}</span>}
+                  </span>
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                      isSelected ? 'border-brand-600 bg-brand-600' : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                  >
+                    {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
   );
 }

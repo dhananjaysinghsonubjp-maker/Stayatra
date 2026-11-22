@@ -210,6 +210,8 @@ export interface Booking {
    * also writes to. */
   idPhotoFrontPath: string | null;
   idPhotoBackPath: string | null;
+  endReason: string | null;
+  cancellationCharge: string | null;
   payments?: Payment[];
   lineItems?: InvoiceLineItem[];
   /** Co-occupants sharing this room (not separate bookings) — "Total Guests" is 1 (the primary
@@ -363,10 +365,13 @@ export interface SaleReportDay {
   bookings: { id: string; guestName: string; roomNumber: string | null; grandTotal: number; paidAmount: number; due: number }[];
 }
 
+export type PaymentType = 'advance' | 'partial' | 'full';
+
 export interface Payment {
   id: string;
   amount: string;
   method: PaymentMethod;
+  type: PaymentType;
   referenceNumber: string | null;
   receiptPhotoPath: string | null;
   collectedAt: string;

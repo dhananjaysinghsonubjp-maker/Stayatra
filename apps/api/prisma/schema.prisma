@@ -824,6 +824,13 @@ model Booking {
   // verified ahead of arrival, before there's any Guest/check-in record to attach it to yet.
   idPhotoFrontPath      String?  @map("id_photo_front_path")
   idPhotoBackPath       String?  @map("id_photo_back_path")
+  // §user request — "Cancel/No Show/Void mein proper box bane reason likhne ke liye": one reason
+  // field shared by all three end-states (which one it was for is just whatever `status` already
+  // became). cancellationCharge only ever gets set alongside status=cancelled — the "Refund
+  // Amount" shown on that confirmation is Total − this, informational only (no real refund/ledger
+  // transaction fires from it, same as the rest of this app's cash movements staying manual).
+  endReason          String?  @map("end_reason")
+  cancellationCharge Decimal? @map("cancellation_charge") @db.Decimal(10, 2)
 
   hotel         Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   otaConnection OtaConnection? @relation(fields: [otaConnectionId], references: [id])
@@ -916,6 +923,10 @@ model Payment {
   bookingId      String        @map("booking_id")
   amount         Decimal       @db.Decimal(10, 2)
   method         PaymentMethod
+  // §user request — Record Payment's "Payment Type" (Advance/Part/Full), so a reprinted receipt
+  // can say what the payment actually was instead of always assuming "Advance Payment" the way it
+  // used to. Defaulted (not nullable) so every pre-existing row stays a valid, meaningful value.
+  type           PaymentType   @default(advance)
   referenceNumber String?      @map("reference_number") // transaction/cheque/UPI ref — added beyond MD spec
   receiptPhotoPath String?     @map("receipt_photo_path") // dev-local disk path, same pattern as Guest.idPhotoPath
   collectedBy    String        @map("collected_by")
@@ -924,6 +935,12 @@ model Payment {
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@map("payments")
+}
+
+enum PaymentType {
+  advance
+  partial
+  full
 }
 
 // §user request — "Ledger / Chart of Accounts": the hotel's own cash movements (utility bills,
