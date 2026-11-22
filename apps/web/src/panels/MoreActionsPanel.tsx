@@ -267,9 +267,9 @@ export function MoreActionsPanel({
           it actually shrink to the available space so text wraps inside it instead. */}
       <div className="flex h-full w-full min-w-0 max-w-md flex-col overflow-hidden bg-white shadow-2xl dark:bg-slate-800">
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white">{view === 'menu' ? 'More Actions' : MENU_ITEMS.find((m) => m.view === view)?.label}</h3>
-            <p className="text-xs text-slate-400 dark:text-slate-500">{view === 'menu' ? 'Edit, communicate, print, payments and more' : lead.guestName}</p>
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-bold text-slate-900 dark:text-white">{view === 'menu' ? 'More Actions' : MENU_ITEMS.find((m) => m.view === view)?.label}</h3>
+            <p className="truncate text-xs text-slate-400 dark:text-slate-500">{view === 'menu' ? 'Edit, communicate, print, payments and more' : lead.guestName}</p>
           </div>
           <button
             type="button"
@@ -281,7 +281,11 @@ export function MoreActionsPanel({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        {/* §bugfix — the previous min-w-0 was only on the panel's own flex slot (vs. the
+            backdrop); this content area is ITSELF a flex child of the panel's flex-col and hit
+            the exact same min-width:auto shrink-refusal independently, still clipping text/
+            buttons on the right on a narrow screen. */}
+        <div className="min-w-0 flex-1 overflow-y-auto">
           {error && <p className="mx-5 mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
           {view === 'menu' && (
@@ -308,8 +312,8 @@ export function MoreActionsPanel({
               (no real refund transaction fires — same as the rest of this app's cash movements
               staying manual). */}
           {view === 'cancel' && (
-            <div className="p-5">
-              <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+            <div className="min-w-0 p-5">
+              <p className="mb-4 break-words text-sm text-slate-600 dark:text-slate-300">
                 Are you sure you want to cancel this reservation? The status will be updated to 'Cancelled', and all assigned rooms will be released.
               </p>
               <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-4 dark:bg-slate-900/40">
@@ -327,7 +331,7 @@ export function MoreActionsPanel({
                 <span className="font-mono font-bold text-brand-600 dark:text-brand-400">Confirmation #: {bookingCode(lead.id)}</span>
               </div>
               <Field label="Reason For Cancellation *">
-                <textarea className={`${inputClass} min-h-20`} value={endReason} onChange={(e) => setEndReason(e.target.value)} placeholder="Enter reason" />
+                <textarea className={`${inputClass} w-full min-h-20 resize-none`} value={endReason} onChange={(e) => setEndReason(e.target.value)} placeholder="Enter reason" />
               </Field>
               {/* §bugfix — "jo guest ne advance amount paid kiya hai vo show hona chahiye, uske
                   neeche se cancellation charges deduct karke denge": a refund can only ever come
@@ -371,16 +375,20 @@ export function MoreActionsPanel({
           )}
 
           {(view === 'noshow' || view === 'void') && (
-            <div className="p-5 text-center">
+            <div className="min-w-0 p-5 text-center">
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-3xl dark:bg-red-500/10">{view === 'noshow' ? '🧳' : '🚫'}</div>
               <h4 className="mb-2 text-base font-bold text-slate-900 dark:text-white">{view === 'noshow' ? 'Mark as No Show' : 'Void Reservation'}</h4>
-              <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mb-4 break-words text-sm text-slate-500 dark:text-slate-400">
                 {view === 'noshow'
                   ? "The guest did not arrive for the scheduled check-in. Marking this reservation as No Show will update the reservation status and release the room based on your property's policy."
                   : 'This voids the reservation entirely, as if it were never made — use this only for a booking created by mistake, not a guest who simply cancelled.'}
               </p>
+              {/* §bugfix — "box ko proper rectangular karo": this textarea had no explicit width
+                  (inputClass alone doesn't set one, and it wasn't wrapped in Field, whose flex
+                  column stretches a bare child to full width) — it was falling back to the
+                  browser's own un-styled default size instead of a clean full-width rectangle. */}
               <textarea
-                className={`${inputClass} min-h-28 text-left`}
+                className={`${inputClass} w-full min-h-28 resize-none text-left`}
                 value={endReason}
                 onChange={(e) => setEndReason(e.target.value)}
                 placeholder={view === 'noshow' ? 'Reason (optional)' : 'Reason for voiding (optional)'}
@@ -397,9 +405,9 @@ export function MoreActionsPanel({
           )}
 
           {view === 'special' && (
-            <div className="space-y-3 p-5">
+            <div className="min-w-0 space-y-3 p-5">
               <Field label="Special request">
-                <textarea className={`${inputClass} min-h-24`} value={specialRequest} onChange={(e) => setSpecialRequest(e.target.value)} placeholder="e.g. Late check-in, extra pillows" />
+                <textarea className={`${inputClass} w-full min-h-24 resize-none`} value={specialRequest} onChange={(e) => setSpecialRequest(e.target.value)} placeholder="e.g. Late check-in, extra pillows" />
               </Field>
               <Button type="button" disabled={busy} onClick={() => run(() => mutate('bookings.updateSpecialRequest', { bookingId: lead.id, specialRequest: specialRequest.trim() || null }, token ?? undefined))} className="w-full">
                 {busy ? 'Saving…' : 'Save'}
@@ -412,8 +420,8 @@ export function MoreActionsPanel({
               own menu entry) instead of a bare toggle; the card itself picks up a golden shine and
               the crown icon once isVip is true (see Bookings.tsx's ReservationCard). */}
           {view === 'vip' && (
-            <div className="p-5">
-              <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+            <div className="min-w-0 p-5">
+              <p className="mb-4 break-words text-sm text-slate-600 dark:text-slate-300">
                 {lead.isVip
                   ? `Remove VIP status from ${roomSummary}? It will no longer be highlighted across the Stay View and related modules.`
                   : `Are you sure you want to mark ${roomSummary} as a VIP room? The room will be highlighted across the Stay View and related modules.`}
@@ -421,7 +429,7 @@ export function MoreActionsPanel({
               {!lead.isVip && (
                 <Field label="Reason / Notes">
                   <textarea
-                    className={`${inputClass} min-h-24`}
+                    className={`${inputClass} w-full min-h-24 resize-none`}
                     value={vipReason}
                     onChange={(e) => setVipReason(e.target.value)}
                     placeholder="e.g., Returning guest, Corporate client, Honeymoon guest."
@@ -454,7 +462,7 @@ export function MoreActionsPanel({
               click-to-open Combobox list this app already uses elsewhere, instead of
               AddPaymentModal's plain pill buttons. */}
           {view === 'payment' && (
-            <div className="space-y-4 p-5">
+            <div className="min-w-0 space-y-4 p-5">
               <div>
                 <h4 className="text-base font-bold text-slate-900 dark:text-white">Record payment</h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Post an interim payment any time during the stay. Amount is editable for part-payments.</p>
@@ -551,7 +559,7 @@ export function MoreActionsPanel({
           )}
 
           {view === 'identity' && (
-            <div className="space-y-3 p-5">
+            <div className="min-w-0 space-y-3 p-5">
               <div className="grid grid-cols-2 gap-3">
                 <Field label="ID type">
                   <select className={inputClass} value={idType} onChange={(e) => setIdType(e.target.value as IdType)}>
@@ -591,7 +599,7 @@ export function MoreActionsPanel({
           )}
 
           {view === 'receipts' && (
-            <div className="space-y-4 p-5">
+            <div className="min-w-0 space-y-4 p-5">
               <div className="flex gap-2.5">
                 <Button type="button" onClick={() => setPrinting('receipt')} className="flex-1">
                   🧾 Advance Receipt
@@ -623,7 +631,7 @@ export function MoreActionsPanel({
           )}
 
           {view === 'mealplan' && (
-            <div className="space-y-4 p-5">
+            <div className="min-w-0 space-y-4 p-5">
               {group.map((b) => {
                 const room = roomsById.get(b.assignedRoomId ?? '');
                 const roomRatePlans = ratePlans.filter((rp) => rp.roomCategoryId === b.roomCategoryId);
