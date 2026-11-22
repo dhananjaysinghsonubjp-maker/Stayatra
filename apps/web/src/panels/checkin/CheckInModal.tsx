@@ -1092,6 +1092,10 @@ function StayDatesModal({
   const [draftCheckInTime, setDraftCheckInTime] = useState(checkInTime);
   const [draftCheckOutTime, setDraftCheckOutTime] = useState(checkOutTime);
   const [timePickerFor, setTimePickerFor] = useState<'checkin' | 'checkout' | null>(null);
+  // §user request — "reservation create karne time aur check-in time jo calendar hai aise show ho
+  // same": the same live hover-fill preview Create Reservation's own calendar now has, shown here
+  // too while the mouse moves across days before the check-out tap actually lands.
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState(() => {
     const [y, m] = checkOutDate.split('-').map(Number);
     return { year: y, month: m - 1 };
@@ -1186,12 +1190,13 @@ function StayDatesModal({
               <div key={d}>{d}</div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1" onMouseLeave={() => setHoverDate(null)}>
             {cells.map((iso, i) => {
               if (!iso) return <div key={`blank-${i}`} />;
               const isCheckIn = iso === checkInDate;
               const isCheckOut = iso === draftCheckOut;
-              const inRange = iso > checkInDate && iso < draftCheckOut;
+              const rangeEnd = hoverDate && hoverDate > checkInDate ? hoverDate : draftCheckOut;
+              const inRange = iso > checkInDate && iso <= rangeEnd && iso !== draftCheckOut;
               const disabled = iso <= checkInDate;
               return (
                 <button
@@ -1199,16 +1204,17 @@ function StayDatesModal({
                   type="button"
                   disabled={disabled && !isCheckIn}
                   onClick={() => !disabled && setDraftCheckOut(iso)}
-                  className={`flex h-9 items-center justify-center rounded-full text-sm transition-colors ${
+                  onMouseEnter={() => !disabled && setHoverDate(iso)}
+                  className={`flex h-9 items-center justify-center text-sm transition-colors ${
                     // §brand-kit §6/§3 — "start date and end date: #0C2171 background with white
                     // text", "selected range background: #E8EEFF, text charcoal".
                     isCheckIn || isCheckOut
-                      ? 'bg-brand-600 font-bold text-white'
+                      ? 'rounded-full bg-brand-600 font-bold text-white'
                       : inRange
-                        ? 'bg-brand-50 text-slate-900'
+                        ? 'rounded-md bg-brand-50 text-slate-900'
                         : disabled
-                          ? 'cursor-not-allowed text-slate-300'
-                          : 'text-slate-700 hover:bg-brand-50'
+                          ? 'rounded-full cursor-not-allowed text-slate-300'
+                          : 'rounded-full text-slate-700 hover:bg-brand-50'
                   }`}
                 >
                   {Number(iso.slice(-2))}

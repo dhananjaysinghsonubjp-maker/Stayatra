@@ -1301,6 +1301,15 @@ function StayDateRangeModal({
 }) {
   const [draftCheckIn, setDraftCheckIn] = useState(checkIn);
   const [draftCheckOut, setDraftCheckOut] = useState<string | null>(checkOut);
+  // §user request, with a reference app's own two-tap range calendar as the target — true after a
+  // check-in-only tap, false once a complete range exists (including the initial one this modal
+  // opens with). The NEXT tap behaves differently depending on which state we're in: mid-selection
+  // it completes the range as check-out, otherwise it starts a fresh selection — see pickDay below.
+  const [awaitingCheckout, setAwaitingCheckout] = useState(false);
+  // Live range-fill preview while awaitingCheckout, following the pointer before the check-out tap
+  // actually lands — "26 pe drag ho toh animation aa jaaye" (hover across days towards 26 should
+  // fill the range live, the way the reference app's own calendar does).
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState(() => {
     const [y, m] = checkIn.split('-').map(Number);
     return { year: y, month: m - 1 };
@@ -1324,13 +1333,20 @@ function StayDateRangeModal({
     });
   }
 
+  // §user request — "26 pe single click karte hi dates select ho jaaye, aur agar single click
+  // karu 26 pe toh automatically wo date check-in aa jaaye": a tap either completes a pending
+  // selection (awaitingCheckout, tapping a later day) or starts a brand-new one — never silently
+  // adjusts an already-complete range's check-out the way a plain "iso <= checkIn" check would.
   function pickDay(iso: string) {
-    if (!draftCheckOut || iso <= draftCheckIn) {
+    if (awaitingCheckout && iso > draftCheckIn) {
+      setDraftCheckOut(iso);
+      setAwaitingCheckout(false);
+    } else {
       setDraftCheckIn(iso);
       setDraftCheckOut(null);
-    } else {
-      setDraftCheckOut(iso);
+      setAwaitingCheckout(true);
     }
+    setHoverDate(null);
   }
 
   return createPortal(
@@ -1357,9 +1373,7 @@ function StayDateRangeModal({
               <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check In</p>
               <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(draftCheckIn)}</p>
             </div>
-            <span className="rounded-full bg-brand-600 px-2 py-1 text-xs font-bold text-white shadow-sm">
-              {draftCheckOut ? `${nights} night${nights === 1 ? '' : 's'}` : 'Pick check-out'}
-            </span>
+            <span className="rounded-full bg-brand-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm">{nights} N</span>
             <div className="text-right">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check Out</p>
               <p className="text-sm font-bold text-slate-900 dark:text-white">{draftCheckOut ? formatDateShort(draftCheckOut) : '—'}</p>
@@ -1385,23 +1399,26 @@ function StayDateRangeModal({
               <div key={d}>{d}</div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1" onMouseLeave={() => setHoverDate(null)}>
             {cells.map((iso, i) => {
               if (!iso) return <div key={`blank-${i}`} />;
               const isCheckIn = iso === draftCheckIn;
-              const isCheckOut = iso === draftCheckOut;
-              const inRange = Boolean(draftCheckOut) && iso > draftCheckIn && iso < (draftCheckOut as string);
+              const isCheckOut = !awaitingCheckout && iso === draftCheckOut;
+              const previewEnd = awaitingCheckout && hoverDate && hoverDate > draftCheckIn ? hoverDate : null;
+              const rangeEnd = previewEnd ?? (!awaitingCheckout ? draftCheckOut : null);
+              const inRange = Boolean(rangeEnd) && iso > draftCheckIn && iso <= (rangeEnd as string) && !isCheckOut;
               return (
                 <button
                   key={iso}
                   type="button"
                   onClick={() => pickDay(iso)}
-                  className={`flex h-9 items-center justify-center rounded-full text-sm transition-colors ${
+                  onMouseEnter={() => awaitingCheckout && setHoverDate(iso)}
+                  className={`flex h-9 items-center justify-center text-sm transition-colors ${
                     isCheckIn || isCheckOut
-                      ? 'bg-brand-600 font-bold text-white'
+                      ? 'rounded-full bg-brand-600 font-bold text-white'
                       : inRange
-                        ? 'bg-brand-50 text-slate-900 dark:bg-brand-500/10 dark:text-white'
-                        : 'text-slate-700 hover:bg-brand-50 dark:text-slate-300 dark:hover:bg-brand-500/10'
+                        ? 'rounded-md bg-brand-50 text-slate-900 dark:bg-brand-500/10 dark:text-white'
+                        : 'rounded-full text-slate-700 hover:bg-brand-50 dark:text-slate-300 dark:hover:bg-brand-500/10'
                   }`}
                 >
                   {Number(iso.slice(-2))}
@@ -1422,7 +1439,7 @@ function StayDateRangeModal({
             disabled={!draftCheckOut}
             onClick={() => draftCheckOut && onApply(draftCheckIn, draftCheckOut)}
           >
-            {draftCheckOut ? `Apply dates · ${nights} night${nights === 1 ? '' : 's'}` : 'Select check-out'}
+            Apply dates · {nights} night{nights === 1 ? '' : 's'}
           </Button>
         </div>
       </div>
