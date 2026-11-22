@@ -28,7 +28,6 @@ import { NotificationBell } from './components/NotificationBell';
 import { SubscriptionBanner } from './components/SubscriptionBanner';
 import { ThemeToggle } from './components/ThemeToggle';
 import { HelpDesk } from './components/HelpDesk';
-import { BannerPlane } from './components/BannerPlane';
 import { applyBrandColor, isColorDark } from './brandColor';
 import { applyBrandFont } from './brandFont';
 import type { Hotel } from './types';
@@ -255,10 +254,6 @@ function Shell() {
           // problem) just switch to plain white or dark based on how light/dark the chosen brand
           // colour actually is (isColorDark, brandColor.ts) — white-on-dark, dark-on-light.
           <div className="relative flex h-20 w-full items-center overflow-hidden bg-brand-600 px-4 sm:h-24 sm:px-8">
-            {/* §user request — "ek plane ka banner chahta hu jo thoda enter ho banner ke andar,
-                uska path dikhega aur fade out ho jayega, bottom-left se enter hoga aur right-side
-                center se exit": purely decorative, sits behind the hamburger/title/icons below. */}
-            <BannerPlane />
             <HamburgerButton tone={bannerTone} onClick={() => setMobileNavOpen(true)} />
             <span className={`truncate pr-24 text-base font-bold sm:pr-32 sm:text-2xl ${bannerTone === 'light' ? 'text-white' : 'text-slate-900'}`}>{hotel.bannerText}</span>
             <div className="absolute inset-y-0 right-0 flex items-center gap-1 px-2 sm:gap-2 sm:px-8">
