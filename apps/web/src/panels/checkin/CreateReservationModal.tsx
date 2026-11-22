@@ -1103,74 +1103,111 @@ export function CreateReservationModal({
             )}
             </div>
 
-            <aside className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/40 lg:sticky lg:top-0 lg:self-start">
-              <div>
-                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Booking Summary</p>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="rounded-lg bg-white p-2 dark:bg-slate-900/40">
+            {/* §user request — "jo booking summary mein colour aur spacing hai vese hi apne mein
+                banao": a reference app's own white-card summary (icon+label stat tiles, per-
+                category Room Charges with their own GST/Subtotal lines, dashed dividers before
+                Grand Total and Balance Payable, red Balance Payable) rebuilt in our brand colors.
+                Per-category GST below applies the SAME blended rate the real Grand Total already
+                uses (totals.gst.rate) rather than an independent per-category slab, so these
+                lines always foot to the one real total below instead of risking a mismatch. */}
+            <aside className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 lg:sticky lg:top-0 lg:self-start">
+              <p className="border-b border-slate-100 pb-3 text-sm font-bold text-slate-900 dark:border-slate-700 dark:text-white">Booking Summary</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-base dark:bg-brand-500/10">📅</span>
+                  <div className="min-w-0">
                     <p className="text-[11px] text-slate-400 dark:text-slate-500">Check-in</p>
-                    <p className="font-semibold text-slate-900 dark:text-white">{formatDateShort(checkIn)}</p>
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(checkIn)}</p>
                   </div>
-                  <div className="rounded-lg bg-white p-2 dark:bg-slate-900/40">
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-base dark:bg-brand-500/10">📅</span>
+                  <div className="min-w-0">
                     <p className="text-[11px] text-slate-400 dark:text-slate-500">Check-out</p>
-                    <p className="font-semibold text-slate-900 dark:text-white">{formatDateShort(checkOut)}</p>
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(checkOut)}</p>
                   </div>
-                  <div className="rounded-lg bg-white p-2 dark:bg-slate-900/40">
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-base dark:bg-brand-500/10">🌙</span>
+                  <div className="min-w-0">
                     <p className="text-[11px] text-slate-400 dark:text-slate-500">Nights</p>
-                    <p className="font-semibold text-slate-900 dark:text-white">{nights}</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white">{String(nights).padStart(2, '0')}</p>
                   </div>
-                  <div className="rounded-lg bg-white p-2 dark:bg-slate-900/40">
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-base dark:bg-brand-500/10">🚪</span>
+                  <div className="min-w-0">
                     <p className="text-[11px] text-slate-400 dark:text-slate-500">Rooms</p>
-                    <p className="font-semibold text-slate-900 dark:text-white">{picked.length}</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white">{String(picked.length).padStart(2, '0')}</p>
                   </div>
                 </div>
               </div>
 
               {picked.length > 0 && (
-                <div className="space-y-1.5 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
-                  <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Room Charges</p>
-                  {roomChargesByCategory.map((c) => (
-                    <div key={c.name} className="flex justify-between text-slate-500 dark:text-slate-400">
-                      <span>{c.name} × {c.count}</span>
-                      <span>₹{c.amount.toFixed(2)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+                <div className="space-y-3 border-t border-slate-100 pt-3 dark:border-slate-700">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Room Charges</p>
+                  {roomChargesByCategory.map((c, i) => {
+                    const categoryGst = Math.round((c.amount * totals.gst.rate) / 100);
+                    const avgRate = nights > 0 && c.count > 0 ? Math.round(c.amount / c.count / nights) : c.amount;
+                    return (
+                      <div key={c.name} className={i > 0 ? 'border-t border-dashed border-slate-200 pt-3 dark:border-slate-700' : ''}>
+                        <div className="flex justify-between text-sm font-bold text-slate-900 dark:text-white">
+                          <span>{c.name}</span>
+                          <span>₹{(c.amount + categoryGst).toFixed(0)}</span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
+                          ₹{avgRate.toLocaleString('en-IN')} × {c.count} Room{c.count === 1 ? '' : 's'} × {nights} Night{nights === 1 ? '' : 's'}
+                        </p>
+                        <div className="mt-1.5 flex justify-between text-sm text-slate-400 dark:text-slate-500">
+                          <span>GST ({totals.gst.rate}%)</span>
+                          <span>₹{categoryGst.toFixed(0)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm text-slate-400 dark:text-slate-500">
+                          <span>Subtotal</span>
+                          <span>₹{(c.amount + categoryGst).toFixed(0)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
 
-              {picked.length > 0 && (
-                <div className="space-y-1.5 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
-                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                    <span>Room charges</span>
-                    <span>₹{baseTotal.toFixed(2)}</span>
-                  </div>
-                  {totals.extraCharges > 0 && (
-                    <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                      <span>Add-ons</span>
-                      <span>₹{totals.extraCharges.toFixed(2)}</span>
+                  <div className="space-y-1 border-t border-slate-100 pt-3 dark:border-slate-700">
+                    <div className="flex justify-between text-sm font-bold text-slate-900 dark:text-white">
+                      <span>Room Charges</span>
+                      <span>₹{baseTotal.toFixed(0)}</span>
                     </div>
-                  )}
-                  {totals.discount > 0 && (
-                    <div className="flex justify-between text-amber-600 dark:text-amber-400">
-                      <span>Discount</span>
-                      <span>−₹{totals.discount.toFixed(2)}</span>
+                    {totals.extraCharges > 0 && (
+                      <div className="flex justify-between text-sm font-bold text-slate-900 dark:text-white">
+                        <span>Add-ons</span>
+                        <span>₹{totals.extraCharges.toFixed(0)}</span>
+                      </div>
+                    )}
+                    {totals.discount > 0 && (
+                      <div className="flex justify-between text-sm font-semibold text-amber-600 dark:text-amber-400">
+                        <span>Discount</span>
+                        <span>−₹{totals.discount.toFixed(0)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm font-bold text-slate-900 dark:text-white">
+                      <span>GST</span>
+                      <span>₹{totals.gst.amount.toFixed(0)}</span>
                     </div>
-                  )}
-                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                    <span>GST ({totals.gst.label}{gstMode === 'inclusive' ? ' · included' : ''})</span>
-                    <span>₹{totals.gst.amount.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between border-t border-slate-100 pt-1.5 text-sm font-bold text-slate-900 dark:border-slate-700 dark:text-white">
-                    <span>Grand Total</span>
-                    <span>₹{grandTotal.toFixed(2)}</span>
+
+                  <div className="border-t border-dashed border-slate-200 pt-3 dark:border-slate-700">
+                    <div className="flex justify-between text-base font-bold text-slate-900 dark:text-white">
+                      <span>Grand Total</span>
+                      <span>₹{grandTotal.toFixed(0)}</span>
+                    </div>
                   </div>
+
                   {/* §user request — "byfercate this in very small cash and mode of payment in
                       italic and very small": Advance Received broken down per mode (Cash ₹2000,
                       UPI ₹3000, …) right under the combined figure, instead of just one lump sum. */}
                   {!isEditMode && advanceAmount > 0 && (
-                    <div className="flex justify-between text-green-600 dark:text-green-400">
+                    <div className="flex justify-between text-sm font-semibold text-green-600 dark:text-green-400">
                       <span>Advance Received</span>
-                      <span>−₹{advanceAmount.toFixed(2)}</span>
+                      <span>−₹{advanceAmount.toFixed(0)}</span>
                     </div>
                   )}
                   {!isEditMode &&
@@ -1179,18 +1216,21 @@ export function CreateReservationModal({
                       .map((r) => (
                         <div key={r.key} className="flex justify-between pl-2 text-[11px] italic text-slate-400 dark:text-slate-500">
                           <span>{PAYMENT_METHOD_OPTIONS.find((o) => o.value === r.method)?.label ?? r.method}</span>
-                          <span>₹{(r.amount as number).toFixed(2)}</span>
+                          <span>₹{(r.amount as number).toFixed(0)}</span>
                         </div>
                       ))}
                   {isEditMode && alreadyPaid > 0 && (
-                    <div className="flex justify-between text-green-600 dark:text-green-400">
+                    <div className="flex justify-between text-sm font-semibold text-green-600 dark:text-green-400">
                       <span>Advance Received</span>
-                      <span>−₹{alreadyPaid.toFixed(2)}</span>
+                      <span>−₹{alreadyPaid.toFixed(0)}</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-sm font-bold text-amber-600 dark:text-amber-400">
-                    <span>Balance Payable</span>
-                    <span>₹{due.toFixed(2)}</span>
+
+                  <div className="border-t border-dashed border-slate-200 pt-3 dark:border-slate-700">
+                    <div className="flex justify-between text-base font-bold">
+                      <span className="text-slate-900 dark:text-white">Balance Payable</span>
+                      <span className="text-red-500 dark:text-red-400">₹{due.toFixed(0)}</span>
+                    </div>
                   </div>
                 </div>
               )}
