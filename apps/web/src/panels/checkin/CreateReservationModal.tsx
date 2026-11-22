@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
@@ -1406,17 +1406,36 @@ function Combobox<T extends string>({
   onChange: (value: T) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // §user request — "ye payment vala dropdown upward ki taraf khulega, ye niche chhup gaya hai":
+  // this sits near the bottom of a scrollable panel, so opening downward can push the list past
+  // the visible area. Flip to open upward whenever there isn't enough room below the trigger.
+  const [openUp, setOpenUp] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const selected = options.find((o) => o.value === value);
+
+  function toggle() {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const estimatedListHeight = Math.min(288, 56 * options.length + 12);
+      setOpenUp(window.innerHeight - rect.bottom < estimatedListHeight && rect.top > estimatedListHeight);
+    }
+    setOpen((o) => !o);
+  }
+
   return (
     <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className={`${inputClass} flex w-full items-center justify-between gap-2 text-left`}>
+      <button ref={triggerRef} type="button" onClick={toggle} className={`${inputClass} flex w-full items-center justify-between gap-2 text-left`}>
         <span className="truncate">{selected ? selected.label : 'Select…'}</span>
         <span className="shrink-0 text-xs text-slate-400">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 right-0 z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800">
+          <div
+            className={`absolute left-0 right-0 z-50 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800 ${
+              openUp ? 'bottom-full mb-1' : 'top-full mt-1'
+            }`}
+          >
             {options.map((o) => {
               const isSelected = o.value === value;
               return (
