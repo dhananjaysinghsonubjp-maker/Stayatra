@@ -9,6 +9,8 @@
     "build:api": "npm run build --workspace=apps/api",
     "test:api": "npm run test --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
-    "build:web": "npm run build --workspace=apps/web"
+    "build:web": "npm run build --workspace=apps/web",
+    "build": "npx prisma generate --schema apps/api/prisma/schema.prisma && npm run build --workspace=apps/api",
+    "start": "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && npm run start:prod --workspace=apps/api"
   }
 }
