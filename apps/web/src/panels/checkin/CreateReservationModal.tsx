@@ -838,32 +838,45 @@ export function CreateReservationModal({
                       )}
 
                       {addingChargeFor === p.room.id && (
-                        <form onSubmit={(e) => addCharge(e, p.room.id)} className="mt-2.5 grid grid-cols-4 gap-2">
+                        <form onSubmit={(e) => addCharge(e, p.room.id)} className="mt-2.5 space-y-2">
                           <input
-                            className={`${inputClass} col-span-2`}
+                            className={inputClass}
                             placeholder="e.g. Extra mattress"
                             value={chargeDesc}
                             onChange={(e) => setChargeDesc(e.target.value)}
                             required
                             autoFocus
                           />
-                          <input
-                            className={inputClass}
-                            type="number"
-                            placeholder="Qty 1"
-                            value={chargeQty}
-                            onChange={(e) => setChargeQty(e.target.value === '' ? '' : Number(e.target.value))}
-                            min={1}
-                          />
-                          <input
-                            className={inputClass}
-                            type="number"
-                            placeholder="₹ price"
-                            value={chargeUnitPrice}
-                            onChange={(e) => setChargeUnitPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                            min={0}
-                          />
-                          <div className="col-span-4 flex gap-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* §user request, with a reference app's own −/+ quantity stepper as
+                                the target, in place of a bare number input. */}
+                            <div className="flex items-center justify-between rounded-lg bg-slate-100 px-1.5 dark:bg-slate-700">
+                              <button
+                                type="button"
+                                onClick={() => setChargeQty((q) => Math.max(1, (q === '' ? 1 : q) - 1))}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-lg font-bold text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-600"
+                              >
+                                −
+                              </button>
+                              <span className="text-sm font-semibold text-slate-900 dark:text-white">{chargeQty === '' ? 1 : chargeQty}</span>
+                              <button
+                                type="button"
+                                onClick={() => setChargeQty((q) => (q === '' ? 1 : q) + 1)}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-lg font-bold text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-600"
+                              >
+                                +
+                              </button>
+                            </div>
+                            <input
+                              className={inputClass}
+                              type="number"
+                              placeholder="₹ price"
+                              value={chargeUnitPrice}
+                              onChange={(e) => setChargeUnitPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                              min={0}
+                            />
+                          </div>
+                          <div className="flex gap-2">
                             <Button type="submit" variant="secondary" className="flex-1">
                               Add
                             </Button>
