@@ -154,6 +154,12 @@ export function createBookingsRouter(bookings: BookingsService) {
           rooms: multiRoomSchema,
           advanceAmount: z.number().nonnegative().optional(),
           paymentMethod: paymentMethodSchema.optional(),
+          // §user request — "cash and UPI dono diya toh hum dono add kar sakein": a reservation's
+          // advance can arrive split across more than one mode in a single sitting. When present,
+          // this replaces advanceAmount/paymentMethod above rather than combining with them.
+          payments: z
+            .array(z.object({ amount: z.number().positive(), method: paymentMethodSchema, referenceNumber: z.string().optional() }))
+            .optional(),
           ...companyBillingSchema,
         }),
       )

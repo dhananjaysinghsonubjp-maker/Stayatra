@@ -8,7 +8,6 @@ import { addDaysKey } from '../../components/DateRangePicker';
 import { formatDateShort } from '../../dateFormat';
 import { computeGstSlab } from '../../gst';
 import { computeInvoiceTotals } from '../../invoice';
-import { paymentMethodLabel } from '../../paymentMethods';
 import { RoomPickerModal } from './RoomPickerModal';
 import type { Booking, PaymentMethod, RatePlan, Room } from '../../types';
 
@@ -29,7 +28,30 @@ function todayPlus(days: number) {
 
 // Now shared with checkin/CheckInModal's own Booking Source field — see bookingSource.ts.
 const SOURCE_OPTIONS = BOOKING_SOURCE_OPTIONS;
-const METHOD_OPTIONS: PaymentMethod[] = ['cash', 'upi', 'online', 'card', 'bank_transfer', 'cheque', 'credit_sale', 'company_settlement', 'agent_settlement', 'cash_deposit'];
+
+// §user request, with a reference app's own icon+description Payment Mode list as the target —
+// same copy/icon per mode wherever this dropdown shows up, mapped onto our actual PaymentMethod
+// enum values (there's no separate "Paytm"/"PrepaidWithOTA" column in our schema, so those fold
+// into the closest real mode — online/credit_sale — instead of inventing new ones).
+const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string; description: string; icon: string }[] = [
+  { value: 'cash', label: 'Cash', description: 'Pay the advance using cash', icon: '💵' },
+  { value: 'upi', label: 'UPI', description: 'Pay instantly using a UPI app', icon: '📲' },
+  { value: 'online', label: 'Online', description: 'Online payment gateway or wallet', icon: '🌐' },
+  { value: 'card', label: 'Card', description: 'Card swipe via POS terminal', icon: '💳' },
+  { value: 'bank_transfer', label: 'Bank Transfer', description: 'NEFT / IMPS / RTGS to the hotel account', icon: '🏦' },
+  { value: 'cheque', label: 'Cheque', description: 'Payment by cheque', icon: '🧾' },
+  { value: 'cash_deposit', label: 'Cash Deposit', description: 'Deposited directly into the bank account', icon: '🏧' },
+  { value: 'credit_sale', label: 'Credit Sale', description: 'Billed to the guest, payment pending', icon: '📄' },
+  { value: 'company_settlement', label: 'Company Settlement', description: 'Billed to and settled by the company', icon: '🏢' },
+  { value: 'agent_settlement', label: 'Agent Settlement', description: 'Billed to and settled by the travel agent', icon: '🧳' },
+];
+
+interface PaymentRow {
+  key: string;
+  method: PaymentMethod;
+  amount: number | '';
+  referenceNumber: string;
+}
 
 interface PickedRoom {
   room: Room;
@@ -123,8 +145,24 @@ export function CreateReservationModal({
   const [discountAmount, setDiscountAmountValue] = useState<number | ''>('');
   const [discountPercent, setDiscountPercent] = useState(10);
 
-  const [advanceAmount, setAdvanceAmount] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('upi');
+  // §user request — "cash aur UPI dono diya toh hum dono add kar sakein, +Add Payment ka option":
+  // an advance can arrive split across more than one mode in a single sitting, so this is a list
+  // of rows (one mode + amount + optional reference each) instead of a single pair — summed into
+  // one `advanceAmount` below for the due/grand-total math, and sent to the API as `payments` so
+  // each mode lands as its own Payment ledger row (createMultiRoomReservation prorates each entry
+  // per room exactly like it already did for the old single advanceAmount/paymentMethod pair).
+  const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([{ key: 'p1', method: 'upi', amount: '', referenceNumber: '' }]);
+  const advanceAmount = paymentRows.reduce((sum, r) => sum + (r.amount === '' ? 0 : r.amount), 0);
+
+  function addPaymentRow() {
+    setPaymentRows((prev) => [...prev, { key: `p${Date.now()}`, method: 'cash', amount: '', referenceNumber: '' }]);
+  }
+  function removePaymentRow(key: string) {
+    setPaymentRows((prev) => prev.filter((r) => r.key !== key));
+  }
+  function updatePaymentRow(key: string, patch: Partial<PaymentRow>) {
+    setPaymentRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
 
   // §user request — "corporate booking vala nahi dala hai", then "poora company details daalne
   // ka option" with a reference app's own Individual/Company toggle as the target: picking
@@ -444,9 +482,12 @@ export function CreateReservationModal({
         const reservationGroupId = editGroup![0].reservationGroupId ?? editGroup![0].id;
         await mutate('bookings.updateReservationGroup', { ...shared, reservationGroupId }, token ?? undefined);
       } else {
+        const payments = paymentRows
+          .filter((r) => r.amount !== '' && r.amount > 0)
+          .map((r) => ({ amount: r.amount as number, method: r.method, referenceNumber: r.referenceNumber.trim() || undefined }));
         await mutate(
           'bookings.createMultiRoomReservation',
-          { ...shared, advanceAmount: advanceAmount > 0 ? advanceAmount : undefined, paymentMethod: advanceAmount > 0 ? paymentMethod : undefined },
+          { ...shared, payments: payments.length > 0 ? payments : undefined },
           token ?? undefined,
         );
       }
@@ -503,36 +544,21 @@ export function CreateReservationModal({
                   <p className="text-[11px] text-slate-400 dark:text-slate-500">Stay dates and arrival details for availability and pricing.</p>
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Field label="Source">
-                  <select className={inputClass} value={source} onChange={(e) => setSource(e.target.value)}>
-                    {SOURCE_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                {/* §user request — "iske click karne ke baad calendar khul jaaye and usse date
-                    select kar sake": same Check In / Check Out box pair Check-in's own Stay
-                    Details card uses, now opening a real calendar (StayDateRangeModal below)
-                    instead of the browser's bare native date inputs. */}
-                <button
-                  type="button"
-                  onClick={() => setStayPickerOpen(true)}
-                  className="flex items-center gap-2 rounded-lg text-left sm:col-span-2"
-                >
-                  <div className="min-w-0 flex-1 rounded-lg bg-brand-50 px-3 py-2 dark:bg-brand-500/10">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check In</p>
-                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(checkIn)}</p>
-                  </div>
-                  <span className="shrink-0 text-slate-400">→</span>
-                  <div className="min-w-0 flex-1 rounded-lg bg-amber-50 px-3 py-2 dark:bg-amber-500/10">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Check Out</p>
-                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(checkOut)}</p>
-                  </div>
-                </button>
-              </div>
+              {/* §user request — "iske click karne ke baad calendar khul jaaye and usse date
+                  select kar sake": same Check In / Check Out box pair Check-in's own Stay Details
+                  card uses, now opening a real calendar (StayDateRangeModal below) instead of the
+                  browser's bare native date inputs. Source moved down into Guest Details below. */}
+              <button type="button" onClick={() => setStayPickerOpen(true)} className="flex w-full items-center gap-2 rounded-lg text-left">
+                <div className="min-w-0 flex-1 rounded-lg bg-brand-50 px-3 py-2 dark:bg-brand-500/10">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">Check In</p>
+                  <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(checkIn)}</p>
+                </div>
+                <span className="shrink-0 text-slate-400">→</span>
+                <div className="min-w-0 flex-1 rounded-lg bg-amber-50 px-3 py-2 dark:bg-amber-500/10">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Check Out</p>
+                  <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(checkOut)}</p>
+                </div>
+              </button>
               <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">{nights} night{nights === 1 ? '' : 's'}</p>
             </div>
 
@@ -552,6 +578,12 @@ export function CreateReservationModal({
                 </Field>
                 <Field label="Email">
                   <input className={inputClass} type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} />
+                </Field>
+                {/* §user request — "source ko niche le jao guest details k andar": moved down from
+                    Stay Details, and restyled as the same click-to-open list dropdown the
+                    reference app's own Booking Source field uses. */}
+                <Field label="Booking Source">
+                  <Combobox value={source} options={SOURCE_OPTIONS} onChange={setSource} />
                 </Field>
                 <Field label="Special Requests">
                   <input className={inputClass} value={specialRequest} onChange={(e) => setSpecialRequest(e.target.value)} />
@@ -948,20 +980,70 @@ export function CreateReservationModal({
                 job, kept untouched so the group's existing ledger isn't duplicated. */}
             {!isEditMode && (
               <div className="order-5">
-                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment Details</p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Advance (₹)">
-                    <input className={inputClass} type="number" min={0} max={grandTotal} value={advanceAmount} onChange={(e) => setAdvanceAmount(Number(e.target.value))} />
-                  </Field>
-                  <Field label="Payment Mode">
-                    <select className={inputClass} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)} disabled={advanceAmount <= 0}>
-                      {METHOD_OPTIONS.map((m) => (
-                        <option key={m} value={m}>
-                          {paymentMethodLabel(m)}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-sm dark:bg-brand-500/10">💳</span>
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Payment Advance</p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500">Enter the payment details.</p>
+                    </div>
+                  </div>
+                  {/* §user request — "+Add Payment ka option which is agar kisi ne cash and UPI
+                      dono diya toh hum dono add kar sakein": each row is its own mode + amount +
+                      optional reference, summed into one advanceAmount for the totals above and
+                      sent to the API as separate ledger entries (see payments[] on submit). */}
+                  <button
+                    type="button"
+                    onClick={addPaymentRow}
+                    className="shrink-0 rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-brand-500/10"
+                  >
+                    + Add Payment
+                  </button>
+                </div>
+                <div className="space-y-2.5">
+                  {paymentRows.map((row) => (
+                    <div key={row.key} className="relative rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40">
+                      {paymentRows.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removePaymentRow(row.key)}
+                          className="absolute right-1.5 top-1.5 text-red-500 hover:text-red-700 dark:text-red-400"
+                          aria-label="Remove payment"
+                        >
+                          ✕
+                        </button>
+                      )}
+                      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                        <Field label="Payment Mode">
+                          <Combobox
+                            value={row.method}
+                            options={PAYMENT_METHOD_OPTIONS}
+                            onChange={(m) => updatePaymentRow(row.key, { method: m })}
+                          />
+                        </Field>
+                        <Field label="Amount (₹)">
+                          <input
+                            className={inputClass}
+                            type="number"
+                            min={0}
+                            max={grandTotal}
+                            value={row.amount}
+                            onChange={(e) => updatePaymentRow(row.key, { amount: e.target.value === '' ? '' : Number(e.target.value) })}
+                          />
+                        </Field>
+                      </div>
+                      <div className="mt-2.5">
+                        <Field label="Reference ID (optional)">
+                          <input
+                            className={inputClass}
+                            value={row.referenceNumber}
+                            onChange={(e) => updatePaymentRow(row.key, { referenceNumber: e.target.value })}
+                            placeholder="e.g. UTR / transaction ID"
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1028,13 +1110,34 @@ export function CreateReservationModal({
                     <span>Grand Total</span>
                     <span>₹{grandTotal.toFixed(2)}</span>
                   </div>
+                  {/* §user request — "byfercate this in very small cash and mode of payment in
+                      italic and very small": Advance Received broken down per mode (Cash ₹2000,
+                      UPI ₹3000, …) right under the combined figure, instead of just one lump sum. */}
+                  {!isEditMode && advanceAmount > 0 && (
+                    <div className="flex justify-between text-green-600 dark:text-green-400">
+                      <span>Advance Received</span>
+                      <span>−₹{advanceAmount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {!isEditMode &&
+                    paymentRows
+                      .filter((r) => r.amount !== '' && r.amount > 0)
+                      .map((r) => (
+                        <div key={r.key} className="flex justify-between pl-2 text-[11px] italic text-slate-400 dark:text-slate-500">
+                          <span>{PAYMENT_METHOD_OPTIONS.find((o) => o.value === r.method)?.label ?? r.method}</span>
+                          <span>₹{(r.amount as number).toFixed(2)}</span>
+                        </div>
+                      ))}
+                  {isEditMode && alreadyPaid > 0 && (
+                    <div className="flex justify-between text-green-600 dark:text-green-400">
+                      <span>Advance Received</span>
+                      <span>−₹{alreadyPaid.toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-sm font-bold text-amber-600 dark:text-amber-400">
                     <span>Balance Payable</span>
                     <span>₹{due.toFixed(2)}</span>
                   </div>
-                  {isEditMode && alreadyPaid > 0 && (
-                    <p className="text-xs text-slate-400 dark:text-slate-500">₹{alreadyPaid.toFixed(2)} already paid</p>
-                  )}
                 </div>
               )}
 
@@ -1231,5 +1334,69 @@ function StayDateRangeModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** §user request, with a reference app's own Booking Source / Payment Mode dropdowns as the
+ * target — a click-to-open list (selected row highlighted, radio dot on the right) instead of a
+ * bare native `<select>`. `description`/`icon` are optional per option so the same component
+ * covers both the plain label-only list (Booking Source) and the icon+subtitle one (Payment
+ * Mode). */
+function Combobox<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string; description?: string; icon?: string }[];
+  onChange: (value: T) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((o) => o.value === value);
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} className={`${inputClass} flex w-full items-center justify-between gap-2 text-left`}>
+        <span className="truncate">{selected ? selected.label : 'Select…'}</span>
+        <span className="shrink-0 text-xs text-slate-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 right-0 z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800">
+            {options.map((o) => {
+              const isSelected = o.value === value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
+                    isSelected ? 'bg-brand-50 dark:bg-brand-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  }`}
+                >
+                  {o.icon && (
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base dark:bg-slate-700">{o.icon}</span>
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-slate-900 dark:text-white">{o.label}</span>
+                    {o.description && <span className="block text-xs text-slate-400 dark:text-slate-500">{o.description}</span>}
+                  </span>
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                      isSelected ? 'border-brand-600 bg-brand-600' : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                  >
+                    {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
   );
 }

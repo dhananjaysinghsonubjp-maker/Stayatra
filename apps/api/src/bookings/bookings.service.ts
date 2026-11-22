@@ -186,6 +186,7 @@ export class BookingsService {
     }[];
     advanceAmount?: number;
     paymentMethod?: PaymentMethod;
+    payments?: { amount: number; method: PaymentMethod; referenceNumber?: string }[];
     // §user request — "corporate booking vala nahi dala hai": set right at creation, applied to
     // every room in the group (same billToCompany* columns setCompanyBilling already uses).
     companyName?: string;
@@ -238,12 +239,16 @@ export class BookingsService {
 
     const reservationGroupId = crypto.randomUUID();
     const grandTotal = input.rooms.reduce((sum, r) => sum + r.totalAmount, 0);
+    // §user request — "cash and UPI dono diya toh hum dono add kar sakein": `payments` (one entry
+    // per mode) takes over from the single advanceAmount/paymentMethod pair whenever it's given.
+    const totalAdvance = input.payments ? input.payments.reduce((sum, p) => sum + p.amount, 0) : (input.advanceAmount ?? 0);
 
     const bookings = await this.prisma.$transaction(async (tx) => {
       const created = [];
       for (const r of roomStays) {
         const room = rooms.find((room) => room.id === r.roomId)!;
-        const share = input.advanceAmount ? (r.totalAmount / grandTotal) * input.advanceAmount : 0;
+        const roomShareRatio = grandTotal > 0 ? r.totalAmount / grandTotal : 0;
+        const share = totalAdvance > 0 ? roomShareRatio * totalAdvance : 0;
         const booking = await tx.booking.create({
           data: {
             hotelId: input.hotelId,
@@ -268,7 +273,7 @@ export class BookingsService {
             status: BookingStatus.confirmed,
             source: input.source,
             paidAmount: share > 0 ? share : undefined,
-            paymentMethod: share > 0 ? input.paymentMethod : undefined,
+            paymentMethod: share > 0 ? (input.payments ? input.payments[0].method : input.paymentMethod) : undefined,
             billToCompanyName: input.companyName,
             billToCompanyTaxIdType: input.companyName ? input.companyTaxIdType : undefined,
             billToCompanyGstin: input.companyName ? input.companyGstin : undefined,
@@ -295,7 +300,15 @@ export class BookingsService {
             })),
           });
         }
-        if (share > 0 && input.paymentMethod) {
+        if (input.payments && roomShareRatio > 0) {
+          for (const p of input.payments) {
+            const amount = Math.round(roomShareRatio * p.amount * 100) / 100;
+            if (amount <= 0) continue;
+            await tx.payment.create({
+              data: { bookingId: booking.id, amount, method: p.method, referenceNumber: p.referenceNumber, collectedBy: input.actorId },
+            });
+          }
+        } else if (share > 0 && input.paymentMethod) {
           await tx.payment.create({
             data: { bookingId: booking.id, amount: share, method: input.paymentMethod, collectedBy: input.actorId },
           });
