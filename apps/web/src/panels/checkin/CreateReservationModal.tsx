@@ -82,6 +82,14 @@ export function CreateReservationModal({
   const [specialRequest, setSpecialRequest] = useState('');
 
   const [picked, setPicked] = useState<PickedRoom[]>([]);
+  // §user request — "ek simple per-room rent daalu aur side mein ek checkbox 'apply to all', to
+  // automatically niche sab rooms mein rent likha aa jaaye": a one-shot bulk-fill, not a persistent
+  // link — checking the box and typing here pushes that rate into every picked room's own rate
+  // field as you type, but each room's field stays independently editable afterward (typing in one
+  // room's own rate never un-fills the others, and nothing stops fine-tuning one room's amount
+  // after the bulk-fill, exactly like the summary-then-override flow asked for).
+  const [applyRateToAll, setApplyRateToAll] = useState(false);
+  const [masterRate, setMasterRate] = useState<number | ''>('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [availableRooms, setAvailableRooms] = useState<(Room & { available: boolean })[]>([]);
   const [draftSelectedIds, setDraftSelectedIds] = useState<string[]>([]);
@@ -338,6 +346,16 @@ export function CreateReservationModal({
     setPicked((prev) => prev.map((p) => (p.room.id === roomId ? { ...p, ratePerNight: rate } : p)));
   }
 
+  function applyMasterRate(rate: number | '') {
+    setMasterRate(rate);
+    if (applyRateToAll && rate !== '') setPicked((prev) => prev.map((p) => ({ ...p, ratePerNight: rate })));
+  }
+
+  function toggleApplyRateToAll(next: boolean) {
+    setApplyRateToAll(next);
+    if (next && masterRate !== '') setPicked((prev) => prev.map((p) => ({ ...p, ratePerNight: Number(masterRate) })));
+  }
+
   function updateRoomDate(roomId: string, field: 'checkIn' | 'checkOut', value: string) {
     setPicked((prev) => prev.map((p) => (p.room.id === roomId ? { ...p, [field]: value } : p)));
   }
@@ -550,6 +568,36 @@ export function CreateReservationModal({
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Rooms</p>
               </div>
+              {/* §user request — "ek simple per room rent daalu aur side mein checkbox 'apply to
+                  all', to automatically niche sab rooms mein rent likha aa jaaye": one master rate,
+                  pushed into every room's own field below while the box stays checked; each room's
+                  own figure in the summary stays editable afterward for a one-off override. Only
+                  worth showing once there's more than one room to spread a rate across. */}
+              {picked.length > 1 && (
+                <div className="mb-2.5 flex items-end gap-2.5 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/40">
+                  <div className="flex-1">
+                    <Field label="Rate /night for all rooms (₹)">
+                      <input
+                        className={inputClass}
+                        type="number"
+                        min={0}
+                        placeholder="e.g. 3500"
+                        value={masterRate}
+                        onChange={(e) => applyMasterRate(e.target.value === '' ? '' : Number(e.target.value))}
+                      />
+                    </Field>
+                  </div>
+                  <label className="mb-2.5 flex shrink-0 items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={applyRateToAll}
+                      onChange={(e) => toggleApplyRateToAll(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    Apply to all
+                  </label>
+                </div>
+              )}
               <div className="space-y-2.5">
                 {roomsWithBase.map((p) => {
                   const roomRatePlans = ratePlans.filter((rp) => rp.roomCategoryId === p.room.roomCategoryId);
