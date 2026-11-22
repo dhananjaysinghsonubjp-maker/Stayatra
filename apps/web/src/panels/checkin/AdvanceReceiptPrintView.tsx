@@ -29,6 +29,12 @@ export function AdvanceReceiptPrintView({ data, onClose }: { data: ReservationSu
   const paymentModes = [...new Set(data.payments.map((p) => paymentMethodLabel(p.method)))].join(', ') || '—';
   const refNumbers = data.payments.map((p) => p.referenceNumber).filter(Boolean).join(', ') || '—';
   const narration = data.due > 0 ? 'PARTIALLY PAID' : 'FULLY PAID';
+  // §user request — "jo recent amount advance humne receive kiya ho vo thoda different colour
+  // mein ho": every payment this reservation has ever collected gets its own dated row (not just
+  // one lump sum), oldest first, with whichever one is most recent highlighted — so a reprinted
+  // receipt after a second Record Payment shows both transactions, not just the new total.
+  const sortedPayments = [...data.payments].sort((a, b) => (a.collectedAt ?? data.createdAt).localeCompare(b.collectedAt ?? data.createdAt));
+  const latestIndex = sortedPayments.length - 1;
 
   return (
     <div className="invoice-print-root fixed inset-0 z-[80] overflow-y-auto bg-slate-900/40 print:bg-white">
@@ -88,8 +94,36 @@ export function AdvanceReceiptPrintView({ data, onClose }: { data: ReservationSu
               <p>
                 Amount Received from <span className="border-b border-dotted border-slate-400 font-bold">{data.guestName}</span>
               </p>
+
+              {sortedPayments.length > 0 && (
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-300 text-left font-semibold text-slate-500">
+                      <th className="py-1.5">Date &amp; Time</th>
+                      <th className="py-1.5">Mode</th>
+                      <th className="py-1.5 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedPayments.map((p, i) => {
+                      const isLatest = i === latestIndex;
+                      return (
+                        <tr key={i} className={isLatest ? 'bg-emerald-50 font-bold text-emerald-700' : 'text-slate-700'}>
+                          <td className="py-1.5 pl-1">{formatDateTimeShort(p.collectedAt ?? data.createdAt)}</td>
+                          <td className="py-1.5">
+                            {paymentMethodLabel(p.method)}
+                            {isLatest ? ' (Latest)' : ''}
+                          </td>
+                          <td className="py-1.5 pr-1 text-right">₹{p.amount.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+
               <p>
-                a Sum of Rs.{' '}
+                Total Advance Received: Rs.{' '}
                 <span className="border-b border-dotted border-slate-400 font-bold">
                   {data.advanceAmount.toFixed(2)} ( {amountInWords(data.advanceAmount)} )
                 </span>

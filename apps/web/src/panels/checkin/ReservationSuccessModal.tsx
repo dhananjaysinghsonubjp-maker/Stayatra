@@ -19,6 +19,11 @@ export interface ReservationSuccessPayment {
   method: PaymentMethod;
   amount: number;
   referenceNumber?: string;
+  /** When this specific transaction was collected — lets the receipt show every payment as its
+   * own dated row instead of one lump sum, and highlight whichever is most recent. Falls back to
+   * the reservation's own createdAt for a fresh creation, where every payment was just collected
+   * "now" and has no real per-transaction timestamp of its own yet. */
+  collectedAt?: string;
 }
 
 export interface ReservationSuccessData {

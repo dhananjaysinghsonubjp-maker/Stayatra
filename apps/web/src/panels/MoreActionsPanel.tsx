@@ -69,7 +69,7 @@ function buildReceiptData(hotelId: string, group: Booking[], roomsById: Map<stri
   const paid = group.reduce((sum, b) => sum + Number(b.paidAmount ?? 0), 0);
   const due = Math.max(0, grandTotal - paid);
   const payments = group.flatMap((b) =>
-    (b.payments ?? []).map((p) => ({ method: p.method as PaymentMethod, amount: Number(p.amount), referenceNumber: p.referenceNumber ?? undefined })),
+    (b.payments ?? []).map((p) => ({ method: p.method as PaymentMethod, amount: Number(p.amount), referenceNumber: p.referenceNumber ?? undefined, collectedAt: p.collectedAt })),
   );
 
   return {
@@ -128,6 +128,7 @@ export function MoreActionsPanel({
   const dues = new Map<string, number>();
   let groupGrandTotal = 0;
   let groupDue = 0;
+  let groupPaid = 0;
   for (const b of group) {
     const totals = computeInvoiceTotals({
       totalAmount: Number(b.totalAmount),
@@ -135,10 +136,12 @@ export function MoreActionsPanel({
       discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
       gstExempt: b.gstExempt,
     });
-    const due = Math.max(0, totals.grandTotal - Number(b.paidAmount ?? 0));
+    const paid = Number(b.paidAmount ?? 0);
+    const due = Math.max(0, totals.grandTotal - paid);
     dues.set(b.id, due);
     groupGrandTotal += totals.grandTotal;
     groupDue += due;
+    groupPaid += paid;
   }
   const roomSummary = (() => {
     const counts = new Map<string, number>();
@@ -321,25 +324,34 @@ export function MoreActionsPanel({
               <Field label="Reason For Cancellation *">
                 <textarea className={`${inputClass} min-h-20`} value={endReason} onChange={(e) => setEndReason(e.target.value)} placeholder="Enter reason" />
               </Field>
+              {/* §bugfix — "jo guest ne advance amount paid kiya hai vo show hona chahiye, uske
+                  neeche se cancellation charges deduct karke denge": a refund can only ever come
+                  out of what the guest actually already paid, never the full booking value — so
+                  this now shows Advance Paid (not Total) as the figure the charge is subtracted
+                  from, with the cancellation charge itself capped at that same paid amount. */}
               <div className="my-4 space-y-2 rounded-xl bg-slate-50 p-4 dark:bg-slate-900/40">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-600 dark:text-slate-300">Total Booking Amount</span>
                   <span className="font-bold text-slate-900 dark:text-white">₹{groupGrandTotal.toFixed(2)}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600 dark:text-slate-300">Advance Paid</span>
+                  <span className="font-bold text-slate-900 dark:text-white">₹{groupPaid.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-600 dark:text-slate-300">Cancellation Charge</span>
                   <input
                     type="number"
                     min={0}
-                    max={groupGrandTotal}
+                    max={groupPaid}
                     className="w-32 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-semibold text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
                     value={cancellationCharge}
-                    onChange={(e) => setCancellationCharge(Math.max(0, Math.min(groupGrandTotal, Number(e.target.value))))}
+                    onChange={(e) => setCancellationCharge(Math.max(0, Math.min(groupPaid, Number(e.target.value))))}
                   />
                 </div>
                 <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-sm dark:border-slate-700">
                   <span className="font-bold text-emerald-600 dark:text-emerald-400">Refund Amount</span>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400">₹{Math.max(0, groupGrandTotal - cancellationCharge).toFixed(2)}</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">₹{Math.max(0, groupPaid - cancellationCharge).toFixed(2)}</span>
                 </div>
               </div>
               <div className="space-y-2">

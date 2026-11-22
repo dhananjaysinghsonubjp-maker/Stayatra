@@ -492,9 +492,10 @@ export function CreateReservationModal({
         return;
       }
 
+      const paymentTimestamp = new Date().toISOString();
       const payments = paymentRows
         .filter((r) => r.amount !== '' && r.amount > 0)
-        .map((r) => ({ amount: r.amount as number, method: r.method, referenceNumber: r.referenceNumber.trim() || undefined }));
+        .map((r) => ({ amount: r.amount as number, method: r.method, referenceNumber: r.referenceNumber.trim() || undefined, collectedAt: paymentTimestamp }));
       const created = await mutate<Booking[]>(
         'bookings.createMultiRoomReservation',
         { ...shared, payments: payments.length > 0 ? payments : undefined },
@@ -511,7 +512,7 @@ export function CreateReservationModal({
       setSuccessData({
         hotelId,
         bookingCode: `BK-${(created[0]?.id ?? '').slice(-6).toUpperCase()}`,
-        createdAt: new Date().toISOString(),
+        createdAt: paymentTimestamp,
         guestName,
         guestPhone: guestPhone || undefined,
         companyName: isCorporate ? companyName.trim() || undefined : undefined,
