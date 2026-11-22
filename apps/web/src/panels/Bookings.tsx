@@ -9,9 +9,9 @@ import { BookingViewModal } from './BookingViewModal';
 import { ReservationDetailModal } from './ReservationDetailModal';
 import { computeInvoiceTotals } from '../invoice';
 import { SOURCE_LABEL } from './channel-manager/ota-labels';
-import { ChannelIcon } from './channel-manager/ChannelBadge';
+import { ChannelBadge } from './channel-manager/ChannelBadge';
 import { formatDateShort } from '../dateFormat';
-import type { Booking, RoomCategory } from '../types';
+import type { Booking, Room, RoomCategory } from '../types';
 
 type ListTab = 'upcoming' | 'checked_in' | 'history';
 const TAB_LABEL: Record<ListTab, string> = { upcoming: 'Upcoming', checked_in: 'Checked In', history: 'History' };
@@ -22,10 +22,19 @@ const STATUS_LABEL: Record<Booking['status'], string> = {
   cancelled: 'Cancelled',
 };
 
+/** "23 Nov" — the date-section header above a day's run of reservations, no year (this list
+ * never spans far enough for that to matter) and deliberately shorter than formatDateShort's own
+ * DD/MM/YY, since that reads badly as a standalone heading. */
+function dateHeaderLabel(dateKey: string) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
 export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?: boolean }) {
   const { token } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [categories, setCategories] = useState<RoomCategory[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [payingBooking, setPayingBooking] = useState<Booking | null>(null);
   const [checkingInBooking, setCheckingInBooking] = useState<Booking | null>(null);
@@ -38,12 +47,14 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
 
   async function refresh() {
     try {
-      const [b, c] = await Promise.all([
+      const [b, c, r] = await Promise.all([
         query<Booking[]>('bookings.listReservations', { hotelId }, token ?? undefined),
         query<RoomCategory[]>('hotels.listRoomCategories', { hotelId }, token ?? undefined),
+        query<Room[]>('hotels.listRooms', { hotelId }, token ?? undefined),
       ]);
       setBookings(b);
       setCategories(c);
+      setRooms(r);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load reservations');
     }
@@ -111,6 +122,24 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
       ),
     );
   }, [groupedRows, search]);
+
+  const roomsById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
+
+  // §user request — "after creating a reservation ye saari dates k according upcoming bookings
+  // mein show ho" + a reference app's own date-grouped list as the target: a date header (e.g.
+  // "23 Nov") above every run of same-day reservations, instead of one flat list. The API already
+  // orders by checkIn ascending, so this only needs to notice when the date changes between
+  // consecutive groups — no separate sort.
+  const dateSections = useMemo(() => {
+    const sections: { dateKey: string; groups: Booking[][] }[] = [];
+    for (const group of searchedRows) {
+      const dateKey = group[0].checkIn.slice(0, 10);
+      const last = sections[sections.length - 1];
+      if (last && last.dateKey === dateKey) last.groups.push(group);
+      else sections.push({ dateKey, groups: [group] });
+    }
+    return sections;
+  }, [searchedRows]);
 
   // Derived live (not a snapshot) so the open detail modal reflects a check-in/payment right
   // after it happens, instead of showing stale data until the modal is closed and reopened.
@@ -188,55 +217,23 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
           </CardBody>
         </Card>
       ) : (
-        <div className="space-y-2.5">
-          {searchedRows.map((group) => {
-            const b = group[0];
-            const grandTotal = group.reduce((sum, row) => {
-              const totals = computeInvoiceTotals({
-                totalAmount: Number(row.totalAmount),
-                lineItems: row.lineItems ?? [],
-                discountAmount: row.discountAmount ? Number(row.discountAmount) : null,
-                gstExempt: row.gstExempt,
-              });
-              return sum + totals.grandTotal;
-            }, 0);
-            const paid = group.reduce((sum, row) => sum + Number(row.paidAmount ?? 0), 0);
-            const due = Math.max(0, grandTotal - paid);
-            const roomType = categories.find((c) => c.id === b.roomCategoryId)?.name ?? '—';
-            const statuses = new Set(group.map((row) => row.status));
-            const groupLabel = statuses.size === 1 ? STATUS_LABEL[b.status] : 'Partially Checked In';
-            return (
-              <button
-                key={group.length > 1 ? b.reservationGroupId! : b.id}
-                onClick={() => (group.length > 1 ? setViewingGroupKey(b.reservationGroupId ?? b.id) : setViewingBooking(b))}
-                className="flex w-full items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-shadow hover:shadow dark:border-slate-700 dark:bg-slate-800"
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <ChannelIcon source={b.source} className="mt-0.5 h-8 w-8" />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{b.guestName}</p>
-                      {b.billToCompanyName && (
-                        <span className="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
-                          🏢 Corporate
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                      {group.length > 1 ? `${group.length} Rooms` : roomType} · {formatDateShort(b.checkIn)} – {formatDateShort(b.checkOut)}
-                    </p>
-                    {b.guestPhone && <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{b.guestPhone}</p>}
-                    {due > 0 && <p className="mt-1 text-xs font-semibold text-amber-600 dark:text-amber-400">₹{due.toFixed(2)} due</p>}
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <Badge tone={statuses.size === 1 ? b.status : 'checked_in'}>{groupLabel}</Badge>
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-slate-700 dark:text-slate-400">{b.nights}N</span>
-                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">#{b.id.slice(-6).toUpperCase()}</span>
-                </div>
-              </button>
-            );
-          })}
+        <div className="space-y-5">
+          {dateSections.map((section) => (
+            <div key={section.dateKey}>
+              <p className="mb-2.5 text-sm font-bold text-slate-500 dark:text-slate-400">{dateHeaderLabel(section.dateKey)}</p>
+              <div className="space-y-2.5">
+                {section.groups.map((group) => (
+                  <ReservationCard
+                    key={group.length > 1 ? group[0].reservationGroupId! : group[0].id}
+                    group={group}
+                    categories={categories}
+                    roomsById={roomsById}
+                    onClick={() => (group.length > 1 ? setViewingGroupKey(group[0].reservationGroupId ?? group[0].id) : setViewingBooking(group[0]))}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -305,6 +302,136 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
         />
       )}
     </div>
+  );
+}
+
+/**
+ * §user request, with a reference app's own Reservations card as the visual target — an
+ * initials avatar, a Check In/Check Out row, a per-category room-count summary with a couple of
+ * actual room-number chips, and a Total Amount/Due/Reserved-count footer, instead of the plain
+ * one-line summary this list used to show.
+ */
+function ReservationCard({
+  group,
+  categories,
+  roomsById,
+  onClick,
+}: {
+  group: Booking[];
+  categories: RoomCategory[];
+  roomsById: Map<string, Room>;
+  onClick: () => void;
+}) {
+  const b = group[0];
+  const grandTotal = group.reduce((sum, row) => {
+    const totals = computeInvoiceTotals({
+      totalAmount: Number(row.totalAmount),
+      lineItems: row.lineItems ?? [],
+      discountAmount: row.discountAmount ? Number(row.discountAmount) : null,
+      gstExempt: row.gstExempt,
+    });
+    return sum + totals.grandTotal;
+  }, 0);
+  const paid = group.reduce((sum, row) => sum + Number(row.paidAmount ?? 0), 0);
+  const due = Math.max(0, grandTotal - paid);
+  const statuses = new Set(group.map((row) => row.status));
+  const groupLabel = statuses.size === 1 ? STATUS_LABEL[b.status] : 'Partially Checked In';
+  const activeCount = group.filter((row) => row.status !== 'cancelled').length;
+
+  const categoryCounts = new Map<string, number>();
+  for (const row of group) {
+    const name = roomsById.get(row.assignedRoomId ?? '')?.roomCategory?.name ?? categories.find((c) => c.id === row.roomCategoryId)?.name ?? '—';
+    categoryCounts.set(name, (categoryCounts.get(name) ?? 0) + 1);
+  }
+  const roomSummary = [...categoryCounts.entries()].map(([name, count]) => `${count} ${name}`).join(' · ');
+  const roomNumbers = group.map((row) => roomsById.get(row.assignedRoomId ?? '')?.roomNumber).filter((n): n is string => Boolean(n));
+
+  return (
+    <button
+      onClick={onClick}
+      className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-sm transition-shadow hover:shadow dark:border-slate-700 dark:bg-slate-800"
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-500 dark:text-slate-400">#{b.id.slice(-6).toUpperCase()}</span>
+          <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-400 shadow-sm dark:bg-slate-800 dark:text-slate-500">
+            Booked: {formatDateShort(b.createdAt)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <ChannelBadge source={b.source} />
+          <Badge tone={statuses.size === 1 ? b.status : 'checked_in'}>{groupLabel}</Badge>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2.5 px-4 py-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
+          {b.guestName.slice(0, 2).toUpperCase()}
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{b.guestName}</p>
+            {b.billToCompanyName && (
+              <span className="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+                🏢 Corporate
+              </span>
+            )}
+          </div>
+          {b.guestPhone && <p className="truncate text-xs text-brand-600 dark:text-brand-400">{b.guestPhone}</p>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 border-t border-slate-100 px-4 py-3 dark:border-slate-700">
+        <div>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">Check In</p>
+          <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(b.checkIn)}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">Check Out</p>
+          <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDateShort(b.checkOut)}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 dark:border-slate-700">
+        <p className="min-w-0 truncate text-sm text-slate-600 dark:text-slate-300">🛏 {roomSummary}</p>
+        <div className="flex shrink-0 items-center gap-1">
+          {roomNumbers.slice(0, 2).map((n) => (
+            <span key={n} className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+              {n}
+            </span>
+          ))}
+          {roomNumbers.length > 2 && (
+            <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-400">
+              +{roomNumbers.length - 2}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 dark:border-slate-700">
+        <div className="flex items-center gap-4">
+          <div>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">Total Amount</p>
+            <p className="text-sm font-bold text-slate-900 dark:text-white">₹{grandTotal.toFixed(0)}</p>
+          </div>
+          {due > 0 && (
+            <div>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">Due</p>
+              <p className="text-sm font-bold text-red-500">₹{due.toFixed(0)}</p>
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+            {b.nights} Night{b.nights === 1 ? '' : 's'}
+          </span>
+          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+            {activeCount}/{group.length} Reserved
+          </span>
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-400 dark:border-slate-600">→</span>
+        </div>
+      </div>
+    </button>
   );
 }
 
