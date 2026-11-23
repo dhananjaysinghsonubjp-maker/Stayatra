@@ -168,6 +168,24 @@ body {
   background-image: linear-gradient(#1e293b, #1e293b), linear-gradient(90deg, #a17f1a, var(--color-brand-500), #a17f1a, var(--color-brand-500), #a17f1a);
 }
 
+/* §user request — "us border ko dark & light blue animation mein dena hai": the Today's
+   Reservations box itself (not each individual reservation row any more — those just alternate
+   grey/white now) gets an animated border shimmering between the brand's dark navy and its
+   lighter blue shade, same two-layer background-clip trick as the VIP cards above. */
+.todays-reservations-card {
+  border: 2px solid transparent;
+  background-image: linear-gradient(white, white), linear-gradient(90deg, var(--color-brand-600), var(--color-brand-500), var(--color-brand-600), var(--color-brand-500), var(--color-brand-600));
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  background-size:
+    100% 100%,
+    200% 100%;
+  animation: vip-shine 3.5s linear infinite;
+}
+.dark .todays-reservations-card {
+  background-image: linear-gradient(#1e293b, #1e293b), linear-gradient(90deg, var(--color-brand-600), var(--color-brand-500), var(--color-brand-600), var(--color-brand-500), var(--color-brand-600));
+}
+
 /* §user request — an ocean-wave strip along the very bottom of the hotel banner, with a shark fin
    that surfaces and swims right-to-left across it. Full 2-minute (120s) cycle: water fades in over
    3s, *then* the fin glides right-to-left in one smooth, slow, uninterrupted 8s pass, *then* (once

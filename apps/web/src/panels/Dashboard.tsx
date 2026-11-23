@@ -156,7 +156,7 @@ function StaffApprovalAlert({ count, onPress }: { count: number; onPress: () => 
  * summary in place of that list's category/amount details, since this box's only job is "who's
  * still waiting to be checked in today". Clicking it goes straight to that reservation's own
  * full-page Booking Details view, same as clicking it from the Reservations list itself. */
-function TodaysReservationCard({ group, rooms, onClick }: { group: Booking[]; rooms: Room[]; onClick: () => void }) {
+function TodaysReservationCard({ group, rooms, alt, onClick }: { group: Booking[]; rooms: Room[]; alt: boolean; onClick: () => void }) {
   const lead = group[0];
   const bookerName = lead.bookedByName ?? lead.guestName;
   const bookerPhone = lead.bookedByPhone ?? lead.guestPhone;
@@ -172,13 +172,13 @@ function TodaysReservationCard({ group, rooms, onClick }: { group: Booking[]; ro
       type="button"
       onClick={onClick}
       className={`w-full overflow-hidden rounded-xl text-left shadow-sm transition-shadow hover:shadow ${
-        lead.isVip ? 'vip-card-blue-gold' : 'border-2 border-brand-600 bg-white dark:border-brand-400 dark:bg-slate-800'
+        lead.isVip ? 'vip-card-blue-gold' : alt ? 'bg-slate-50 dark:bg-slate-900/40' : 'bg-white dark:bg-slate-800'
       }`}
     >
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5 dark:border-slate-700">
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-slate-500 dark:text-slate-400">#{bookingIdShort}</span>
-          <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-400 shadow-sm dark:bg-slate-800 dark:text-slate-500">
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 dark:bg-slate-700 dark:text-slate-500">
             Booked: {formatDateShort(lead.createdAt)}
           </span>
         </div>
@@ -237,15 +237,16 @@ function TodaysReservations({ arrivals, rooms, onOpenReservation }: { arrivals: 
   if (pendingGroups.length === 0) return null;
 
   return (
-    <Card className="mb-6">
+    <Card className="mb-6 todays-reservations-card">
       <CardHeader title="Today's Reservations" subtitle="Guests checking in today" />
       <CardBody>
         <div className="space-y-2.5">
-          {pendingGroups.map((group) => (
+          {pendingGroups.map((group, i) => (
             <TodaysReservationCard
               key={group[0].reservationGroupId ?? group[0].id}
               group={group}
               rooms={rooms}
+              alt={i % 2 === 1}
               onClick={() => onOpenReservation(group[0].reservationGroupId ?? group[0].id)}
             />
           ))}
