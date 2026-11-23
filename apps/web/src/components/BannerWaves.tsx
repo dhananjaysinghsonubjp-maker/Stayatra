@@ -28,13 +28,14 @@ export function BannerWaves() {
           style={{ backgroundImage: `url("data:image/svg+xml,${WAVE_FRONT}")`, backgroundRepeat: 'repeat-x', backgroundSize: '120px 100%' }}
         />
       </div>
-      {/* Classic shark-fin silhouette — pointed top, flat base, one curved trailing edge — matching
-          the reference screenshot's own fin, dark enough to read as "poking up through" the wave
-          band in front of it (DOM order: waves are painted first, this fin last/on top). Bigger
-          than the wave strip itself per feedback, so it isn't clipped by that strip's own
-          overflow-hidden. */}
-      <svg className="banner-shark-fin absolute bottom-0 h-8 w-8 sm:h-9 sm:w-9" viewBox="0 0 24 24" fill="#0b1240">
-        <path d="M12 2 C 9 9 8 15 8 20 L19 20 C 14 16 12.5 9 12 2 Z" />
+      {/* Shark-fin silhouette redrawn to match the reference exactly — a near-straight trailing
+          (right) edge down from the point, a flat base, and a swept, gently curved leading (left)
+          edge back up to the point. Taller than wide (a 16:24 viewBox, not a square one), dark
+          enough to read as "poking up through" the wave band in front of it (DOM order: waves are
+          painted first, this fin last/on top). Bigger than the wave strip itself, so it isn't
+          clipped by that strip's own overflow-hidden. */}
+      <svg className="banner-shark-fin absolute bottom-0 h-9 w-6 sm:h-10 sm:w-7" viewBox="0 0 16 24" fill="#0b1240">
+        <path d="M12 1 L12.5 22 L3 22 C 4 17 7 8 12 1 Z" />
       </svg>
     </div>
   );
