@@ -2,8 +2,8 @@ import { HttpException } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { type NestExpressApplication } from '@nestjs/platform-express';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
-import path from 'node:path';
 import { AppModule } from './app.module.js';
+import { UPLOAD_ROOT } from './common/upload-root.js';
 import { PrismaService } from './prisma/prisma.service.js';
 import { AuthService } from './auth/auth.service.js';
 import { HotelsService } from './hotels/hotels.service.js';
@@ -37,7 +37,7 @@ async function bootstrap() {
   // deploy, tighten to the real frontend URL once this isn't just a UI preview.
   const corsOrigin = process.env.CORS_ORIGIN?.split(',').map((o) => o.trim());
   app.enableCors({ origin: corsOrigin ?? true, credentials: true });
-  app.useStaticAssets(path.resolve(process.cwd(), 'uploads'), { prefix: '/uploads/' });
+  app.useStaticAssets(UPLOAD_ROOT, { prefix: '/uploads/' });
 
   const prisma = app.get(PrismaService);
   const auth = app.get(AuthService);

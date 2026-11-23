@@ -6,8 +6,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AuthService } from '../auth/auth.service.js';
 import { ID_EXTRACTOR, type IdExtractor } from './id-extractor.interface.js';
+import { UPLOAD_ROOT } from '../common/upload-root.js';
 
-const UPLOAD_ROOT = path.resolve(process.cwd(), 'uploads'); // dev-only local disk — S3 in production, per §3
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_BYTES = 8 * 1024 * 1024;
 
