@@ -150,6 +150,24 @@ body {
   background-image: linear-gradient(#1e293b, #1e293b), linear-gradient(90deg, #a17f1a, #ffe68a, #a17f1a, #ffe68a, #a17f1a);
 }
 
+/* §user request — "jo golden animation VIP booking mein diya hai, vaise iske border mein bhi
+   golden-blue animation chalega": same shimmer trick as .vip-card above, but alternating gold
+   with the brand blue instead of a lighter gold tint — for Dashboard's "Today's Reservations"
+   cards, whose own non-VIP state is already a solid brand-blue border. */
+.vip-card-blue-gold {
+  border: 2px solid transparent;
+  background-image: linear-gradient(white, white), linear-gradient(90deg, #d4af37, var(--color-brand-500), #d4af37, var(--color-brand-500), #d4af37);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  background-size:
+    100% 100%,
+    200% 100%;
+  animation: vip-shine 3.5s linear infinite;
+}
+.dark .vip-card-blue-gold {
+  background-image: linear-gradient(#1e293b, #1e293b), linear-gradient(90deg, #a17f1a, var(--color-brand-500), #a17f1a, var(--color-brand-500), #a17f1a);
+}
+
 /* §user request — an ocean-wave strip along the very bottom of the hotel banner, with a shark fin
    that surfaces and swims right-to-left across it. Full 2-minute (120s) cycle: water fades in over
    3s, *then* the fin glides right-to-left in one smooth, slow, uninterrupted 8s pass, *then* (once

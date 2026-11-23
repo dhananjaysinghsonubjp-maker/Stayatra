@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
 import { query } from '../api';
 import { useAuth } from '../AuthContext';
-import { Card, CardBody, CardHeader, EmptyState, StatCard } from '../components/ui';
+import { Badge, Card, CardBody, CardHeader, EmptyState, StatCard } from '../components/ui';
 import { ChannelBadge } from './channel-manager/ChannelBadge';
 import { ChannelManagerDashboard } from './channel-manager/ChannelManagerDashboard';
 import { OccupancyDonut, RevenueHeatmap, RevenueTrendChart } from './dashboard/PerformanceCharts';
+import { formatDateShort } from '../dateFormat';
 import type { Booking, CleaningRecord, InHouseRow, OtaConnection, Room, StaffProfile } from '../types';
 import type { Tab } from '../layout/Sidebar';
+
+const RESERVATION_STATUS_LABEL: Record<Booking['status'], string> = {
+  confirmed: 'Upcoming',
+  checked_in: 'Checked In',
+  checked_out: 'Checked Out',
+  cancelled: 'Cancelled',
+  no_show: 'No Show',
+  void: 'Voided',
+};
 
 function isToday(iso: string) {
   const d = new Date(iso);
@@ -151,6 +161,8 @@ function TodaysReservationCard({ group, rooms, onClick }: { group: Booking[]; ro
   const bookerName = lead.bookedByName ?? lead.guestName;
   const bookerPhone = lead.bookedByPhone ?? lead.guestPhone;
   const bookingIdShort = lead.id.slice(-6).toUpperCase();
+  const statuses = new Set(group.map((b) => b.status));
+  const statusLabel = statuses.size === 1 ? RESERVATION_STATUS_LABEL[lead.status] : 'Partially Checked In';
   const roomNumberFor = (b: Booking) => rooms.find((r) => r.id === b.assignedRoomId)?.roomNumber;
   const pendingRooms = group.filter((b) => b.status === 'confirmed').map(roomNumberFor).filter((n): n is string => Boolean(n));
   const doneRooms = group.filter((b) => b.status === 'checked_in' || b.status === 'checked_out').map(roomNumberFor).filter((n): n is string => Boolean(n));
@@ -159,29 +171,43 @@ function TodaysReservationCard({ group, rooms, onClick }: { group: Booking[]; ro
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-xl border-2 border-brand-500/70 bg-brand-50/50 p-3.5 text-left shadow-sm transition-shadow hover:shadow dark:border-brand-400/60 dark:bg-brand-500/10"
+      className={`w-full overflow-hidden rounded-xl text-left shadow-sm transition-shadow hover:shadow ${
+        lead.isVip ? 'vip-card-blue-gold' : 'border-2 border-brand-600 bg-white dark:border-brand-400 dark:bg-slate-800'
+      }`}
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-bold text-slate-500 dark:text-slate-400">#{bookingIdShort}</span>
-        <ChannelBadge source={lead.source} />
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/40">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-500 dark:text-slate-400">#{bookingIdShort}</span>
+          <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-400 shadow-sm dark:bg-slate-800 dark:text-slate-500">
+            Booked: {formatDateShort(lead.createdAt)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <ChannelBadge source={lead.source} />
+          <Badge tone={statuses.size === 1 ? lead.status : 'checked_in'}>{statusLabel}</Badge>
+        </div>
       </div>
-      <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
+
+      <div className="flex items-center gap-2.5 px-4 py-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
           {bookerName.slice(0, 2).toUpperCase()}
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0">
           <p className="flex items-center gap-1.5 truncate text-sm font-bold text-slate-900 dark:text-white">
             {bookerName} {lead.isVip && <span title="VIP">👑</span>}
           </p>
           {bookerPhone && <p className="truncate text-xs text-brand-600 dark:text-brand-400">{bookerPhone}</p>}
         </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 dark:border-slate-700">
+        <p className="min-w-0 truncate text-xs">
+          {pendingRooms.length > 0 && <span className="font-medium text-amber-600 dark:text-amber-400">Pending: {pendingRooms.join(', ')}</span>}
+          {pendingRooms.length > 0 && doneRooms.length > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+          {doneRooms.length > 0 && <span className="font-medium text-emerald-600 dark:text-emerald-400">Checked in: {doneRooms.join(', ')}</span>}
+        </p>
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-400 dark:border-slate-600">→</span>
       </div>
-      <p className="mt-2 truncate text-xs">
-        {pendingRooms.length > 0 && <span className="font-medium text-amber-600 dark:text-amber-400">Pending: {pendingRooms.join(', ')}</span>}
-        {pendingRooms.length > 0 && doneRooms.length > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-        {doneRooms.length > 0 && <span className="font-medium text-emerald-600 dark:text-emerald-400">Checked in: {doneRooms.join(', ')}</span>}
-      </p>
     </button>
   );
 }
