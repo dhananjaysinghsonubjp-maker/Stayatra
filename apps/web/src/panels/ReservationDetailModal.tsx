@@ -1,17 +1,16 @@
-import { useEffect, useState } from 'react';
-import { query, mutate, ApiError } from '../api';
+import { useState } from 'react';
+import { mutate, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
-import { Badge, Button, Card, inputClass } from '../components/ui';
+import { Badge, Button, inputClass } from '../components/ui';
 import { computeInvoiceTotals } from '../invoice';
 import { formatDateShort, formatDateTimeShort } from '../dateFormat';
 import { istDateKey } from '../components/DateRangePicker';
 import { ChannelIcon } from './channel-manager/ChannelBadge';
 import { SOURCE_LABEL } from './channel-manager/ota-labels';
 import { CheckInModal } from './checkin/CheckInModal';
-import { AddPaymentModal } from './AddPaymentModal';
-import { GroupPaymentModal } from './GroupPaymentModal';
 import { PaymentHistory, type PaymentHistoryEntry } from './PaymentHistory';
 import { InvoicePrintView } from './InvoicePrintView';
+import type { MoreActionsView } from './MoreActionsPanel';
 import type { Booking, Room, RatePlan } from '../types';
 
 const STATUS_LABEL: Record<Booking['status'], string> = {
@@ -30,17 +29,32 @@ function groupStatus(bookings: Booking[]): Booking['status'] | 'partial' {
   return bookings[0].status;
 }
 
-/** One room's own row in the reservation — its own status, own rate, own "Check in" (so a
- * multi-room reservation's "Partial Check-in" is just checking in some rooms and not others,
- * nothing more than each Booking row's own existing status machinery). */
-function RoomRow({
+/** "23 Nov 2026" — matches the reference page's own header date style, distinct from this app's
+ * usual DD/MM/YY (formatDateShort). */
+function formatDateLong(iso: string) {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
+function initialsOf(name: string) {
+  const parts = name.trim().split(/\s+/);
+  return parts.length > 1 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : name.slice(0, 2).toUpperCase();
+}
+
+/** One room's own row inside the Rooms table — its own status, own rate, own "⋮" menu for the
+ * same per-room actions the old card-style view had inline (change room, remove room, add charge,
+ * print invoice) plus its own Check-in, now tucked behind a menu so the row stays a single
+ * compact line matching the reference table. */
+function RoomTableRow({
   booking,
   room,
+  ratePlans,
   today,
   canManage,
   candidateRooms,
+  checked,
+  onToggleChecked,
   onCheckIn,
-  onAddPayment,
   onReassignRoom,
   onRemoveRoom,
   onAddCharge,
@@ -49,27 +63,56 @@ function RoomRow({
 }: {
   booking: Booking;
   room: Room | undefined;
+  ratePlans: RatePlan[];
   today: string;
   canManage: boolean;
   candidateRooms: Room[];
+  checked: boolean;
+  onToggleChecked: () => void;
   onCheckIn: () => void;
-  onAddPayment: () => void;
   onReassignRoom: (roomId: string) => Promise<void>;
   onRemoveRoom: () => void;
   onAddCharge: (description: string, quantity: number, unitPrice: number) => Promise<void>;
   onRemoveCharge: (lineItemId: string) => Promise<void>;
   onPrintInvoice: () => void;
 }) {
-  const [reassigning, setReassigning] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [mode, setMode] = useState<'none' | 'reassign' | 'charge'>('none');
   const [pickedRoomId, setPickedRoomId] = useState('');
   const [saving, setSaving] = useState(false);
   const [reassignError, setReassignError] = useState<string | null>(null);
-  const [addingCharge, setAddingCharge] = useState(false);
   const [chargeDesc, setChargeDesc] = useState('');
   const [chargeQty, setChargeQty] = useState(1);
   const [chargeUnitPrice, setChargeUnitPrice] = useState(0);
   const [chargeSaving, setChargeSaving] = useState(false);
   const [chargeError, setChargeError] = useState<string | null>(null);
+
+  const totals = computeInvoiceTotals({
+    totalAmount: Number(booking.totalAmount),
+    lineItems: booking.lineItems ?? [],
+    discountAmount: booking.discountAmount ? Number(booking.discountAmount) : null,
+    gstExempt: booking.gstExempt,
+  });
+  const due = Math.max(0, totals.grandTotal - Number(booking.paidAmount ?? 0));
+  const isFutureStay = booking.status === 'confirmed' && booking.checkIn.slice(0, 10) > today;
+  const guestCount = 1 + (booking.guests?.length ?? 0);
+  const ratePlan = ratePlans.find((rp) => rp.id === booking.ratePlanId);
+  const mealPlanLabel = ratePlan?.mealPlan ?? ratePlan?.name ?? '—';
+
+  async function confirmReassign() {
+    if (!pickedRoomId) return;
+    setSaving(true);
+    setReassignError(null);
+    try {
+      await onReassignRoom(pickedRoomId);
+      setMode('none');
+      setPickedRoomId('');
+    } catch (err) {
+      setReassignError(err instanceof ApiError ? err.message : 'Failed to change room');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function confirmAddCharge() {
     if (!chargeDesc.trim()) return;
@@ -77,7 +120,7 @@ function RoomRow({
     setChargeError(null);
     try {
       await onAddCharge(chargeDesc.trim(), chargeQty, chargeUnitPrice);
-      setAddingCharge(false);
+      setMode('none');
       setChargeDesc('');
       setChargeQty(1);
       setChargeUnitPrice(0);
@@ -88,132 +131,115 @@ function RoomRow({
     }
   }
 
-  const totals = computeInvoiceTotals({
-    totalAmount: Number(booking.totalAmount),
-    lineItems: booking.lineItems ?? [],
-    discountAmount: booking.discountAmount ? Number(booking.discountAmount) : null,
-    gstExempt: booking.gstExempt,
-  });
-  const due = Math.max(0, totals.grandTotal - Number(booking.paidAmount ?? 0));
-  // §user request — "Start Check-in block rahega jab tak date na aaye": a reservation days out
-  // still shouldn't invite an accidental early check-in click, but the just-added dates-editable
-  // check-in flow is exactly how a genuine early arrival gets handled — so this stays reachable
-  // (muted, smaller) instead of fully disabled.
-  const isFutureStay = booking.status === 'confirmed' && booking.checkIn.slice(0, 10) > today;
-
-  async function confirmReassign() {
-    if (!pickedRoomId) return;
-    setSaving(true);
-    setReassignError(null);
-    try {
-      await onReassignRoom(pickedRoomId);
-      setReassigning(false);
-      setPickedRoomId('');
-    } catch (err) {
-      setReassignError(err instanceof ApiError ? err.message : 'Failed to change room');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
-    <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-bold text-slate-900 dark:text-white">
-            Room {room?.roomNumber ?? '—'}
-            <span className="ml-2 text-xs font-normal text-slate-400 dark:text-slate-500">
-              {formatDateShort(booking.checkIn)} – {formatDateShort(booking.checkOut)}
-            </span>
+    <div className="border-b border-slate-100 py-3 last:border-0 dark:border-slate-700/60">
+      <div className="flex items-center gap-3">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={booking.status !== 'confirmed'}
+          onChange={onToggleChecked}
+          className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-30 dark:border-slate-600"
+        />
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base dark:bg-slate-700">🛏️</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">
+            {room?.roomNumber ?? '—'} {booking.isVip && <span title="VIP">👑</span>}
           </p>
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            {room?.roomCategory?.name ?? '—'} · ₹{totals.grandTotal.toFixed(2)}
-            {/* §user request — "har booking ka invoice chahiye": a group reservation's own rooms
-                had no invoice at all before — only a standalone single-room booking did
-                (BookingViewModal's "Print Invoice"). Same InvoicePrintView, reused per room
-                here, works regardless of status (confirmed/checked_in/checked_out — a guest can
-                still want their invoice after checkout). */}
-            <button onClick={onPrintInvoice} className="ml-2 text-brand-600 hover:underline dark:text-brand-400">
-              🧾 Invoice
-            </button>
-          </p>
+          <p className="truncate text-xs text-slate-400 dark:text-slate-500">{room?.roomCategory?.name ?? '—'}</p>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <div className="flex items-center gap-2">
-            <Badge tone={booking.status}>{STATUS_LABEL[booking.status]}</Badge>
-            {booking.status === 'confirmed' && !isFutureStay && (
-              <button onClick={onCheckIn} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
-                Check in
-              </button>
-            )}
-          </div>
-          {booking.status === 'confirmed' && isFutureStay && (
-            <div className="flex flex-col items-end">
-              <span className="text-[11px] text-slate-400 dark:text-slate-500">Check-in opens {formatDateShort(booking.checkIn)}</span>
-              <button onClick={onCheckIn} className="text-[11px] font-medium text-slate-400 hover:text-brand-600 hover:underline dark:text-slate-500 dark:hover:text-brand-400">
-                Check in early
-              </button>
-            </div>
+        <div className="hidden w-28 shrink-0 text-xs text-slate-500 dark:text-slate-400 sm:block">
+          {guestCount} Guest{guestCount > 1 ? 's' : ''}
+        </div>
+        <div className="hidden w-36 shrink-0 text-xs text-slate-500 dark:text-slate-400 md:block">
+          {formatDateShort(booking.checkIn)} – {formatDateShort(booking.checkOut)}
+          <br />
+          <span className="text-slate-400 dark:text-slate-500">{booking.nights} Night{booking.nights > 1 ? 's' : ''}</span>
+        </div>
+        <div className="hidden w-28 shrink-0 truncate text-xs text-slate-500 dark:text-slate-400 lg:block">{mealPlanLabel}</div>
+        <div className="w-24 shrink-0 sm:w-28">
+          <Badge tone={booking.status}>{STATUS_LABEL[booking.status]}</Badge>
+        </div>
+        <div className="hidden w-24 shrink-0 text-right text-xs sm:block">
+          <p className="text-slate-400 dark:text-slate-500">Net Charge</p>
+          <p className="font-semibold text-slate-900 dark:text-white">₹{totals.grandTotal.toFixed(0)}</p>
+        </div>
+        <div className="hidden w-24 shrink-0 text-right text-xs sm:block">
+          <p className="text-slate-400 dark:text-slate-500">Due</p>
+          <p className={`font-semibold ${due > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>₹{due.toFixed(0)}</p>
+        </div>
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+            aria-label="Room actions"
+          >
+            ⋮
+          </button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800">
+                {booking.status === 'confirmed' && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onCheckIn();
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  >
+                    {isFutureStay ? 'Check in early' : 'Check in'}
+                  </button>
+                )}
+                {booking.status === 'confirmed' && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setMode('reassign');
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  >
+                    Change room
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setMode('charge');
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                >
+                  + Add charge
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onPrintInvoice();
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                >
+                  🧾 Print Invoice
+                </button>
+                {canManage && booking.reservationGroupId && booking.status === 'confirmed' && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onRemoveRoom();
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+                  >
+                    Remove room
+                  </button>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>
 
-      {/* §user request — "Neeraj ji ki booking mein rooms ko edit bhi kar sakte hain": swap
-          this room before check-in, same-category available rooms only (server re-checks dates). */}
-      {booking.status === 'confirmed' && (
-        <div className="mt-2 border-t border-slate-50 pt-2 dark:border-slate-700/60">
-          {!reassigning ? (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setReassigning(true)}
-                className="text-xs font-medium text-slate-500 hover:text-brand-600 hover:underline dark:text-slate-400 dark:hover:text-brand-400"
-              >
-                Change room
-              </button>
-              {/* §user request — removing a room from a group booking is a cancellation of that
-                  one room's own Booking row, same weight as cancelling any reservation — owner/
-                  manager only, same as the Cancel action elsewhere in this app. */}
-              {canManage && booking.reservationGroupId && (
-                <button onClick={onRemoveRoom} className="text-xs font-medium text-slate-400 hover:text-red-600 hover:underline dark:hover:text-red-400">
-                  Remove room
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <select className={`${inputClass} w-auto text-xs`} value={pickedRoomId} onChange={(e) => setPickedRoomId(e.target.value)}>
-                <option value="">— pick a room —</option>
-                {candidateRooms.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.roomNumber}
-                  </option>
-                ))}
-              </select>
-              <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!pickedRoomId || saving} onClick={confirmReassign}>
-                {saving ? 'Saving…' : 'Save'}
-              </Button>
-              <button
-                onClick={() => {
-                  setReassigning(false);
-                  setReassignError(null);
-                }}
-                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-              >
-                Cancel
-              </button>
-              {reassignError && <p className="w-full text-xs text-red-600">{reassignError}</p>}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* §user request — "Neeraj ji ke Room 102 mein extra bedding laga, ya extra charges":
-          room-specific add-ons the booker's one group payment above still has to account for —
-          each lands on this exact room's own invoice (InvoiceLineItem), same field the check-in
-          wizard's "Add Extra Charges" already writes to, just reachable any time now, not only
-          at check-in. */}
       {(booking.lineItems?.length ?? 0) > 0 && (
-        <div className="mt-2 space-y-1 border-t border-slate-50 pt-2 dark:border-slate-700/60">
+        <div className="ml-12 mt-2 space-y-1">
           {booking.lineItems!.map((li) => (
             <div key={li.id} className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
               <span>
@@ -229,69 +255,39 @@ function RoomRow({
           ))}
         </div>
       )}
-      <div className="mt-2 border-t border-slate-50 pt-2 dark:border-slate-700/60">
-        {!addingCharge ? (
-          <button
-            onClick={() => setAddingCharge(true)}
-            className="text-xs font-medium text-slate-500 hover:text-brand-600 hover:underline dark:text-slate-400 dark:hover:text-brand-400"
-          >
-            + Add charge
-          </button>
-        ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              className={`${inputClass} w-32 text-xs`}
-              placeholder="e.g. Extra bedding"
-              value={chargeDesc}
-              onChange={(e) => setChargeDesc(e.target.value)}
-              autoFocus
-            />
-            <input
-              type="number"
-              min={1}
-              className={`${inputClass} w-14 text-xs`}
-              value={chargeQty}
-              onChange={(e) => setChargeQty(Math.max(1, Number(e.target.value)))}
-              title="Quantity"
-            />
-            <input
-              type="number"
-              min={0}
-              className={`${inputClass} w-20 text-xs`}
-              value={chargeUnitPrice}
-              onChange={(e) => setChargeUnitPrice(Number(e.target.value))}
-              title="Price"
-            />
-            <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!chargeDesc.trim() || chargeSaving} onClick={confirmAddCharge}>
-              {chargeSaving ? 'Adding…' : 'Add'}
-            </Button>
-            <button
-              onClick={() => {
-                setAddingCharge(false);
-                setChargeError(null);
-              }}
-              className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-            >
-              Cancel
-            </button>
-            {chargeError && <p className="w-full text-xs text-red-600">{chargeError}</p>}
-          </div>
-        )}
-      </div>
 
-      {due > 0 && (
-        <div className="mt-2 flex items-center justify-between border-t border-slate-50 pt-2 dark:border-slate-700/60">
-          <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">₹{due.toFixed(2)} due</span>
-          {/* §user request — "Neeraj ji room-wise payment nahi karte": a room inside a group
-              reservation has no payment action of its own anymore — the one "Add Payment" button
-              against the whole booking (below) is the only entry point, same money either way,
-              just not picked room-by-room by staff. An ordinary single-room booking still gets
-              its own link here (there's no "group" to collect against otherwise). */}
-          {!booking.reservationGroupId && (
-            <button onClick={onAddPayment} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
-              Add Payment
-            </button>
-          )}
+      {mode === 'reassign' && (
+        <div className="ml-12 mt-2 flex flex-wrap items-center gap-2">
+          <select className={`${inputClass} w-auto text-xs`} value={pickedRoomId} onChange={(e) => setPickedRoomId(e.target.value)}>
+            <option value="">— pick a room —</option>
+            {candidateRooms.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.roomNumber}
+              </option>
+            ))}
+          </select>
+          <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!pickedRoomId || saving} onClick={confirmReassign}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+          <button onClick={() => setMode('none')} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+            Cancel
+          </button>
+          {reassignError && <p className="w-full text-xs text-red-600">{reassignError}</p>}
+        </div>
+      )}
+
+      {mode === 'charge' && (
+        <div className="ml-12 mt-2 flex flex-wrap items-center gap-2">
+          <input className={`${inputClass} w-32 text-xs`} placeholder="e.g. Extra bedding" value={chargeDesc} onChange={(e) => setChargeDesc(e.target.value)} autoFocus />
+          <input type="number" min={1} className={`${inputClass} w-14 text-xs`} value={chargeQty} onChange={(e) => setChargeQty(Math.max(1, Number(e.target.value)))} title="Quantity" />
+          <input type="number" min={0} className={`${inputClass} w-20 text-xs`} value={chargeUnitPrice} onChange={(e) => setChargeUnitPrice(Number(e.target.value))} title="Price" />
+          <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!chargeDesc.trim() || chargeSaving} onClick={confirmAddCharge}>
+            {chargeSaving ? 'Adding…' : 'Add'}
+          </Button>
+          <button onClick={() => setMode('none')} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+            Cancel
+          </button>
+          {chargeError && <p className="w-full text-xs text-red-600">{chargeError}</p>}
         </div>
       )}
     </div>
@@ -299,30 +295,40 @@ function RoomRow({
 }
 
 /**
- * §user request, with a reference app's own multi-room Booking Details screen as the explicit
- * target — every room this reservation covers, each checkable in on its own ("Partial
- * Check-in"), a shared guest/contact/source info grid, and per-room payment/due (payments are
- * still tracked per Booking row — there's no cross-room ledger account in this data model, so
- * "Add Payment" lives on each room exactly like it already does everywhere else in the app).
+ * §user request, with a reference app's full-page Booking Details screen as the explicit visual
+ * target (replacing the old centred "Booking Details" popup) — "Maharaj ji ki booking ek hi naam
+ * se hai, par alag rooms mein alag guest check-in honge": a proper per-room table (own guest
+ * count/dates/meal plan/status/⋮ menu each) under one shared booker/guest summary, with the
+ * sticky bottom "Check In" button opening the exact same CheckInModal slider already used
+ * everywhere else in the app — nothing new built for that part, just reached from here too.
  */
 export function ReservationDetailModal({
   hotelId,
   bookings,
+  rooms,
+  ratePlans,
   onClose,
   onChanged,
+  onMoreActions,
+  onEdit,
 }: {
   hotelId: string;
   bookings: Booking[];
+  rooms: Room[];
+  ratePlans: RatePlan[];
   onClose: () => void;
   onChanged: () => void;
+  /** Opens the existing MoreActionsPanel for this whole reservation — optionally straight to one
+   * of its sub-views (used by the Guest ID / Special Requests shortcuts below). */
+  onMoreActions: (initialView?: MoreActionsView) => void;
+  /** Opens CreateReservationModal in its existing edit-group mode for this reservation. */
+  onEdit: () => void;
 }) {
   const { token, role } = useAuth();
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [ratePlans, setRatePlans] = useState<RatePlan[]>([]);
-  const [checkingInBooking, setCheckingInBooking] = useState<Booking | null>(null);
-  const [payingBooking, setPayingBooking] = useState<Booking | null>(null);
+  const [tab, setTab] = useState<'overview' | 'folio'>('overview');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [checkInQueue, setCheckInQueue] = useState<Booking[]>([]);
   const [printingBooking, setPrintingBooking] = useState<Booking | null>(null);
-  const [payingGroup, setPayingGroup] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addingRoom, setAddingRoom] = useState(false);
   const [newRoomId, setNewRoomId] = useState('');
@@ -330,31 +336,12 @@ export function ReservationDetailModal({
   const [newAmount, setNewAmount] = useState(0);
   const [addRoomSaving, setAddRoomSaving] = useState(false);
   const [addRoomError, setAddRoomError] = useState<string | null>(null);
-  // §user request — "Remove room" cancels that room's own Booking row (reservationsManager-gated
-  // server-side, same as cancelling any booking), so only an owner/manager sees it — a front_desk
-  // can still Change Room (a swap, nothing cancelled) and Add Room.
   const canManage = ['owner', 'manager'].includes(role('pms') ?? '') || ['owner', 'manager'].includes(role('channel_manager') ?? '');
-
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      query<Room[]>('hotels.listRooms', { hotelId }, token ?? undefined),
-      query<RatePlan[]>('rates.listAllRatePlansForHotel', { hotelId }, token ?? undefined),
-    ])
-      .then(([r, rp]) => {
-        if (!cancelled) {
-          setRooms(r);
-          setRatePlans(rp);
-        }
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load rooms'));
-    return () => {
-      cancelled = true;
-    };
-  }, [hotelId, token]);
 
   const first = bookings[0];
   const status = groupStatus(bookings);
+  const today = istDateKey(new Date().toISOString());
+
   const grandTotal = bookings.reduce((sum, b) => {
     const totals = computeInvoiceTotals({
       totalAmount: Number(b.totalAmount),
@@ -366,11 +353,9 @@ export function ReservationDetailModal({
   }, 0);
   const paid = bookings.reduce((sum, b) => sum + Number(b.paidAmount ?? 0), 0);
   const due = Math.max(0, grandTotal - paid);
-  // §user request — "advance ke baad payment add karein toh bulk amount ho jata hai, pata nahi
-  // chalta kab kya hua": a group's one "Add Payment" (addGroupPayment) lands as a separate
-  // Payment row per room, all sharing the exact same collectedAt (one DB transaction) — merging
-  // by that timestamp+method+reference turns those back into the single installment the booker
-  // actually paid, instead of fragmenting one payment into one confusing line per room.
+  const paymentStatusLabel = due <= 0 ? 'Paid' : paid > 0 ? 'Partially Paid' : 'Unpaid';
+  const paymentStatusTone = due <= 0 ? 'text-emerald-600 dark:text-emerald-400' : paid > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400';
+
   const paymentTimeline: PaymentHistoryEntry[] = (() => {
     const merged = new Map<string, PaymentHistoryEntry & { rooms: Set<string> }>();
     for (const b of bookings) {
@@ -382,34 +367,15 @@ export function ReservationDetailModal({
           existing.amount += Number(p.amount);
           existing.rooms.add(roomNumber);
         } else {
-          merged.set(key, {
-            key,
-            amount: Number(p.amount),
-            collectedAt: p.collectedAt,
-            method: p.method,
-            referenceNumber: p.referenceNumber,
-            rooms: new Set([roomNumber]),
-          });
+          merged.set(key, { key, amount: Number(p.amount), collectedAt: p.collectedAt, method: p.method, referenceNumber: p.referenceNumber, rooms: new Set([roomNumber]) });
         }
       }
     }
     return [...merged.values()].map((e) => ({ ...e, roomLabel: e.rooms.size > 1 ? `Rooms ${[...e.rooms].join(', ')}` : undefined }));
   })();
-  const firstPending = bookings.find((b) => b.status === 'confirmed');
-  const today = istDateKey(new Date().toISOString());
-  // §bugfix — "Booking Details: Neeraj Gupta" at the top used to read straight off
-  // bookings[0].guestName/guestPhone, which is only the booker's info until that room's own
-  // check-in overwrites it with whoever actually checked into Room 1 — after that, the group
-  // summary silently started showing a random room's guest instead of who placed the booking.
-  // bookedByName/bookedByPhone (set once at creation, untouched by any room's check-in) is the
-  // one source that's never stale; falls back to guestName/guestPhone for an ordinary
-  // single-room booking, where there never was a separate booker to begin with.
+
   const bookerName = first.bookedByName ?? first.guestName;
   const bookerPhone = first.bookedByPhone ?? first.guestPhone;
-  // §user request, reference app's "Booking ID" + "Total Guest": a short, stable, human-readable
-  // code derived from the real id (no separate field/migration needed) and the primary guest plus
-  // any BookingGuest co-occupants — summed across every room, since each room's own occupant(s)
-  // all count toward one reservation's total guest count.
   const bookingIdShort = first.id.slice(-6).toUpperCase();
   const totalGuests = bookings.reduce((sum, b) => sum + 1 + (b.guests?.length ?? 0), 0);
   const addRoomCandidates = rooms.filter((r) => r.status === 'available' && !bookings.some((b) => b.assignedRoomId === r.id));
@@ -467,260 +433,384 @@ export function ReservationDetailModal({
     }
   }
 
+  function toggleSelected(bookingId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(bookingId)) next.delete(bookingId);
+      else next.add(bookingId);
+      return next;
+    });
+  }
+
+  // §user request — "jo check-in pe click karenge toh wahi slider khulega jo humne banaya hai":
+  // every trigger below (per-room ⋮ menu, this bottom bar) feeds the exact same CheckInModal,
+  // just queued one booking at a time so a multi-room "Check In" still walks through each room's
+  // own guest details in turn instead of needing a brand-new bulk wizard.
+  const eligibleToday = bookings.filter((b) => b.status === 'confirmed' && b.checkIn.slice(0, 10) <= today);
+  const eligibleFuture = bookings.filter((b) => b.status === 'confirmed' && b.checkIn.slice(0, 10) > today);
+
+  function targetsFor(pool: Booking[]) {
+    const picked = pool.filter((b) => selected.has(b.id));
+    return picked.length > 0 ? picked : pool;
+  }
+
+  function startCheckIn(pool: Booking[]) {
+    if (pool.length === 0) return;
+    setCheckInQueue(pool);
+  }
+
+  const currentCheckIn = checkInQueue[0] ?? null;
+
+  const allConfirmedSelected = bookings.filter((b) => b.status === 'confirmed').length > 0 && bookings.filter((b) => b.status === 'confirmed').every((b) => selected.has(b.id));
+
+  function toggleSelectAll() {
+    const confirmedIds = bookings.filter((b) => b.status === 'confirmed').map((b) => b.id);
+    setSelected(allConfirmedSelected ? new Set() : new Set(confirmedIds));
+  }
+
   return (
-    // §bugfix — CheckInModal/AddPaymentModal render their own full-screen overlay on top, but
-    // were previously mounted as React children of this backdrop's onClick={onClose}; any click
-    // inside them (e.g. the "Next · Payment" submit button) bubbled through the React tree and
-    // instantly closed this whole detail view mid-flow. Rendering them in a sibling Fragment
-    // (outside the backdrop) keeps them visually nested but out of its click-bubble path.
     <>
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-        <Card className="max-h-[90vh] overflow-y-auto">
-          <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Booking Details</h3>
-              <span className="mt-1 inline-block">
-                <Badge tone={status === 'partial' ? 'checked_in' : status}>{status === 'partial' ? 'Partially Checked In' : STATUS_LABEL[status]}</Badge>
-              </span>
-            </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300">
-              ✕
+      <div className="fixed inset-0 z-50 flex flex-col bg-slate-50 dark:bg-slate-900">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-800 sm:px-6">
+          <div className="flex items-start gap-3">
+            <button onClick={onClose} className="mt-1 shrink-0 text-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white" aria-label="Back">
+              ←
             </button>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-lg font-bold text-slate-900 dark:text-white sm:text-xl">Booking #{bookingIdShort}</h1>
+                <Badge tone={status === 'partial' ? 'checked_in' : status}>{status === 'partial' ? 'Partially Checked In' : STATUS_LABEL[status]}</Badge>
+              </div>
+              <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500 sm:text-sm">Created on {formatDateLong(first.createdAt)}</p>
+            </div>
           </div>
+          <Button type="button" variant="secondary" onClick={() => onMoreActions()} className="shrink-0">
+            More Actions
+          </Button>
+        </div>
 
-          {error && <p className="px-5 pt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p className="px-4 pt-3 text-sm text-red-600 dark:text-red-400 sm:px-6">{error}</p>}
 
-          {firstPending && (
-            <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-700">
-              {firstPending.checkIn.slice(0, 10) > today ? (
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2.5 dark:bg-slate-900">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Check-in opens {formatDateShort(firstPending.checkIn)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setCheckingInBooking(firstPending)}
-                    className="text-xs font-medium text-slate-500 hover:text-brand-600 hover:underline dark:text-slate-400 dark:hover:text-brand-400"
-                  >
-                    Check in early
-                  </button>
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-4 sm:p-6">
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-2xl bg-brand-50 px-5 py-4 dark:bg-brand-500/10">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-600 text-sm font-bold text-white">{initialsOf(bookerName)}</span>
+                <div>
+                  <p className="flex items-center gap-1.5 text-sm font-bold text-slate-900 dark:text-white">
+                    {bookerName} {first.isVip && <span title="VIP">👑</span>}
+                  </p>
+                  {bookerPhone && <p className="text-xs text-slate-500 dark:text-slate-400">📞 {bookerPhone}</p>}
                 </div>
-              ) : (
-                <Button type="button" className="w-full" onClick={() => setCheckingInBooking(firstPending)}>
-                  Start Check-in
-                </Button>
-              )}
-            </div>
-          )}
-
-          <div className="px-5 py-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Rooms ({bookings.length})</p>
-            <div className="space-y-2">
-              {bookings.map((b) => (
-                <RoomRow
-                  key={b.id}
-                  booking={b}
-                  room={roomFor(b)}
-                  today={today}
-                  canManage={canManage}
-                  candidateRooms={rooms.filter((r) => r.roomCategoryId === b.roomCategoryId && r.status === 'available' && r.id !== b.assignedRoomId)}
-                  onCheckIn={() => setCheckingInBooking(b)}
-                  onAddPayment={() => setPayingBooking(b)}
-                  onReassignRoom={(roomId) => reassignRoom(b, roomId)}
-                  onRemoveRoom={() => removeRoom(b)}
-                  onAddCharge={(description, quantity, unitPrice) => addCharge(b, description, quantity, unitPrice)}
-                  onRemoveCharge={removeCharge}
-                  onPrintInvoice={() => setPrintingBooking(b)}
-                />
-              ))}
-            </div>
-
-            {/* §user request, reference app's "+ Add Room" — only a group reservation
-                (Neeraj ji's multi-room booking) has anything to add a room *to*; an ordinary
-                single-room reservation has no reservationGroupId to attach a new one against. */}
-            {first.reservationGroupId && (
-              <div className="mt-2">
-                {!addingRoom ? (
-                  <button
-                    onClick={() => setAddingRoom(true)}
-                    className="w-full rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-medium text-slate-500 hover:border-brand-400 hover:text-brand-600 dark:border-slate-600 dark:text-slate-400 dark:hover:border-brand-500 dark:hover:text-brand-400"
-                  >
-                    + Add Room
-                  </button>
-                ) : (
-                  <div className="space-y-2 rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        className={`${inputClass} text-xs`}
-                        value={newRoomId}
-                        onChange={(e) => {
-                          setNewRoomId(e.target.value);
-                          setNewRatePlanId('');
-                        }}
-                      >
-                        <option value="">— pick a room —</option>
-                        {addRoomCandidates.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.roomNumber} — {r.roomCategory?.name ?? 'Uncategorized'}
-                          </option>
-                        ))}
-                      </select>
-                      <select className={`${inputClass} text-xs`} value={newRatePlanId} onChange={(e) => setNewRatePlanId(e.target.value)} disabled={!newRoomId}>
-                        <option value="">— rate plan (optional) —</option>
-                        {ratePlansForNewRoom.map((rp) => (
-                          <option key={rp.id} value={rp.id}>
-                            {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">Total amount</span>
-                      <input
-                        type="number"
-                        min={0}
-                        className={`${inputClass} w-28 text-xs`}
-                        value={newAmount}
-                        onChange={(e) => setNewAmount(Number(e.target.value))}
-                      />
-                      <div className="ml-auto flex gap-2">
-                        <button
-                          onClick={() => {
-                            setAddingRoom(false);
-                            setAddRoomError(null);
-                          }}
-                          className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                        >
-                          Cancel
-                        </button>
-                        <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!newRoomId || addRoomSaving} onClick={addRoom}>
-                          {addRoomSaving ? 'Adding…' : 'Add'}
-                        </Button>
-                      </div>
-                    </div>
-                    {addRoomError && <p className="text-xs text-red-600">{addRoomError}</p>}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="divide-y divide-slate-100 border-t border-slate-100 px-5 dark:divide-slate-700 dark:border-slate-700">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 py-3 text-sm">
-              <div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Booking ID</p>
-                <p className="font-medium text-slate-900 dark:text-white">{bookingIdShort}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Total Guests</p>
-                <p className="font-medium text-slate-900 dark:text-white">{totalGuests}</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">📅 Stay Period</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-white">
+                  {formatDateTimeShort(first.checkIn)} – {formatDateTimeShort(first.checkOut)}
+                </p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">({first.nights} Night{first.nights > 1 ? 's' : ''})</p>
               </div>
               <div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Guest Name</p>
-                <p className="font-medium text-slate-900 dark:text-white">{bookerName}</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">🛏 Rooms</p>
+                <p className="text-sm font-bold text-slate-900 dark:text-white">{bookings.length} Room{bookings.length > 1 ? 's' : ''}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Source</p>
-                <p className="flex items-center gap-1.5 font-medium text-slate-900 dark:text-white">
+                <p className="text-xs text-slate-400 dark:text-slate-500">👤 Guests</p>
+                <p className="text-sm font-bold text-slate-900 dark:text-white">{totalGuests} Guest{totalGuests > 1 ? 's' : ''}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 dark:text-slate-500">🌐 Booking Source</p>
+                <p className="flex items-center gap-1.5 text-sm font-bold text-slate-900 dark:text-white">
                   <ChannelIcon source={first.source} className="h-4 w-4" /> {SOURCE_LABEL[first.source] ?? first.source}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Check-in</p>
-                <p className="font-medium text-slate-900 dark:text-white">{formatDateShort(first.checkIn)}</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">⏱ Payment Status</p>
+                <p className={`text-sm font-bold ${paymentStatusTone}`}>{paymentStatusLabel}</p>
               </div>
-              <div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Check-out</p>
-                <p className="font-medium text-slate-900 dark:text-white">{formatDateShort(first.checkOut)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Contact No.</p>
-                <p className="font-medium text-slate-900 dark:text-white">{bookerPhone ?? 'N/A'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Email</p>
-                <p className="font-medium text-slate-900 dark:text-white">{first.guestEmail ?? 'N/A'}</p>
-              </div>
-              <div className="col-span-2">
-                <p className="text-xs text-slate-400 dark:text-slate-500">Special Request</p>
-                <p className="font-medium text-slate-900 dark:text-white">{first.specialRequest ?? 'N/A'}</p>
-              </div>
-              <div className="col-span-2">
-                <p className="text-xs text-slate-400 dark:text-slate-500">Booking Date</p>
-                <p className="font-medium text-slate-900 dark:text-white">{formatDateTimeShort(first.createdAt)}</p>
-              </div>
+              <span className="ml-auto hidden text-4xl opacity-80 lg:inline">🏨</span>
             </div>
-          </div>
 
-          <div className="space-y-1.5 border-t border-slate-100 px-5 py-4 text-sm dark:border-slate-700">
-            <div className="flex justify-between text-slate-500 dark:text-slate-400">
-              <span>Booking Amount</span>
-              <span className="text-slate-900 dark:text-white">₹{grandTotal.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-slate-500 dark:text-slate-400">
-              <span>Paid</span>
-              <span className="text-slate-900 dark:text-white">₹{paid.toFixed(2)}</span>
-            </div>
-            <div className={`flex items-center justify-between font-medium ${due > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-              <span>Due</span>
-              <span>{due > 0 ? `₹${due.toFixed(2)}` : 'Paid in full'}</span>
-            </div>
-            {/* §user request — "Neeraj ji room-wise payment nahi karte, ek hi baar poori booking
-                ki karte hain": one payment action against the whole booking's due — the server
-                splits it across rooms by their own outstanding, so staff never has to decide
-                which room gets how much. */}
-            {due > 0 && (
-              <Button
-                type="button"
-                className="mt-1 w-full justify-center"
-                onClick={() => (first.reservationGroupId ? setPayingGroup(true) : setPayingBooking(first))}
+            <div className="mt-4 flex gap-2 border-b border-slate-200 dark:border-slate-700">
+              <button
+                onClick={() => setTab('overview')}
+                className={`rounded-t-lg px-4 py-2 text-sm font-semibold ${
+                  tab === 'overview' ? 'border-b-2 border-brand-600 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                }`}
               >
-                Add Payment
+                Overview
+              </button>
+              <button
+                onClick={() => setTab('folio')}
+                className={`rounded-t-lg px-4 py-2 text-sm font-semibold ${
+                  tab === 'folio' ? 'border-b-2 border-brand-600 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                }`}
+              >
+                Master Folio
+              </button>
+            </div>
+
+            {tab === 'overview' ? (
+              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
+                <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800 sm:p-5">
+                  <div className="flex items-center gap-3">
+                    <input type="checkbox" checked={allConfirmedSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600" />
+                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">Rooms ({String(bookings.length).padStart(2, '0')})</h2>
+                  </div>
+                  <p className="mb-1 ml-7 text-xs text-slate-400 dark:text-slate-500">Each room can have different guests, rates and status.</p>
+
+                  <div className="mt-2">
+                    {bookings.map((b) => (
+                      <RoomTableRow
+                        key={b.id}
+                        booking={b}
+                        room={roomFor(b)}
+                        ratePlans={ratePlans}
+                        today={today}
+                        canManage={canManage}
+                        candidateRooms={rooms.filter((r) => r.roomCategoryId === b.roomCategoryId && r.status === 'available' && r.id !== b.assignedRoomId)}
+                        checked={selected.has(b.id)}
+                        onToggleChecked={() => toggleSelected(b.id)}
+                        onCheckIn={() => startCheckIn([b])}
+                        onReassignRoom={(roomId) => reassignRoom(b, roomId)}
+                        onRemoveRoom={() => removeRoom(b)}
+                        onAddCharge={(description, quantity, unitPrice) => addCharge(b, description, quantity, unitPrice)}
+                        onRemoveCharge={removeCharge}
+                        onPrintInvoice={() => setPrintingBooking(b)}
+                      />
+                    ))}
+                  </div>
+
+                  {first.reservationGroupId && (
+                    <div className="mt-3">
+                      {!addingRoom ? (
+                        <button
+                          onClick={() => setAddingRoom(true)}
+                          className="w-full rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-medium text-slate-500 hover:border-brand-400 hover:text-brand-600 dark:border-slate-600 dark:text-slate-400 dark:hover:border-brand-500 dark:hover:text-brand-400"
+                        >
+                          + Add Room
+                        </button>
+                      ) : (
+                        <div className="space-y-2 rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
+                          <div className="grid grid-cols-2 gap-2">
+                            <select
+                              className={`${inputClass} text-xs`}
+                              value={newRoomId}
+                              onChange={(e) => {
+                                setNewRoomId(e.target.value);
+                                setNewRatePlanId('');
+                              }}
+                            >
+                              <option value="">— pick a room —</option>
+                              {addRoomCandidates.map((r) => (
+                                <option key={r.id} value={r.id}>
+                                  {r.roomNumber} — {r.roomCategory?.name ?? 'Uncategorized'}
+                                </option>
+                              ))}
+                            </select>
+                            <select className={`${inputClass} text-xs`} value={newRatePlanId} onChange={(e) => setNewRatePlanId(e.target.value)} disabled={!newRoomId}>
+                              <option value="">— rate plan (optional) —</option>
+                              {ratePlansForNewRoom.map((rp) => (
+                                <option key={rp.id} value={rp.id}>
+                                  {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">Total amount</span>
+                            <input type="number" min={0} className={`${inputClass} w-28 text-xs`} value={newAmount} onChange={(e) => setNewAmount(Number(e.target.value))} />
+                            <div className="ml-auto flex gap-2">
+                              <button
+                                onClick={() => {
+                                  setAddingRoom(false);
+                                  setAddRoomError(null);
+                                }}
+                                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                              >
+                                Cancel
+                              </button>
+                              <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!newRoomId || addRoomSaving} onClick={addRoom}>
+                                {addRoomSaving ? 'Adding…' : 'Add'}
+                              </Button>
+                            </div>
+                          </div>
+                          {addRoomError && <p className="text-xs text-red-600">{addRoomError}</p>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">Total Charges</p>
+                        <p className="mt-0.5 text-sm font-bold text-slate-900 dark:text-white">₹{grandTotal.toFixed(0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">Advance</p>
+                        <p className="mt-0.5 text-sm font-bold text-emerald-600 dark:text-emerald-400">₹{paid.toFixed(0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">Due</p>
+                        <p className={`mt-0.5 text-sm font-bold ${due > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>₹{due.toFixed(0)}</p>
+                      </div>
+                    </div>
+                    {due > 0 && (
+                      <Button type="button" className="mt-3 w-full justify-center" onClick={() => onMoreActions('payment')}>
+                        Record Payment
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">Guest Information</h3>
+                      <button onClick={onEdit} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                        Edit
+                      </button>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">{bookerName}</p>
+                    <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-slate-700 dark:text-slate-300">Primary Guest</span>
+                    {bookerPhone && <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">📞 {bookerPhone}</p>}
+                    {first.guestEmail && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">✉️ {first.guestEmail}</p>}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center dark:border-slate-700 dark:bg-slate-800">
+                    <div className="flex items-center justify-between text-left">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">Guest ID</h3>
+                      <button onClick={() => onMoreActions('identity')} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                        {first.idPhotoFrontPath ? 'View / Edit' : '+ Scan Document'}
+                      </button>
+                    </div>
+                    {first.idPhotoFrontPath ? (
+                      <div className="mt-3 text-left text-sm">
+                        <p className="font-semibold text-slate-900 dark:text-white">{first.idType?.replace(/_/g, ' ') ?? 'ID'}</p>
+                        <p className="text-slate-500 dark:text-slate-400">{first.idNumber ?? '—'}</p>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="mt-3 text-3xl">🪪</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">No Document Scanned</p>
+                        <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                          Upload or capture the primary guest's ID to automatically extract name, ID number, date of birth, address.
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center dark:border-slate-700 dark:bg-slate-800">
+                    <div className="flex items-center justify-between text-left">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">Special Requests</h3>
+                      <button onClick={() => onMoreActions('special')} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                        {first.specialRequest ? 'Edit' : '+ Add Request'}
+                      </button>
+                    </div>
+                    {first.specialRequest ? (
+                      <p className="mt-3 text-left text-sm text-slate-700 dark:text-slate-300">{first.specialRequest}</p>
+                    ) : (
+                      <>
+                        <p className="mt-3 text-3xl">📋</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">No Special Requests</p>
+                        <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">Add guest preferences such as early check-in, late checkout, high floor.</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Booking ID</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{bookingIdShort}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Total Guests</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{totalGuests}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Booking Date</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{formatDateTimeShort(first.createdAt)}</p>
+                  </div>
+                </div>
+
+                <div className="mt-5 space-y-1.5 border-t border-slate-100 pt-4 text-sm dark:border-slate-700">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Per-room charges</p>
+                  {bookings.map((b) => {
+                    const totals = computeInvoiceTotals({
+                      totalAmount: Number(b.totalAmount),
+                      lineItems: b.lineItems ?? [],
+                      discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+                      gstExempt: b.gstExempt,
+                    });
+                    return (
+                      <div key={b.id} className="flex justify-between text-slate-500 dark:text-slate-400">
+                        <span>Room {roomFor(b)?.roomNumber ?? '—'}</span>
+                        <span className="text-slate-900 dark:text-white">₹{totals.grandTotal.toFixed(2)}</span>
+                      </div>
+                    );
+                  })}
+                  <div className="flex justify-between border-t border-slate-100 pt-1.5 font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    <span>Booking Amount</span>
+                    <span className="text-slate-900 dark:text-white">₹{grandTotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                    <span>Paid</span>
+                    <span className="text-slate-900 dark:text-white">₹{paid.toFixed(2)}</span>
+                  </div>
+                  <div className={`flex items-center justify-between font-medium ${due > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                    <span>Due</span>
+                    <span>{due > 0 ? `₹${due.toFixed(2)}` : 'Paid in full'}</span>
+                  </div>
+                  {due > 0 && (
+                    <Button type="button" className="mt-1 w-full justify-center" onClick={() => onMoreActions('payment')}>
+                      Record Payment
+                    </Button>
+                  )}
+                </div>
+
+                <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-700">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment History</p>
+                  <PaymentHistory entries={paymentTimeline} />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {(eligibleToday.length > 0 || eligibleFuture.length > 0) && (
+          <div className="flex items-center justify-end gap-3 border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-800 sm:px-6">
+            {eligibleFuture.length > 0 && (
+              <Button type="button" variant="secondary" onClick={() => startCheckIn(targetsFor(eligibleFuture))}>
+                Pre-check-in
+              </Button>
+            )}
+            {eligibleToday.length > 0 && (
+              <Button type="button" onClick={() => startCheckIn(targetsFor(eligibleToday))}>
+                Check In
               </Button>
             )}
           </div>
-
-          {/* §user request — "payment ka date aur time proper aana chahiye, pata chale 1st
-              installment, 2nd, final payment kab hui": every payment collected against this
-              booking, oldest first, each its own dated receipt line instead of one rolled-up
-              "Paid" total. */}
-          <div className="border-t border-slate-100 px-5 py-4 dark:border-slate-700">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment History</p>
-            <PaymentHistory entries={paymentTimeline} />
-          </div>
-        </Card>
+        )}
       </div>
-    </div>
 
-      {checkingInBooking && (
+      {currentCheckIn && (
         <CheckInModal
           hotelId={hotelId}
-          reservation={checkingInBooking}
-          assignedRoomNumber={roomFor(checkingInBooking)?.roomNumber}
-          onClose={() => setCheckingInBooking(null)}
+          reservation={currentCheckIn}
+          assignedRoomNumber={roomFor(currentCheckIn)?.roomNumber}
+          onClose={() => setCheckInQueue([])}
           onDone={() => {
-            setCheckingInBooking(null);
+            setCheckInQueue((q) => q.slice(1));
             onChanged();
           }}
         />
       )}
-      {payingBooking && (
-        <AddPaymentModal booking={payingBooking} onClose={() => setPayingBooking(null)} onDone={onChanged} />
-      )}
-      {payingGroup && first.reservationGroupId && (
-        <GroupPaymentModal
-          reservationGroupId={first.reservationGroupId}
-          bookerName={bookerName}
-          due={due}
-          onClose={() => setPayingGroup(false)}
-          onDone={onChanged}
-        />
-      )}
       {printingBooking && (
-        <InvoicePrintView
-          booking={printingBooking}
-          roomType={roomFor(printingBooking)?.roomCategory?.name ?? '—'}
-          onClose={() => setPrintingBooking(null)}
-        />
+        <InvoicePrintView booking={printingBooking} roomType={roomFor(printingBooking)?.roomCategory?.name ?? '—'} onClose={() => setPrintingBooking(null)} />
       )}
     </>
   );

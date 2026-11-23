@@ -11,7 +11,8 @@ import { BookingVoucherPrintView } from './checkin/BookingVoucherPrintView';
 import type { ReservationSuccessData } from './checkin/ReservationSuccessModal';
 import type { Booking, IdType, Payment, PaymentMethod, PaymentType, RatePlan, Room, RoomCategory } from '../types';
 
-type View = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'payment' | 'identity' | 'receipts' | 'mealplan';
+export type MoreActionsView = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'payment' | 'identity' | 'receipts' | 'mealplan';
+type View = MoreActionsView;
 
 const ID_TYPE_OPTIONS: IdType[] = ['aadhaar', 'passport', 'driving_license', 'voter_id', 'other'];
 const PAYMENT_TYPE_OPTIONS: { value: PaymentType; label: string; description: string }[] = [
@@ -138,6 +139,7 @@ export function MoreActionsPanel({
   ratePlans,
   onClose,
   onChanged,
+  initialView,
 }: {
   hotelId: string;
   group: Booking[];
@@ -146,6 +148,10 @@ export function MoreActionsPanel({
   ratePlans: RatePlan[];
   onClose: () => void;
   onChanged: () => void;
+  /** §user request, with the new Booking Details page's own sidebar shortcuts ("Guest ID → Scan
+   * Document", "Special Requests → + Add Request") as the target — opens straight into that
+   * sub-view instead of always landing on the menu first. */
+  initialView?: MoreActionsView;
 }) {
   const { token } = useAuth();
   const lead = group[0];
@@ -179,7 +185,7 @@ export function MoreActionsPanel({
     return [...counts.entries()].map(([name, count]) => `${count} ${name}`).join(' · ');
   })();
 
-  const [view, setView] = useState<View>('menu');
+  const [view, setView] = useState<View>(initialView ?? 'menu');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

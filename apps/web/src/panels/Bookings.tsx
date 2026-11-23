@@ -11,7 +11,7 @@ import { computeInvoiceTotals } from '../invoice';
 import { SOURCE_LABEL } from './channel-manager/ota-labels';
 import { ChannelBadge } from './channel-manager/ChannelBadge';
 import { formatDateShort } from '../dateFormat';
-import { MoreActionsPanel } from './MoreActionsPanel';
+import { MoreActionsPanel, type MoreActionsView } from './MoreActionsPanel';
 import type { Booking, RatePlan, Room, RoomCategory } from '../types';
 
 type ListTab = 'upcoming' | 'checked_in' | 'history';
@@ -45,6 +45,8 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
   const [viewingGroupKey, setViewingGroupKey] = useState<string | null>(null);
   const [actionsGroupKey, setActionsGroupKey] = useState<string | null>(null);
+  const [actionsInitialView, setActionsInitialView] = useState<MoreActionsView | undefined>(undefined);
+  const [editingGroup, setEditingGroup] = useState<Booking[] | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [sourceFilter, setSourceFilter] = useState('all');
   const [listTab, setListTab] = useState<ListTab>('upcoming');
@@ -293,10 +295,17 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
         <ReservationDetailModal
           hotelId={hotelId}
           bookings={viewingGroup}
+          rooms={rooms}
+          ratePlans={ratePlans}
           onClose={() => setViewingGroupKey(null)}
           onChanged={() => {
             void refresh();
           }}
+          onMoreActions={(initialView) => {
+            setActionsGroupKey(viewingGroup[0].reservationGroupId ?? viewingGroup[0].id);
+            setActionsInitialView(initialView);
+          }}
+          onEdit={() => setEditingGroup(viewingGroup)}
         />
       )}
       {actionsGroup && actionsGroup.length > 0 && (
@@ -306,8 +315,23 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
           roomsById={roomsById}
           categories={categories}
           ratePlans={ratePlans}
-          onClose={() => setActionsGroupKey(null)}
+          initialView={actionsInitialView}
+          onClose={() => {
+            setActionsGroupKey(null);
+            setActionsInitialView(undefined);
+          }}
           onChanged={() => {
+            void refresh();
+          }}
+        />
+      )}
+      {editingGroup && editingGroup.length > 0 && (
+        <CreateReservationModal
+          hotelId={hotelId}
+          editGroup={editingGroup}
+          onClose={() => setEditingGroup(null)}
+          onDone={() => {
+            setEditingGroup(null);
             void refresh();
           }}
         />
