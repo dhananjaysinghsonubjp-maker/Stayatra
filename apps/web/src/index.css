@@ -227,6 +227,28 @@ body {
   animation: banner-shark-swim 30s linear infinite;
 }
 
+/* §user request — rich "Hotel Brand" colour picker (BrandColorPicker.tsx), built on react-colorful's
+   HexColorPicker (saturation/lightness square + hue slider in one piece). Its own stylesheet ships
+   a fixed 200px square; stretched to fill the popover's width instead, with a slightly taller
+   square so the hue strip underneath doesn't feel cramped. */
+.brand-color-picker .react-colorful {
+  width: 100%;
+  height: 180px;
+}
+.brand-color-picker .react-colorful__saturation {
+  border-radius: 0.75rem;
+}
+.brand-color-picker .react-colorful__hue {
+  margin-top: 0.75rem;
+  height: 14px;
+  border-radius: 9999px;
+}
+.brand-color-picker .react-colorful__hue-pointer,
+.brand-color-picker .react-colorful__saturation-pointer {
+  width: 18px;
+  height: 18px;
+}
+
 /* Plain amount fields, no spinner arrows — every number input in the app. */
 input[type='number'] {
   -moz-appearance: textfield;

@@ -14,6 +14,7 @@ import { HotelDetails } from './settings/HotelDetails';
 import { Credentials } from './channel-manager/Credentials';
 import { Billing } from './Billing';
 import { applyBrandColor, isValidHexColor } from '../brandColor';
+import { BrandColorPicker } from '../components/BrandColorPicker';
 import { applyBrandFont, fontStackFor, DEFAULT_FONT_STACK } from '../brandFont';
 import { FONT_FAMILIES, fontOptionId, ensureFontFamilyLoaded } from '../fontCatalog';
 import type { Hotel, LedgerCategory, RatePlan, Room, RoomCategory } from '../types';
@@ -1151,28 +1152,8 @@ function BrandColorSection({ hotel, token, onUpdated }: { hotel: Hotel; token: s
     <Card>
       <CardHeader title="3. Brand Colour" subtitle="Sets the theme colour used across buttons, headings, and charts throughout the app." />
       <CardBody>
-        <div className="mb-4 flex flex-wrap gap-2">
-          {BRAND_COLOR_PRESETS.map((p) => (
-            <button
-              key={p.hex}
-              type="button"
-              title={p.label}
-              onClick={() => preview(p.hex)}
-              className={`h-8 w-8 rounded-full ring-2 ring-offset-2 transition-transform hover:scale-110 dark:ring-offset-slate-800 ${
-                value.toLowerCase() === p.hex.toLowerCase() ? 'ring-slate-400 dark:ring-slate-300' : 'ring-transparent'
-              }`}
-              style={{ backgroundColor: p.hex }}
-            />
-          ))}
-        </div>
         <div className="flex flex-wrap items-center gap-4">
-          <input
-            type="color"
-            value={isValidHexColor(value) ? value : DEFAULT_BRAND_COLOR}
-            onChange={(e) => preview(e.target.value)}
-            className="h-12 w-12 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-transparent p-0.5 dark:border-slate-600"
-            aria-label="Pick brand colour"
-          />
+          <BrandColorPicker value={value} onChange={preview} presets={BRAND_COLOR_PRESETS} />
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Hex code</label>
             <input
