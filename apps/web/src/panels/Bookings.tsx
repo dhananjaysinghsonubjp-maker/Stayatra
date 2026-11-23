@@ -33,7 +33,19 @@ function dateHeaderLabel(dateKey: string) {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
 
-export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?: boolean }) {
+export function Bookings({
+  hotelId,
+  hasPms = true,
+  initialGroupKey,
+  onInitialConsumed,
+}: {
+  hotelId: string;
+  hasPms?: boolean;
+  /** Set by Dashboard's "Today's Reservations" card (§ user request) — opens straight into that
+   * reservation's own full-page Booking Details view instead of landing on the plain list. */
+  initialGroupKey?: string | null;
+  onInitialConsumed?: () => void;
+}) {
   const { token } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [categories, setCategories] = useState<RoomCategory[]>([]);
@@ -72,6 +84,14 @@ export function Bookings({ hotelId, hasPms = true }: { hotelId: string; hasPms?:
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId]);
+
+  useEffect(() => {
+    if (!initialGroupKey) return;
+    if (!bookings.some((b) => (b.reservationGroupId ?? b.id) === initialGroupKey)) return;
+    setViewingGroupKey(initialGroupKey);
+    onInitialConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialGroupKey, bookings]);
 
   const filtered = useMemo(() => {
     return sourceFilter === 'all' ? bookings : bookings.filter((b) => b.source === sourceFilter);

@@ -1,21 +1,11 @@
 import { useEffect, useState } from 'react';
 import { query } from '../api';
 import { useAuth } from '../AuthContext';
-import { Badge, Button, Card, CardBody, CardHeader, EmptyState, StatCard } from '../components/ui';
+import { Card, CardBody, CardHeader, EmptyState, StatCard } from '../components/ui';
 import { ChannelManagerDashboard } from './channel-manager/ChannelManagerDashboard';
-import { CheckInModal } from './checkin/CheckInModal';
 import { OccupancyDonut, RevenueHeatmap, RevenueTrendChart } from './dashboard/PerformanceCharts';
 import type { Booking, CleaningRecord, InHouseRow, OtaConnection, Room, StaffProfile } from '../types';
 import type { Tab } from '../layout/Sidebar';
-
-const ARRIVAL_STATUS_LABEL: Record<Booking['status'], string> = {
-  confirmed: 'Upcoming',
-  checked_in: 'Checked In',
-  checked_out: 'Checked Out',
-  cancelled: 'Cancelled',
-  no_show: 'No Show',
-  void: 'Voided',
-};
 
 function isToday(iso: string) {
   const d = new Date(iso);
@@ -150,41 +140,82 @@ function StaffApprovalAlert({ count, onPress }: { count: number; onPress: () => 
   );
 }
 
+/** One booker's own card inside the Today's Reservations box — same avatar + bold-name shape as
+ * the Reservations list's own cards ("Maharaj ji", "Sadiq"), but with a room-number pending/done
+ * summary in place of that list's category/amount details, since this box's only job is "who's
+ * still waiting to be checked in today". Clicking it goes straight to that reservation's own
+ * full-page Booking Details view, same as clicking it from the Reservations list itself. */
+function TodaysReservationCard({ group, rooms, onClick }: { group: Booking[]; rooms: Room[]; onClick: () => void }) {
+  const lead = group[0];
+  const bookerName = lead.bookedByName ?? lead.guestName;
+  const roomNumberFor = (b: Booking) => rooms.find((r) => r.id === b.assignedRoomId)?.roomNumber;
+  const pendingRooms = group.filter((b) => b.status === 'confirmed').map(roomNumberFor).filter((n): n is string => Boolean(n));
+  const doneRooms = group.filter((b) => b.status === 'checked_in' || b.status === 'checked_out').map(roomNumberFor).filter((n): n is string => Boolean(n));
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-xl p-3.5 text-left shadow-sm transition-shadow hover:shadow ${
+        lead.isVip ? 'vip-card' : 'border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'
+      }`}
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
+        {bookerName.slice(0, 2).toUpperCase()}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1.5 truncate text-sm font-bold text-slate-900 dark:text-white">
+          {bookerName} {lead.isVip && <span title="VIP">👑</span>}
+        </p>
+        <p className="mt-0.5 truncate text-xs">
+          {pendingRooms.length > 0 && <span className="font-medium text-amber-600 dark:text-amber-400">Pending: {pendingRooms.join(', ')}</span>}
+          {pendingRooms.length > 0 && doneRooms.length > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+          {doneRooms.length > 0 && <span className="font-medium text-emerald-600 dark:text-emerald-400">Checked in: {doneRooms.join(', ')}</span>}
+        </p>
+      </div>
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-400 dark:border-slate-600">→</span>
+    </button>
+  );
+}
+
 /**
  * §user request — "good afternoon ke neeche, hotel current status ke upar ek box jisme current
- * date ki reservation ho aur check-in ka option khule": a real, working Check In button (opens
- * the same CheckInModal slider used everywhere else), not just a link that jumps to Room View.
+ * date ki reservation ho": grouped by booker (one card per reservationGroupId, same as the
+ * Reservations list), showing only rooms still pending check-in today next to any already done
+ * in that same booking — clicking a card jumps straight to its own full Booking Details page,
+ * which (since every room here checks in today, never a future date) shows a real "Check In"
+ * button there, not "Pre-check-in". The whole box disappears once every room checking in today
+ * has actually been checked in — there's nothing left here to act on at that point.
  */
-function TodaysReservations({ arrivals, rooms, onCheckIn }: { arrivals: Booking[]; rooms: Room[]; onCheckIn: (b: Booking) => void }) {
+function TodaysReservations({ arrivals, rooms, onOpenReservation }: { arrivals: Booking[]; rooms: Room[]; onOpenReservation: (groupKey: string) => void }) {
+  const groups = new Map<string, Booking[]>();
+  const order: string[] = [];
+  for (const b of arrivals) {
+    const key = b.reservationGroupId ?? b.id;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(b);
+  }
+  const pendingGroups = order.map((key) => groups.get(key)!).filter((group) => group.some((b) => b.status === 'confirmed'));
+
+  if (pendingGroups.length === 0) return null;
+
   return (
     <Card className="mb-6">
       <CardHeader title="Today's Reservations" subtitle="Guests checking in today" />
       <CardBody>
-        {arrivals.length === 0 ? (
-          <EmptyState title="No reservations for today" />
-        ) : (
-          <ul className="divide-y divide-slate-100 dark:divide-slate-700">
-            {arrivals.map((b) => {
-              const room = rooms.find((r) => r.id === b.assignedRoomId);
-              return (
-                <li key={b.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-slate-900 dark:text-white">{b.guestName}</p>
-                    <p className="text-xs text-slate-400 dark:text-slate-500">{room ? `Room ${room.roomNumber}` : 'Room not assigned'}</p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Badge tone={b.status}>{ARRIVAL_STATUS_LABEL[b.status]}</Badge>
-                    {b.status === 'confirmed' && (
-                      <Button className="px-3 py-1.5 text-xs" onClick={() => onCheckIn(b)}>
-                        Check In
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <div className="space-y-2.5">
+          {pendingGroups.map((group) => (
+            <TodaysReservationCard
+              key={group[0].reservationGroupId ?? group[0].id}
+              group={group}
+              rooms={rooms}
+              onClick={() => onOpenReservation(group[0].reservationGroupId ?? group[0].id)}
+            />
+          ))}
+        </div>
       </CardBody>
     </Card>
   );
@@ -325,6 +356,7 @@ export function Dashboard({
   hasPms = true,
   hasChannelManager = false,
   isOwner = false,
+  onOpenReservation,
 }: {
   hotelId: string;
   /** Shown in the greeting banner (§ user request) in place of the sidebar's own hotel-name display. */
@@ -336,6 +368,9 @@ export function Dashboard({
   /** Pending-staff-approval banner (§ user request) is an owner-only concern — a GM/front_desk
    * already knows they submitted it, so it's not shown to them. */
   isOwner?: boolean;
+  /** Today's Reservations card (§ user request) — jumps to the Reservations tab's own full-page
+   * Booking Details view for this group, same page as clicking it in that list. */
+  onOpenReservation: (reservationGroupKey: string) => void;
 }) {
   const { token } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -346,7 +381,6 @@ export function Dashboard({
   const [cmConnections, setCmConnections] = useState<OtaConnection[]>([]);
   const [cmBookings, setCmBookings] = useState<Booking[]>([]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(Date.now());
-  const [checkingIn, setCheckingIn] = useState<Booking | null>(null);
 
   async function loadPmsData() {
     const [r, b, c, ih] = await Promise.all([
@@ -476,7 +510,7 @@ export function Dashboard({
         ]}
       />
 
-      <TodaysReservations arrivals={arrivals} rooms={rooms} onCheckIn={setCheckingIn} />
+      <TodaysReservations arrivals={arrivals} rooms={rooms} onOpenReservation={onOpenReservation} />
 
       {/* §user request — discrepancies are an owner-only concern; FMO/GM gets the occupancy
           counts but not the discrepancy alert itself (that's the Owner Dashboard branch above). */}
@@ -537,18 +571,6 @@ export function Dashboard({
         </CardBody>
       </Card>
 
-      {checkingIn && (
-        <CheckInModal
-          hotelId={hotelId}
-          reservation={checkingIn}
-          assignedRoomNumber={rooms.find((r) => r.id === checkingIn.assignedRoomId)?.roomNumber}
-          onClose={() => setCheckingIn(null)}
-          onDone={() => {
-            setCheckingIn(null);
-            void loadPmsData();
-          }}
-        />
-      )}
     </div>
   );
 }

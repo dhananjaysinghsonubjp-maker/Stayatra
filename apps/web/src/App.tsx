@@ -84,6 +84,10 @@ function Shell() {
   // Guest Messaging should open straight into, since tab switches here are just local state
   // with no routing/URL params to pass that through another way.
   const [pendingMessageBookingId, setPendingMessageBookingId] = useState<string | null>(null);
+  // Set by Dashboard's "Today's Reservations" card (§ user request) — same reasoning as
+  // pendingMessageBookingId above: carries which reservation group the Reservations tab should
+  // open straight into its own full-page Booking Details view for.
+  const [pendingReservationGroupKey, setPendingReservationGroupKey] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -277,10 +281,30 @@ function Shell() {
           </div>
         )}
         <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
-          {activeTab === 'dashboard' && <Dashboard hotelId={hotel.id} hotelName={hotel.name} onNavigate={setTab} hasPms={hasPms} hasChannelManager={hasChannelManager} isOwner={isOwner} />}
+          {activeTab === 'dashboard' && (
+            <Dashboard
+              hotelId={hotel.id}
+              hotelName={hotel.name}
+              onNavigate={setTab}
+              hasPms={hasPms}
+              hasChannelManager={hasChannelManager}
+              isOwner={isOwner}
+              onOpenReservation={(groupKey) => {
+                setPendingReservationGroupKey(groupKey);
+                setTab('bookings');
+              }}
+            />
+          )}
           {activeTab === 'rooms' && hasPms && <RoomBoard hotelId={hotel.id} />}
           {activeTab === 'inhouse' && hasPms && !isHousekeeping && <InHouse hotelId={hotel.id} />}
-          {activeTab === 'bookings' && canSeeReservations && <Bookings hotelId={hotel.id} hasPms={hasPms} />}
+          {activeTab === 'bookings' && canSeeReservations && (
+            <Bookings
+              hotelId={hotel.id}
+              hasPms={hasPms}
+              initialGroupKey={pendingReservationGroupKey}
+              onInitialConsumed={() => setPendingReservationGroupKey(null)}
+            />
+          )}
           {activeTab === 'dues' && hasPms && !isHousekeeping && <Dues hotelId={hotel.id} />}
           {activeTab === 'ledger' && hasPms && !isHousekeeping && <Ledger hotelId={hotel.id} />}
           {activeTab === 'contacts' && hasPms && !isHousekeeping && <Contacts hotelId={hotel.id} isOwner={pmsRole === 'owner'} />}
