@@ -105,7 +105,12 @@ export function MultiDatePicker({ selected, onApply, onClose }: { selected: stri
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-7">
+          {/* §user request — "ye colour joint ho raha hai, isko clean banao, edges gol rakho,
+              smooth karo": a selected range wrapping onto a new row had zero vertical gap between
+              rows, so one row's right-rounded end and the next row's left-rounded start sat flush
+              against each other and visually fused into one odd blob instead of reading as two
+              separate, cleanly rounded pills. */}
+          <div className="grid grid-cols-7 gap-y-1.5">
             {cells.map((dateKey, i) => {
               if (!dateKey) return <div key={`blank-${i}`} className="py-1" />;
               const day = Number(dateKey.slice(-2));
