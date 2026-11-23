@@ -151,15 +151,15 @@ body {
 }
 
 /* §user request — an ocean-wave strip along the very bottom of the hotel banner, with a shark fin
-   that surfaces and swims right-to-left across it. Full 30s cycle: water fades in over 3s, *then*
-   the fin glides right-to-left in one smooth, slow, uninterrupted 5s pass, *then* (once it's gone)
-   the water fades back out over 3s, then stays hidden for the rest of the cycle. Pure CSS: the
-   waves' own horizontal scroll (background-position) runs on its own independent, always-on loop,
-   while a second, shared 30s fade keyframe — applied to both the wave layers and the fin — carries
-   that show/hide timeline; the fin's own keyframe layers its right-to-left `left` position on top
-   of the same timeline, as a single two-point glide (no mid-flight waypoints) so it reads as one
-   continuous motion rather than several bobbing steps. Nothing here is randomized or recomputed
-   per cycle, so there's no need for JS. */
+   that surfaces and swims right-to-left across it. Full 2-minute (120s) cycle: water fades in over
+   3s, *then* the fin glides right-to-left in one smooth, slow, uninterrupted 8s pass, *then* (once
+   it's gone) the water fades back out over 3s, then stays hidden for the rest of the cycle. Pure
+   CSS: the waves' own horizontal scroll (background-position) runs on its own independent,
+   always-on loop, while a second, shared 120s fade keyframe — applied to both the wave layers and
+   the fin — carries that show/hide timeline; the fin's own keyframe layers its right-to-left `left`
+   position on top of the same timeline, as a single two-point glide (no mid-flight waypoints) so it
+   reads as one continuous motion rather than several bobbing steps. Nothing here is randomized or
+   recomputed per cycle, so there's no need for JS. */
 @keyframes banner-wave-back {
   from {
     background-position-x: 0;
@@ -176,20 +176,21 @@ body {
     background-position-x: 120px;
   }
 }
-/* Shared 30s show/hide timing — 3s fade in (0%–10%), fully visible through the fin's own 8s swim
-   (10%–36.7%, slowed down from 5s per feedback), 3s fade out (36.7%–46.7%), then hidden for the
-   rest of the cycle. */
+/* Shared 120s (2-minute) show/hide timing — same absolute durations as before (3s fade in, 8s
+   swim, 3s fade out), just spread across a longer cycle: fade in 0%–2.5% (3s), fully visible
+   through the fin's own swim 2.5%–9.167% (8s), fade out 9.167%–11.667% (3s), then hidden for the
+   rest of the 120s. */
 @keyframes banner-wave-fade {
   0% {
     opacity: 0;
   }
-  10% {
+  2.5% {
     opacity: 1;
   }
-  36.7% {
+  9.167% {
     opacity: 1;
   }
-  46.7%,
+  11.667%,
   100% {
     opacity: 0;
   }
@@ -197,34 +198,34 @@ body {
 .banner-wave-back {
   animation:
     banner-wave-back 9s linear infinite,
-    banner-wave-fade 30s linear infinite;
+    banner-wave-fade 120s linear infinite;
 }
 .banner-wave-front {
   animation:
     banner-wave-front 6s linear infinite,
-    banner-wave-fade 30s linear infinite;
+    banner-wave-fade 120s linear infinite;
 }
 @keyframes banner-shark-swim {
   0%,
-  10% {
+  2.5% {
     left: 104%;
     opacity: 0;
   }
-  10.3% {
+  2.6% {
     opacity: 1;
   }
-  36.7% {
+  9.167% {
     left: -10%;
     opacity: 1;
   }
-  46.7%,
+  11.667%,
   100% {
     left: -10%;
     opacity: 0;
   }
 }
 .banner-shark-fin {
-  animation: banner-shark-swim 30s linear infinite;
+  animation: banner-shark-swim 120s linear infinite;
 }
 
 /* §user request — rich "Hotel Brand" colour picker (BrandColorPicker.tsx), built on react-colorful's

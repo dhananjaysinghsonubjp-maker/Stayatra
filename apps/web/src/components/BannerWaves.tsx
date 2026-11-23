@@ -2,8 +2,9 @@
 // pinned to the very bottom of the hotel banner, continuously scrolling (two layers at different
 // speeds for a little depth), plus a dark fin that glides right-to-left across it in one smooth,
 // slow 8s pass once the water's 3s fade-in finishes, then the whole strip fades back out over 3s
-// once the fin is gone. All the motion is plain CSS (banner-wave-back/-front/-shark-fin in
-// index.css) — nothing here is randomized or recomputed per cycle, so there's no need for JS.
+// once the fin is gone — the whole show/hide cycle repeats every 2 minutes. All the motion is
+// plain CSS (banner-wave-back/-front/-shark-fin in index.css) — nothing here is randomized or
+// recomputed per cycle, so there's no need for JS.
 //
 // The fin is taller than the wave strip itself (so a good chunk of it reads as rising up out of
 // the water, not just peeking over it) — it sits in its own untrimmed wrapper, with the wave tiles
@@ -30,12 +31,13 @@ export function BannerWaves() {
       </div>
       {/* Shark-fin silhouette redrawn to match the reference exactly — a near-straight trailing
           (right) edge down from the point, a flat base, and a swept, gently curved leading (left)
-          edge back up to the point. Taller than wide (a 16:24 viewBox, not a square one), dark
-          enough to read as "poking up through" the wave band in front of it (DOM order: waves are
-          painted first, this fin last/on top). Bigger than the wave strip itself, so it isn't
-          clipped by that strip's own overflow-hidden. */}
-      <svg className="banner-shark-fin absolute bottom-0 h-9 w-6 sm:h-10 sm:w-7" viewBox="0 0 16 24" fill="#0b1240">
-        <path d="M12 1 L12.5 22 L3 22 C 4 17 7 8 12 1 Z" />
+          edge back up to the point. Taller than wide, dark enough to read as "poking up through"
+          the wave band in front of it (DOM order: waves are painted first, this fin last/on top).
+          Bigger than the wave strip itself, so it isn't clipped by that strip's own overflow-hidden.
+          §user request — "thoda broad, heavy dikhna chaiye": base widened and the leading-edge
+          curve bellied out further (viewBox 16→18) for a chunkier, heavier-looking fin. */}
+      <svg className="banner-shark-fin absolute bottom-0 h-9 w-7 sm:h-10 sm:w-8" viewBox="0 0 18 24" fill="#0b1240">
+        <path d="M13 1 L13.5 22 L2 22 C 3 16 6 7 13 1 Z" />
       </svg>
     </div>
   );
