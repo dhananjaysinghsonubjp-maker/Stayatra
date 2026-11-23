@@ -176,8 +176,9 @@ body {
     background-position-x: 120px;
   }
 }
-/* Shared 30s show/hide timing — 3s fade in (0%–10%), fully visible through the fin's 5s swim
-   (10%–26.7%), 3s fade out (26.7%–36.7%), then hidden for the rest of the cycle. */
+/* Shared 30s show/hide timing — 3s fade in (0%–10%), fully visible through the fin's own 8s swim
+   (10%–36.7%, slowed down from 5s per feedback), 3s fade out (36.7%–46.7%), then hidden for the
+   rest of the cycle. */
 @keyframes banner-wave-fade {
   0% {
     opacity: 0;
@@ -185,10 +186,10 @@ body {
   10% {
     opacity: 1;
   }
-  26.7% {
+  36.7% {
     opacity: 1;
   }
-  36.7%,
+  46.7%,
   100% {
     opacity: 0;
   }
@@ -212,11 +213,11 @@ body {
   10.3% {
     opacity: 1;
   }
-  26.7% {
+  36.7% {
     left: -10%;
     opacity: 1;
   }
-  36.7%,
+  46.7%,
   100% {
     left: -10%;
     opacity: 0;
