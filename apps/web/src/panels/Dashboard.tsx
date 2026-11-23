@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
 import { query } from '../api';
 import { useAuth } from '../AuthContext';
-import { Badge, Card, CardBody, CardHeader, EmptyState, StatCard } from '../components/ui';
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, StatCard } from '../components/ui';
 import { ChannelManagerDashboard } from './channel-manager/ChannelManagerDashboard';
+import { CheckInModal } from './checkin/CheckInModal';
 import { OccupancyDonut, RevenueHeatmap, RevenueTrendChart } from './dashboard/PerformanceCharts';
 import type { Booking, CleaningRecord, InHouseRow, OtaConnection, Room, StaffProfile } from '../types';
 import type { Tab } from '../layout/Sidebar';
+
+const ARRIVAL_STATUS_LABEL: Record<Booking['status'], string> = {
+  confirmed: 'Upcoming',
+  checked_in: 'Checked In',
+  checked_out: 'Checked Out',
+  cancelled: 'Cancelled',
+  no_show: 'No Show',
+  void: 'Voided',
+};
 
 function isToday(iso: string) {
   const d = new Date(iso);
@@ -137,6 +147,46 @@ function StaffApprovalAlert({ count, onPress }: { count: number; onPress: () => 
       </div>
       <span className="text-amber-400">›</span>
     </button>
+  );
+}
+
+/**
+ * §user request — "good afternoon ke neeche, hotel current status ke upar ek box jisme current
+ * date ki reservation ho aur check-in ka option khule": a real, working Check In button (opens
+ * the same CheckInModal slider used everywhere else), not just a link that jumps to Room View.
+ */
+function TodaysReservations({ arrivals, rooms, onCheckIn }: { arrivals: Booking[]; rooms: Room[]; onCheckIn: (b: Booking) => void }) {
+  return (
+    <Card className="mb-6">
+      <CardHeader title="Today's Reservations" subtitle="Guests checking in today" />
+      <CardBody>
+        {arrivals.length === 0 ? (
+          <EmptyState title="No reservations for today" />
+        ) : (
+          <ul className="divide-y divide-slate-100 dark:divide-slate-700">
+            {arrivals.map((b) => {
+              const room = rooms.find((r) => r.id === b.assignedRoomId);
+              return (
+                <li key={b.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-slate-900 dark:text-white">{b.guestName}</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">{room ? `Room ${room.roomNumber}` : 'Room not assigned'}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge tone={b.status}>{ARRIVAL_STATUS_LABEL[b.status]}</Badge>
+                    {b.status === 'confirmed' && (
+                      <Button className="px-3 py-1.5 text-xs" onClick={() => onCheckIn(b)}>
+                        Check In
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardBody>
+    </Card>
   );
 }
 
@@ -296,25 +346,28 @@ export function Dashboard({
   const [cmConnections, setCmConnections] = useState<OtaConnection[]>([]);
   const [cmBookings, setCmBookings] = useState<Booking[]>([]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(Date.now());
+  const [checkingIn, setCheckingIn] = useState<Booking | null>(null);
+
+  async function loadPmsData() {
+    const [r, b, c, ih] = await Promise.all([
+      query<Room[]>('bookings.getRoomBoard', { hotelId }, token ?? undefined),
+      query<Booking[]>('bookings.listReservations', { hotelId }, token ?? undefined),
+      query<CleaningRecord[]>('cleaning.list', { hotelId, flaggedOnly: true }, token ?? undefined),
+      query<InHouseRow[]>('bookings.listInHouse', { hotelId }, token ?? undefined),
+    ]);
+    setRooms(r);
+    setBookings(b);
+    setCleanings(c);
+    setInHouseRows(ih);
+    setLastUpdatedAt(Date.now());
+  }
 
   useEffect(() => {
     if (!hasPms) return;
-    async function load() {
-      const [r, b, c, ih] = await Promise.all([
-        query<Room[]>('bookings.getRoomBoard', { hotelId }, token ?? undefined),
-        query<Booking[]>('bookings.listReservations', { hotelId }, token ?? undefined),
-        query<CleaningRecord[]>('cleaning.list', { hotelId, flaggedOnly: true }, token ?? undefined),
-        query<InHouseRow[]>('bookings.listInHouse', { hotelId }, token ?? undefined),
-      ]);
-      setRooms(r);
-      setBookings(b);
-      setCleanings(c);
-      setInHouseRows(ih);
-      setLastUpdatedAt(Date.now());
-    }
-    void load();
-    const id = setInterval(load, 8000);
+    void loadPmsData();
+    const id = setInterval(loadPmsData, 8000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId, token, hasPms]);
 
   useEffect(() => {
@@ -423,6 +476,8 @@ export function Dashboard({
         ]}
       />
 
+      <TodaysReservations arrivals={arrivals} rooms={rooms} onCheckIn={setCheckingIn} />
+
       {/* §user request — discrepancies are an owner-only concern; FMO/GM gets the occupancy
           counts but not the discrepancy alert itself (that's the Owner Dashboard branch above). */}
       <OccupancyCounters occupied={occupied} available={available} housekeeping={housekeepingRooms} delayed={delayedCount} />
@@ -448,66 +503,52 @@ export function Dashboard({
         <StatCard label="Collected today" value={`₹${collectedToday.toLocaleString('en-IN')}`} tone="brand" />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader
-            title="Room status"
-            action={
-              <button onClick={() => onNavigate('rooms')} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
-                Open Room View →
-              </button>
-            }
-          />
-          <CardBody>
-            {rooms.length === 0 ? (
-              <EmptyState title="No rooms yet" hint="Add rooms from Staff & Setup" />
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {rooms.map((r) => (
-                  <span
-                    key={r.id}
-                    title={`${r.roomNumber} — ${r.status}`}
-                    className={`flex h-9 w-9 items-center justify-center rounded-md text-xs font-semibold ${
-                      r.status === 'available'
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
-                        : r.status === 'occupied'
-                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300'
-                          : 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
-                    }`}
-                  >
-                    {r.roomNumber.replace(/\D/g, '') || r.roomNumber.slice(0, 2)}
-                  </span>
-                ))}
-              </div>
-            )}
-          </CardBody>
-        </Card>
+      <Card>
+        <CardHeader
+          title="Room status"
+          action={
+            <button onClick={() => onNavigate('rooms')} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+              Open Room View →
+            </button>
+          }
+        />
+        <CardBody>
+          {rooms.length === 0 ? (
+            <EmptyState title="No rooms yet" hint="Add rooms from Staff & Setup" />
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {rooms.map((r) => (
+                <span
+                  key={r.id}
+                  title={`${r.roomNumber} — ${r.status}`}
+                  className={`flex h-9 w-9 items-center justify-center rounded-md text-xs font-semibold ${
+                    r.status === 'available'
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                      : r.status === 'occupied'
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300'
+                        : 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                  }`}
+                >
+                  {r.roomNumber.replace(/\D/g, '') || r.roomNumber.slice(0, 2)}
+                </span>
+              ))}
+            </div>
+          )}
+        </CardBody>
+      </Card>
 
-        <Card>
-          <CardHeader
-            title="Today's arrivals"
-            action={
-              <button onClick={() => onNavigate('rooms')} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
-                Check in →
-              </button>
-            }
-          />
-          <CardBody>
-            {arrivals.length === 0 ? (
-              <EmptyState title="No arrivals today" />
-            ) : (
-              <ul className="divide-y divide-slate-100 dark:divide-slate-700">
-                {arrivals.map((b) => (
-                  <li key={b.id} className="flex items-center justify-between py-2 text-sm">
-                    <span className="text-slate-700 dark:text-slate-300">{b.guestName}</span>
-                    <Badge tone={b.status}>{b.status}</Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
-      </div>
+      {checkingIn && (
+        <CheckInModal
+          hotelId={hotelId}
+          reservation={checkingIn}
+          assignedRoomNumber={rooms.find((r) => r.id === checkingIn.assignedRoomId)?.roomNumber}
+          onClose={() => setCheckingIn(null)}
+          onDone={() => {
+            setCheckingIn(null);
+            void loadPmsData();
+          }}
+        />
+      )}
     </div>
   );
 }
