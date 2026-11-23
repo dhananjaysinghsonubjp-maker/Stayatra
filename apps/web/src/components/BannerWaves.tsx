@@ -29,14 +29,18 @@ export function BannerWaves() {
           style={{ backgroundImage: `url("data:image/svg+xml,${WAVE_FRONT}")`, backgroundRepeat: 'repeat-x', backgroundSize: '120px 100%' }}
         />
       </div>
-      {/* Shark-fin silhouette redrawn to match the reference exactly — a near-straight trailing
-          (right) edge down from the point, a flat base, and a swept, gently curved leading (left)
-          edge back up to the point. Taller than wide, dark enough to read as "poking up through"
-          the wave band in front of it (DOM order: waves are painted first, this fin last/on top).
-          Bigger than the wave strip itself, so it isn't clipped by that strip's own overflow-hidden.
-          §user request — "thoda broad, heavy dikhna chaiye": base widened and the leading-edge
-          curve bellied out further (viewBox 16→18) for a chunkier, heavier-looking fin. */}
-      <svg className="banner-shark-fin absolute bottom-0 h-9 w-7 sm:h-10 sm:w-8" viewBox="0 0 18 24" fill="#0b1240">
+      {/* Shark-fin silhouette: a near-straight trailing (right) edge down from the point, a flat
+          base, and a swept, gently curved leading (left) edge back up to the point. Dark enough to
+          read as "poking up through" the wave band in front of it (DOM order: waves are painted
+          first, this fin last/on top). Bigger than the wave strip itself, so it isn't clipped by
+          that strip's own overflow-hidden.
+          §user request — "ye abhi bhi slim hai, width 3 size honi chaiye, itna broad badhao": the
+          earlier width bump only widened the *box* — by default an <svg> keeps its viewBox's own
+          aspect ratio and just centers/pads inside a wider box instead of actually stretching, so
+          the fin itself stayed visually the same width. `preserveAspectRatio="none"` makes it fill
+          the box exactly instead, so tripling the width class (w-7→w-[84px], sm:w-8→sm:w-[96px])
+          now genuinely triples how broad the drawn fin looks, not just its invisible bounding box. */}
+      <svg className="banner-shark-fin absolute bottom-0 h-9 w-[84px] sm:h-10 sm:w-[96px]" viewBox="0 0 18 24" preserveAspectRatio="none" fill="#0b1240">
         <path d="M13 1 L13.5 22 L2 22 C 3 16 6 7 13 1 Z" />
       </svg>
     </div>
