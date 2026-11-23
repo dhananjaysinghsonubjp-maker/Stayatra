@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { query } from '../api';
 import { useAuth } from '../AuthContext';
 import { Card, CardBody, CardHeader, EmptyState, StatCard } from '../components/ui';
+import { ChannelBadge } from './channel-manager/ChannelBadge';
 import { ChannelManagerDashboard } from './channel-manager/ChannelManagerDashboard';
 import { OccupancyDonut, RevenueHeatmap, RevenueTrendChart } from './dashboard/PerformanceCharts';
 import type { Booking, CleaningRecord, InHouseRow, OtaConnection, Room, StaffProfile } from '../types';
@@ -148,6 +149,8 @@ function StaffApprovalAlert({ count, onPress }: { count: number; onPress: () => 
 function TodaysReservationCard({ group, rooms, onClick }: { group: Booking[]; rooms: Room[]; onClick: () => void }) {
   const lead = group[0];
   const bookerName = lead.bookedByName ?? lead.guestName;
+  const bookerPhone = lead.bookedByPhone ?? lead.guestPhone;
+  const bookingIdShort = lead.id.slice(-6).toUpperCase();
   const roomNumberFor = (b: Booking) => rooms.find((r) => r.id === b.assignedRoomId)?.roomNumber;
   const pendingRooms = group.filter((b) => b.status === 'confirmed').map(roomNumberFor).filter((n): n is string => Boolean(n));
   const doneRooms = group.filter((b) => b.status === 'checked_in' || b.status === 'checked_out').map(roomNumberFor).filter((n): n is string => Boolean(n));
@@ -156,24 +159,29 @@ function TodaysReservationCard({ group, rooms, onClick }: { group: Booking[]; ro
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-xl p-3.5 text-left shadow-sm transition-shadow hover:shadow ${
-        lead.isVip ? 'vip-card' : 'border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'
-      }`}
+      className="w-full rounded-xl border-2 border-brand-500/70 bg-brand-50/50 p-3.5 text-left shadow-sm transition-shadow hover:shadow dark:border-brand-400/60 dark:bg-brand-500/10"
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
-        {bookerName.slice(0, 2).toUpperCase()}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 truncate text-sm font-bold text-slate-900 dark:text-white">
-          {bookerName} {lead.isVip && <span title="VIP">👑</span>}
-        </p>
-        <p className="mt-0.5 truncate text-xs">
-          {pendingRooms.length > 0 && <span className="font-medium text-amber-600 dark:text-amber-400">Pending: {pendingRooms.join(', ')}</span>}
-          {pendingRooms.length > 0 && doneRooms.length > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-          {doneRooms.length > 0 && <span className="font-medium text-emerald-600 dark:text-emerald-400">Checked in: {doneRooms.join(', ')}</span>}
-        </p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-bold text-slate-500 dark:text-slate-400">#{bookingIdShort}</span>
+        <ChannelBadge source={lead.source} />
       </div>
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-400 dark:border-slate-600">→</span>
+      <div className="flex items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
+          {bookerName.slice(0, 2).toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 truncate text-sm font-bold text-slate-900 dark:text-white">
+            {bookerName} {lead.isVip && <span title="VIP">👑</span>}
+          </p>
+          {bookerPhone && <p className="truncate text-xs text-brand-600 dark:text-brand-400">{bookerPhone}</p>}
+        </div>
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-400 dark:border-slate-600">→</span>
+      </div>
+      <p className="mt-2 truncate text-xs">
+        {pendingRooms.length > 0 && <span className="font-medium text-amber-600 dark:text-amber-400">Pending: {pendingRooms.join(', ')}</span>}
+        {pendingRooms.length > 0 && doneRooms.length > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+        {doneRooms.length > 0 && <span className="font-medium text-emerald-600 dark:text-emerald-400">Checked in: {doneRooms.join(', ')}</span>}
+      </p>
     </button>
   );
 }
