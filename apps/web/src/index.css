@@ -151,10 +151,12 @@ body {
 }
 
 /* §user request — an ocean-wave strip along the very bottom of the hotel banner, with a shark fin
-   that surfaces and swims across every 20s. Pure CSS (background-position scroll for the waves,
-   a keyframed `left` for the fin) rather than JS/rAF — smoother, and nothing here changes between
-   cycles the way the earlier plane's random flight path did, so there's no need to recompute
-   anything in script. */
+   that surfaces and swims right-to-left across it over a smooth 5s, then the whole strip (waves
+   included) fades out until the next cycle 30s after the last one started. Pure CSS: the waves'
+   own horizontal scroll (background-position) runs on its own independent, always-on loop, while
+   a second, shared 30s fade keyframe — applied to both the wave layers and the fin — handles the
+   show/hide cycle; the fin's own keyframe layers its right-to-left `left` position on top of that
+   same timeline. Nothing here is randomized or recomputed per cycle, so there's no need for JS. */
 @keyframes banner-wave-back {
   from {
     background-position-x: 0;
@@ -171,47 +173,69 @@ body {
     background-position-x: 120px;
   }
 }
+/* Shared 30s show/hide timing: a quick fade in, visible for the 5s the shark takes to swim
+   across (1% to ~17.7% of 30s), a quick fade out, then hidden for the rest of the cycle. */
+@keyframes banner-wave-fade {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  1% {
+    opacity: 1;
+  }
+  17.7% {
+    opacity: 1;
+  }
+  19% {
+    opacity: 0;
+  }
+}
 .banner-wave-back {
-  animation: banner-wave-back 9s linear infinite;
+  animation:
+    banner-wave-back 9s linear infinite,
+    banner-wave-fade 30s ease-in-out infinite;
 }
 .banner-wave-front {
-  animation: banner-wave-front 6s linear infinite;
+  animation:
+    banner-wave-front 6s linear infinite,
+    banner-wave-fade 30s ease-in-out infinite;
 }
 @keyframes banner-shark-swim {
-  0%,
-  74% {
-    left: -8%;
+  0% {
+    left: 106%;
     opacity: 0;
     transform: translateY(2px) rotate(-6deg);
   }
-  76% {
+  1% {
+    left: 100%;
     opacity: 1;
+    transform: translateY(0) rotate(0deg);
   }
-  80% {
-    left: 15%;
+  5.5% {
+    left: 75%;
     transform: translateY(-1px) rotate(4deg);
   }
-  85% {
-    left: 40%;
+  9.8% {
+    left: 50%;
     transform: translateY(1px) rotate(-4deg);
   }
-  90% {
-    left: 65%;
+  14% {
+    left: 25%;
     transform: translateY(-1px) rotate(4deg);
   }
-  94% {
-    left: 92%;
+  17.7% {
+    left: -8%;
     opacity: 1;
-    transform: translateY(1px) rotate(-4deg);
+    transform: translateY(2px) rotate(-6deg);
   }
-  96%,
+  19%,
   100% {
-    left: 108%;
+    left: -8%;
     opacity: 0;
   }
 }
 .banner-shark-fin {
-  animation: banner-shark-swim 20s ease-in-out infinite;
+  animation: banner-shark-swim 30s ease-in-out infinite;
 }
 
 /* Plain amount fields, no spinner arrows — every number input in the app. */
