@@ -69,7 +69,11 @@ function Icon(path: string) {
 }
 
 const CHEVRON = Icon('M9 5l7 7-7 7');
-const BULK_UPDATE_ICON = Icon('M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 12v9m0-9l-3 3m3-3l3 3');
+// §user request, with a reference app's own sidebar screenshot as the exact target — the
+// "Room Management" group's icon there is a narrow vertical card/book shape (an outer rounded
+// rect with one line near the left forming a thin spine strip), not the cloud-upload shape this
+// used to be.
+const ROOM_MANAGEMENT_ICON = Icon('M7 2h10a1 1 0 011 1v18a1 1 0 01-1 1H7a1 1 0 01-1-1V3a1 1 0 011-1zM10 2v20');
 
 const NAV: NavEntry[] = [
   { id: 'dashboard', label: 'Dashboard', icon: Icon('M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1h3a1 1 0 001-1V10M9 21h6') },
@@ -81,7 +85,9 @@ const NAV: NavEntry[] = [
       { id: 'inhouse', label: 'In-House Guests', icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z') },
     ],
   },
-  { id: 'cm_calendar', label: 'Calendar View', icon: Icon('M3 3h18v18H3V3zm0 6h18M3 15h18M9 3v18M15 3v18') },
+  // §user request, with the same reference screenshot — "Calendar View" there uses a classic
+  // calendar-with-ring-binding icon, not a plain 3×3 grid.
+  { id: 'cm_calendar', label: 'Calendar View', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
   { id: 'bookings', label: 'Reservations', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
   { id: 'dues', label: 'Dues', icon: Icon('M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z') },
   { id: 'ledger', label: 'Ledger', icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z') },
@@ -89,7 +95,7 @@ const NAV: NavEntry[] = [
   {
     // §user request — "Bulk Update ka naam change hoke Room Management hoga"
     label: 'Room Management',
-    icon: BULK_UPDATE_ICON,
+    icon: ROOM_MANAGEMENT_ICON,
     children: [
       {
         // §user request — "Rate Update/Inventory Update ko sort/simple karo": those two separate
