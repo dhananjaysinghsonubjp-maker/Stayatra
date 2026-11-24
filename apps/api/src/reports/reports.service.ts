@@ -318,23 +318,41 @@ export class ReportsService {
    */
   async getCheckInCheckOutReport(input: { hotelId: string; from: Date; to: Date }) {
     const toInclusive = endOfDay(input.to);
-    const rows = await this.prisma.booking.findMany({
+
+    // §bugfix — "checked-in" used to mean "this booking's current status happens to be
+    // checked_in/checked_out", so a guest who arrived a week ago and is still staying got
+    // double-counted as both "checked-in" AND "stay over" (and their full-stay revenue got
+    // re-added on every single day this report was run for). Arrivals below are scoped to the
+    // period itself — bookings whose check-in actually falls in [from, to] — same "revenue
+    // counted on check-in day, never per night" convention this app's own Sale Report already
+    // uses, so this only counts a stay's revenue once, ever.
+    const arrivals = await this.prisma.booking.findMany({
       where: {
         hotelId: input.hotelId,
+        checkIn: { gte: input.from, lte: toInclusive },
         status: { in: ['confirmed', 'checked_in', 'checked_out'] },
-        checkIn: { lte: toInclusive },
-        checkOut: { gte: input.from },
       },
       include: { assignedRoom: true, lineItems: true },
     });
 
-    let occupancy = 0;
-    let checkedIn = 0;
-    let stayOver = 0;
+    // In-house before the period started and still here through it — adds to Occupancy, not
+    // Revenue (its revenue was already counted on its own, earlier check-in day).
+    const stayOver = await this.prisma.booking.count({
+      where: { hotelId: input.hotelId, checkIn: { lt: input.from }, checkOut: { gt: input.from }, status: 'checked_in' },
+    });
+
+    // §bugfix — "Collected"/"Pending" used to read a booking's lifetime paidAmount for every
+    // booking touching the period, which isn't what either word means on a daily report: this is
+    // the actual cash the front desk took in during [from, to], from Payment's own collectedAt,
+    // not from whichever bookings happen to overlap these dates.
+    const payments = await this.prisma.payment.findMany({
+      where: { collectedAt: { gte: input.from, lte: toInclusive }, booking: { hotelId: input.hotelId } },
+    });
+    const collected = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+
     let revenue = 0;
     let totalGst = 0;
     let totalCommission = 0;
-    let collected = 0;
     const details: {
       id: string;
       guestName: string;
@@ -350,7 +368,7 @@ export class ReportsService {
     }[] = [];
     const byOta = new Map<string, { bookings: number; gross: number; commission: number; gst: number; paid: number }>();
 
-    for (const b of rows) {
+    for (const b of arrivals) {
       const totals = computeInvoiceTotals({
         totalAmount: Number(b.totalAmount),
         lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
@@ -361,13 +379,9 @@ export class ReportsService {
       const breakdown = (b.channelBreakdown ?? {}) as Record<string, unknown>;
       const commission = typeof breakdown.commission === 'number' ? breakdown.commission : 0;
 
-      occupancy += 1;
-      if (b.status === 'checked_in' || b.status === 'checked_out') checkedIn += 1;
-      if (b.checkIn < input.from) stayOver += 1;
       revenue += totals.grandTotal;
       totalGst += totals.gst.amount;
       totalCommission += commission;
-      collected += paid;
 
       details.push({
         id: b.id,
@@ -396,8 +410,8 @@ export class ReportsService {
 
     const netPayable = revenue - totalCommission;
     return {
-      occupancy,
-      checkedIn,
+      occupancy: arrivals.length + stayOver,
+      checkedIn: arrivals.length,
       stayOver,
       revenue,
       totalGst,
