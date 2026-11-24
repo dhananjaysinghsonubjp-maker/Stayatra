@@ -25,6 +25,18 @@ export type Tab =
   | 'reports_rooms'
   | 'reports_sale'
   | 'reports_expenses'
+  | 'reports_account_book'
+  | 'reports_advance_adjustment'
+  | 'reports_invoice_bills'
+  | 'reports_payment_receipts'
+  | 'reports_payment_report'
+  | 'reports_profit_loss'
+  | 'reports_advance_received'
+  | 'reports_room_sale'
+  | 'reports_gst_bill'
+  | 'reports_credit_debit'
+  | 'reports_day_book'
+  | 'reports_room_wise_revenue'
   | 'cm_calendar'
   | 'cm_guest_messaging'
   | 'cm_reviews'
@@ -131,6 +143,18 @@ const NAV: NavEntry[] = [
         icon: Icon('M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 2v8m0 0v2m0-2c-1.11 0-2.08-.402-2.599-1M5 12a7 7 0 1014 0 7 7 0 00-14 0z'),
         children: [
           { id: 'dues', label: 'Dues', icon: Icon('M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z') },
+          { id: 'reports_account_book', label: 'Account Book', icon: Icon('M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z M9 7h6m-6 4h6m-6 4h4') },
+          { id: 'reports_advance_adjustment', label: 'Advance Adjustment', icon: Icon('M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4') },
+          { id: 'reports_invoice_bills', label: 'Invoice Bills', icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z') },
+          { id: 'reports_payment_receipts', label: 'Payment Receipts', icon: Icon('M9 7h6m0 10v-3m-3 3v-3m-3 3v-3M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z') },
+          { id: 'reports_payment_report', label: 'Payment Report', icon: Icon('M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 2v8m0 0v2m0-2c-1.11 0-2.08-.402-2.599-1M5 12a7 7 0 1014 0 7 7 0 00-14 0z') },
+          { id: 'reports_profit_loss', label: 'Profit And Loss', icon: Icon('M3 17l6-6 4 4 8-8M21 7h-6m6 0v6') },
+          { id: 'reports_advance_received', label: 'Advance Received', icon: Icon('M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z') },
+          { id: 'reports_room_sale', label: 'Room Sale', icon: Icon('M4 6h16M4 6a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2M4 6l8-3 8 3M9 13h6') },
+          { id: 'reports_gst_bill', label: 'GST Bill', icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z') },
+          { id: 'reports_credit_debit', label: 'Credit and Debit', icon: Icon('M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4') },
+          { id: 'reports_day_book', label: 'Day Book', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
+          { id: 'reports_room_wise_revenue', label: 'Room Wise Revenue', icon: Icon('M3 17l6-6 4 4 8-8M21 7h-6m6 0v6') },
           { id: 'reports_sale', label: 'Sale Report', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
           { id: 'reports_rooms', label: 'Rooms Report', icon: Icon('M4 6h16M4 6a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2M4 6l8-3 8 3M9 13h6') },
           { id: 'reports_expenses', label: 'Daily Expenses', icon: Icon('M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 2v8m0 0v2m0-2c-1.11 0-2.08-.402-2.599-1M5 12a7 7 0 1014 0 7 7 0 00-14 0z') },

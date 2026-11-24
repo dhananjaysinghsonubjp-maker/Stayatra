@@ -8,7 +8,7 @@ import { ReportPrintShell } from './ReportPrintShell';
 import { ReportDateRangePill } from './ReportDateRangePill';
 import type { IdType } from '../../types';
 
-function todayPlus(days: number) {
+export function todayPlus(days: number) {
   return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 }
 
@@ -18,7 +18,7 @@ function idTypeLabel(t: IdType | null) {
 
 /** Shared by all three below — a date-range picker sitting above the printable area (`no-print`,
  * so it never ends up on the actual printed page) plus a refresh button. */
-function DateRangeBar({ from, to, setFrom, setTo, onRefresh, loading }: { from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void; onRefresh: () => void; loading: boolean }) {
+export function DateRangeBar({ from, to, setFrom, setTo, onRefresh, loading }: { from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void; onRefresh: () => void; loading: boolean }) {
   return (
     <div className="no-print mb-4 flex flex-wrap items-center justify-end gap-2">
       <button onClick={onRefresh} disabled={loading} title="Refresh" className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-brand-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-slate-700">

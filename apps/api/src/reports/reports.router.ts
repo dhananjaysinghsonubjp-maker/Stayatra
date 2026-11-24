@@ -43,5 +43,53 @@ export function createReportsRouter(reports: ReportsService) {
     checkInCheckOut: ownerOrManager
       .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
       .query(({ input }) => reports.getCheckInCheckOutReport(input)),
+
+    advanceReceived: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getAdvanceReceivedReport(input)),
+
+    roomSale: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getRoomSaleReport(input)),
+
+    gstBill: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getGstBillReport(input)),
+
+    paymentReceipts: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getPaymentReceiptsReport(input)),
+
+    profitAndLoss: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getProfitAndLossReport(input)),
+
+    creditAndDebit: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getCreditAndDebitReport(input)),
+
+    roomWiseRevenue: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getRoomWiseRevenueReport(input)),
+
+    invoiceBills: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getInvoiceBillsReport(input)),
+
+    paymentReport: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getPaymentReport(input)),
+
+    accountBook: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getAccountBookReport(input)),
+
+    advanceAdjustment: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getAdvanceAdjustmentReport(input)),
+
+    dayBook: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getDayBookReport(input)),
   });
 }

@@ -432,4 +432,483 @@ export class ReportsService {
       })),
     };
   }
+
+  /** Shared by Credit and Debit / Account Book / Day Book below — the same "Payment rows read as
+   * cash-in, tagged Room" merge Ledger's own listTransactions already does, duplicated here rather
+   * than imported so ReportsService stays self-contained (same reasoning as the rest of this
+   * file's own Prisma queries). */
+  private async getMergedTransactions(hotelId: string, from: Date, to: Date) {
+    const [entries, payments] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({
+        where: { hotelId, createdAt: { gte: from, lte: to } },
+        include: { category: true },
+      }),
+      this.prisma.payment.findMany({
+        where: { booking: { hotelId }, collectedAt: { gte: from, lte: to } },
+        include: { booking: { include: { assignedRoom: true } } },
+      }),
+    ]);
+    const merged = [
+      ...entries.map((e) => ({
+        id: e.id,
+        type: e.type,
+        amount: Number(e.amount),
+        paymentMethod: e.paymentMethod as string,
+        category: e.category?.name ?? null,
+        remarks: e.remarks,
+        createdAt: e.createdAt,
+        bookingId: null as string | null,
+        guestName: null as string | null,
+        roomNumber: null as string | null,
+      })),
+      ...payments.map((p) => ({
+        id: p.id,
+        type: 'cash_in' as const,
+        amount: Number(p.amount),
+        paymentMethod: p.method as string,
+        category: 'Room',
+        remarks: null as string | null,
+        createdAt: p.collectedAt,
+        bookingId: p.booking.id,
+        guestName: p.booking.guestName as string | null,
+        roomNumber: p.booking.assignedRoom?.roomNumber ?? null,
+      })),
+    ];
+    merged.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return merged;
+  }
+
+  /** §user request, with a reference app's own "Advance Received Report" as the target — every
+   * advance-type payment in the range, one receipt row each. */
+  async getAdvanceReceivedReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const payments = await this.prisma.payment.findMany({
+      where: { booking: { hotelId: input.hotelId }, type: 'advance', collectedAt: { gte: input.from, lte: toInclusive } },
+      include: { booking: { include: { assignedRoom: true } } },
+      orderBy: { collectedAt: 'asc' },
+    });
+    const seen = new Map<string, number>();
+    const rows = payments.map((p) => {
+      const n = (seen.get(p.bookingId) ?? 0) + 1;
+      seen.set(p.bookingId, n);
+      const code = `BK-${p.booking.id.slice(-6).toUpperCase()}`;
+      return {
+        id: p.id,
+        date: p.collectedAt.toISOString(),
+        receiptNo: `${code}-${n}`,
+        guestName: p.booking.guestName,
+        amount: Number(p.amount),
+        remark: `${p.booking.guestName}, Booking: ${code}, Room: ${p.booking.assignedRoom?.roomNumber ?? '—'}`,
+      };
+    });
+    return { rows, totalAdvance: rows.reduce((s, r) => s + r.amount, 0) };
+  }
+
+  /** §user request, with a reference app's own "Room Sale Report" as the target — a tax-invoice
+   * style row per room booking (same "revenue counted on check-in day" convention as Sale Report),
+   * with GST split evenly into CGST/SGST (standard for an intra-state Indian hotel bill). */
+  async getRoomSaleReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const bookings = await this.prisma.booking.findMany({
+      where: { hotelId: input.hotelId, checkIn: { gte: input.from, lte: toInclusive }, status: { not: 'void' } },
+      include: { assignedRoom: true, lineItems: true, payments: true },
+      orderBy: { checkIn: 'asc' },
+    });
+    let totalBase = 0;
+    let totalCgst = 0;
+    let totalSgst = 0;
+    let grandTotal = 0;
+    let totalCommission = 0;
+    let totalNights = 0;
+    const rows = bookings.map((b) => {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      const cgst = totals.gst.amount / 2;
+      const sgst = totals.gst.amount / 2;
+      const breakdown = (b.channelBreakdown ?? {}) as Record<string, unknown>;
+      const commission = typeof breakdown.commission === 'number' ? breakdown.commission : 0;
+      totalBase += totals.basePrice;
+      totalCgst += cgst;
+      totalSgst += sgst;
+      grandTotal += totals.grandTotal;
+      totalCommission += commission;
+      totalNights += b.nights;
+      return {
+        id: b.id,
+        invoiceDate: b.createdAt.toISOString(),
+        invoiceNumber: `BK-${b.id.slice(-6).toUpperCase()}`,
+        guestName: b.guestName,
+        gstNo: b.billToCompanyGstin,
+        checkIn: b.checkIn.toISOString(),
+        checkOut: b.checkOut.toISOString(),
+        roomNumber: b.assignedRoom?.roomNumber ?? '—',
+        roomTariff: b.nights > 0 ? totals.basePrice / b.nights : totals.basePrice,
+        nights: b.nights,
+        baseAmount: totals.basePrice,
+        cgst,
+        sgst,
+        grandTotal: totals.grandTotal,
+        commissionPayable: commission,
+        modeOfPayment: b.payments[0]?.method ?? null,
+      };
+    });
+    return { rows, summary: { totalBookings: rows.length, totalRooms: rows.length, totalNights, totalBase, totalCgst, totalSgst, grandTotal, totalCommission } };
+  }
+
+  /** §user request, with a reference app's own "GST Bill Report" as the target — only bookings
+   * actually billed to a GSTIN (company billing, for the guest's own input credit), not every
+   * booking — a hotel with no B2B stays in the range correctly shows none. */
+  async getGstBillReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const bookings = await this.prisma.booking.findMany({
+      where: { hotelId: input.hotelId, checkIn: { gte: input.from, lte: toInclusive }, billToCompanyGstin: { not: null } },
+      include: { lineItems: true },
+      orderBy: { checkIn: 'asc' },
+    });
+    return bookings.map((b) => {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      return {
+        id: b.id,
+        gstNo: b.billToCompanyGstin,
+        receiverName: b.billToCompanyName ?? b.guestName,
+        invoiceDate: b.createdAt.toISOString(),
+        invoiceNumber: `BK-${b.id.slice(-6).toUpperCase()}`,
+        guestName: b.guestName,
+        checkIn: b.checkIn.toISOString(),
+        checkOut: b.checkOut.toISOString(),
+        rooms: 1,
+        nights: b.nights,
+        baseValue: totals.basePrice,
+        cgst: totals.gst.amount / 2,
+        sgst: totals.gst.amount / 2,
+        invoiceValue: totals.grandTotal,
+      };
+    });
+  }
+
+  /** §user request, with a reference app's own "Payment Receipts" as the target — every payment
+   * in the range as one on-screen row (unlike the PDF-style reports above), for a front desk to
+   * search/filter directly rather than print. */
+  async getPaymentReceiptsReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const payments = await this.prisma.payment.findMany({
+      where: { booking: { hotelId: input.hotelId }, collectedAt: { gte: input.from, lte: toInclusive } },
+      include: { booking: { include: { assignedRoom: true } } },
+      orderBy: { collectedAt: 'desc' },
+    });
+    return payments.map((p) => ({
+      id: p.id,
+      receiptNo: p.id.slice(-6).toUpperCase(),
+      receiptDate: p.collectedAt.toISOString(),
+      bookingCode: `BK-${p.booking.id.slice(-6).toUpperCase()}`,
+      guestName: p.booking.guestName,
+      checkIn: p.booking.checkIn.toISOString(),
+      checkOut: p.booking.checkOut.toISOString(),
+      roomNumber: p.booking.assignedRoom?.roomNumber ?? '—',
+      paymentType: p.type,
+      paymentMethod: p.method,
+      amount: Number(p.amount),
+    }));
+  }
+
+  /** §user request, with a reference app's own "Profit And Loss Report" as the target — revenue
+   * (net of discount, commission and GST broken out) against Ledger's own Cash Out entries as
+   * operating expenses, grouped by category. No cost-of-goods concept exists in this app (a hotel
+   * stay has no COGS the way physical inventory would), so "profit" here is simply revenue minus
+   * these logged expenses. */
+  async getProfitAndLossReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const bookings = await this.prisma.booking.findMany({
+      where: { hotelId: input.hotelId, checkIn: { gte: input.from, lte: toInclusive }, status: { not: 'void' } },
+      include: { lineItems: true },
+    });
+    let netRevenue = 0;
+    let gst = 0;
+    let commission = 0;
+    for (const b of bookings) {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      netRevenue += totals.subtotal - totals.discount;
+      gst += totals.gst.amount;
+      const breakdown = (b.channelBreakdown ?? {}) as Record<string, unknown>;
+      commission += typeof breakdown.commission === 'number' ? breakdown.commission : 0;
+    }
+    const grossRevenue = netRevenue + gst;
+
+    const expenseEntries = await this.prisma.ledgerEntry.findMany({
+      where: { hotelId: input.hotelId, type: 'cash_out', createdAt: { gte: input.from, lte: toInclusive } },
+      include: { category: true },
+    });
+    const byCategory = new Map<string, number>();
+    for (const e of expenseEntries) {
+      const name = e.category?.name ?? 'Uncategorized';
+      byCategory.set(name, (byCategory.get(name) ?? 0) + Number(e.amount));
+    }
+    const expenses = [...byCategory.entries()].map(([category, amount]) => ({ category, amount }));
+    const totalExpenses = expenses.reduce((s, r) => s + r.amount, 0);
+
+    return { netRevenue, commission, gst, grossRevenue, expenses, totalExpenses, netProfit: netRevenue - totalExpenses };
+  }
+
+  /** §user request, with a reference app's own "Credit and Debit Report" as the target — the same
+   * merged Payment+Ledger view as Day Book/Account Book, summed into Total Credit/Debit/Net
+   * Balance stat tiles plus a flat on-screen list. */
+  async getCreditAndDebitReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const merged = await this.getMergedTransactions(input.hotelId, input.from, toInclusive);
+    const totalCredit = merged.filter((m) => m.type === 'cash_in').reduce((s, m) => s + m.amount, 0);
+    const totalDebit = merged.filter((m) => m.type === 'cash_out').reduce((s, m) => s + m.amount, 0);
+    return {
+      totalCredit,
+      totalDebit,
+      netBalance: totalCredit - totalDebit,
+      rows: merged.map((m) => ({
+        id: m.id,
+        date: m.createdAt.toISOString(),
+        description: m.bookingId ? `${m.guestName}, Room: ${m.roomNumber ?? '—'}` : m.remarks || m.category || 'Entry',
+        method: m.paymentMethod,
+        amount: m.amount,
+        type: m.type,
+      })),
+    };
+  }
+
+  /** §user request, with a reference app's own "Room Wise Revenue Report" as the target — every
+   * active room, every night of the range: how many it was actually occupied, vs how many it
+   * could have been sold (`active` rooms only — one room per night, same inventory unit the
+   * Channel Manager's own availability pool already treats a room as). */
+  async getRoomWiseRevenueReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const availableNightsPerRoom = Math.max(1, Math.round((toInclusive.getTime() - input.from.getTime()) / 86400000) + 1);
+    const [rooms, bookings] = await Promise.all([
+      this.prisma.room.findMany({ where: { hotelId: input.hotelId, active: true }, include: { roomCategory: true } }),
+      this.prisma.booking.findMany({
+        where: { hotelId: input.hotelId, checkIn: { gte: input.from, lte: toInclusive }, status: { not: 'void' }, assignedRoomId: { not: null } },
+        include: { lineItems: true },
+      }),
+    ]);
+    const byRoom = new Map<string, { occupiedNights: number; roomRevenue: number; otherRevenue: number }>();
+    for (const b of bookings) {
+      if (!b.assignedRoomId) continue;
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      const entry = byRoom.get(b.assignedRoomId) ?? { occupiedNights: 0, roomRevenue: 0, otherRevenue: 0 };
+      entry.occupiedNights += b.nights;
+      entry.roomRevenue += totals.basePrice;
+      entry.otherRevenue += totals.extraCharges;
+      byRoom.set(b.assignedRoomId, entry);
+    }
+    const rows = rooms.map((r) => {
+      const entry = byRoom.get(r.id) ?? { occupiedNights: 0, roomRevenue: 0, otherRevenue: 0 };
+      return {
+        roomId: r.id,
+        roomNumber: r.roomNumber,
+        roomType: r.roomCategory?.name ?? '—',
+        occupiedNights: entry.occupiedNights,
+        availableNights: availableNightsPerRoom,
+        occupancyPercent: availableNightsPerRoom > 0 ? (entry.occupiedNights / availableNightsPerRoom) * 100 : 0,
+        roomRevenue: entry.roomRevenue,
+        otherRevenue: entry.otherRevenue,
+        totalRevenue: entry.roomRevenue + entry.otherRevenue,
+      };
+    });
+    const totalOccupied = rows.reduce((s, r) => s + r.occupiedNights, 0);
+    const totalAvailable = rooms.length * availableNightsPerRoom;
+    return {
+      rows,
+      summary: {
+        totalRooms: rooms.length,
+        occupiedNights: totalOccupied,
+        availableNights: totalAvailable,
+        avgOccupancy: totalAvailable > 0 ? (totalOccupied / totalAvailable) * 100 : 0,
+        roomRevenue: rows.reduce((s, r) => s + r.roomRevenue, 0),
+        otherRevenue: rows.reduce((s, r) => s + r.otherRevenue, 0),
+        totalRevenue: rows.reduce((s, r) => s + r.totalRevenue, 0),
+      },
+    };
+  }
+
+  /** §user request, with a reference app's own "Invoice Bills" as the target — every booking in
+   * the range as a plain invoice-status row (Paid/Partially Paid/Unpaid), the simplest of the
+   * bill-shaped reports above. */
+  async getInvoiceBillsReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const bookings = await this.prisma.booking.findMany({
+      where: { hotelId: input.hotelId, checkIn: { gte: input.from, lte: toInclusive }, status: { not: 'void' } },
+      include: { assignedRoom: true, lineItems: true },
+      orderBy: { checkIn: 'asc' },
+    });
+    return bookings.map((b) => {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      const paid = Number(b.paidAmount ?? 0);
+      const due = Math.max(0, totals.grandTotal - paid);
+      return {
+        id: b.id,
+        invoiceNumber: `BK-${b.id.slice(-6).toUpperCase()}`,
+        guestName: b.guestName,
+        roomNumber: b.assignedRoom?.roomNumber ?? '—',
+        checkIn: b.checkIn.toISOString(),
+        checkOut: b.checkOut.toISOString(),
+        total: totals.grandTotal,
+        paid,
+        due,
+        status: due <= 0 ? 'Paid' : paid > 0 ? 'Partially Paid' : 'Unpaid',
+      };
+    });
+  }
+
+  /** §user request, with a reference app's own "Payment Report" as the target — every payment in
+   * the range as a flat row plus a by-method summary, the printable counterpart to the on-screen
+   * Payment Receipts above. */
+  async getPaymentReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const payments = await this.prisma.payment.findMany({
+      where: { booking: { hotelId: input.hotelId }, collectedAt: { gte: input.from, lte: toInclusive } },
+      include: { booking: { include: { assignedRoom: true } } },
+      orderBy: { collectedAt: 'asc' },
+    });
+    const byMethod = new Map<string, number>();
+    const rows = payments.map((p) => {
+      byMethod.set(p.method, (byMethod.get(p.method) ?? 0) + Number(p.amount));
+      return {
+        id: p.id,
+        date: p.collectedAt.toISOString(),
+        guestName: p.booking.guestName,
+        bookingCode: `BK-${p.booking.id.slice(-6).toUpperCase()}`,
+        roomNumber: p.booking.assignedRoom?.roomNumber ?? '—',
+        method: p.method,
+        reference: p.referenceNumber,
+        amount: Number(p.amount),
+      };
+    });
+    return { rows, total: rows.reduce((s, r) => s + r.amount, 0), byMethod: [...byMethod.entries()].map(([method, amount]) => ({ method, amount })) };
+  }
+
+  /** §user request, with a reference app's own "Account Book Report" as the target — a classic
+   * ledger page: an opening balance carried in from everything before the range (since the
+   * hotel's own ledgerOpeningDate, same cutoff getSummary already uses), the range's own
+   * transactions in chronological order, and the resulting closing balance. */
+  async getAccountBookReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const hotel = await this.prisma.hotel.findUniqueOrThrow({ where: { id: input.hotelId }, select: { ledgerOpeningBalance: true, ledgerOpeningDate: true } });
+    const openingFrom = hotel.ledgerOpeningDate ?? new Date(0);
+    const [priorEntries, priorPayments] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({ where: { hotelId: input.hotelId, createdAt: { gte: openingFrom, lt: input.from } } }),
+      this.prisma.payment.findMany({ where: { booking: { hotelId: input.hotelId }, collectedAt: { gte: openingFrom, lt: input.from } } }),
+    ]);
+    let opening = Number(hotel.ledgerOpeningBalance ?? 0);
+    for (const e of priorEntries) opening += e.type === 'cash_in' ? Number(e.amount) : -Number(e.amount);
+    for (const p of priorPayments) opening += Number(p.amount);
+
+    const merged = await this.getMergedTransactions(input.hotelId, input.from, toInclusive);
+    const periodCredit = merged.filter((m) => m.type === 'cash_in').reduce((s, m) => s + m.amount, 0);
+    const periodDebit = merged.filter((m) => m.type === 'cash_out').reduce((s, m) => s + m.amount, 0);
+    return {
+      opening,
+      closing: opening + periodCredit - periodDebit,
+      periodCredit,
+      periodDebit,
+      rows: merged
+        .slice()
+        .reverse()
+        .map((m) => ({
+          id: m.id,
+          date: m.createdAt.toISOString(),
+          description: m.bookingId ? `${m.guestName} — Room ${m.roomNumber ?? '—'}` : m.remarks || m.category || 'Entry',
+          type: m.type,
+          amount: m.amount,
+        })),
+    };
+  }
+
+  /** §user request, with a reference app's own "Advance Adjustment Report" as the target — how
+   * much of each booking's advance has actually been applied against its final bill, and what's
+   * still outstanding. */
+  async getAdvanceAdjustmentReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const bookings = await this.prisma.booking.findMany({
+      where: { hotelId: input.hotelId, checkIn: { gte: input.from, lte: toInclusive }, status: { not: 'void' } },
+      include: { assignedRoom: true, lineItems: true, payments: true },
+    });
+    return bookings
+      .filter((b) => b.payments.length > 0)
+      .map((b) => {
+        const totals = computeInvoiceTotals({
+          totalAmount: Number(b.totalAmount),
+          lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+          discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+          gstExempt: b.gstExempt,
+        });
+        const advanceReceived = b.payments.filter((p) => p.type === 'advance').reduce((s, p) => s + Number(p.amount), 0);
+        const totalPaid = b.payments.reduce((s, p) => s + Number(p.amount), 0);
+        return {
+          id: b.id,
+          bookingCode: `BK-${b.id.slice(-6).toUpperCase()}`,
+          guestName: b.guestName,
+          roomNumber: b.assignedRoom?.roomNumber ?? '—',
+          advanceReceived,
+          adjustedAgainstStay: Math.min(advanceReceived, totals.grandTotal),
+          balanceDue: Math.max(0, totals.grandTotal - totalPaid),
+        };
+      });
+  }
+
+  /** §user request, with a reference app's own "Day Book Report" as the target — the same merged
+   * Payment+Ledger transactions as Account Book/Credit and Debit, grouped into one section per
+   * calendar day with its own credit/debit subtotal (a classic accounting "day book", one page per
+   * day), reusing this app's own Daily Expenses report's day-grouping idea but for both directions
+   * of cash movement instead of just Cash Out. */
+  async getDayBookReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const merged = await this.getMergedTransactions(input.hotelId, input.from, toInclusive);
+    const byDay = new Map<string, { credit: number; debit: number; items: typeof merged }>();
+    for (const m of merged) {
+      const key = dayKey(m.createdAt);
+      const entry = byDay.get(key) ?? { credit: 0, debit: 0, items: [] };
+      if (m.type === 'cash_in') entry.credit += m.amount;
+      else entry.debit += m.amount;
+      entry.items.push(m);
+      byDay.set(key, entry);
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, { credit, debit, items }]) => ({
+        date,
+        credit,
+        debit,
+        net: credit - debit,
+        items: items
+          .slice()
+          .reverse()
+          .map((m) => ({
+            id: m.id,
+            description: m.bookingId ? `${m.guestName} — Room ${m.roomNumber ?? '—'}` : m.remarks || m.category || 'Entry',
+            type: m.type,
+            amount: m.amount,
+            method: m.paymentMethod,
+          })),
+      }));
+  }
 }

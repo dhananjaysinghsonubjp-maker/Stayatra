@@ -23,6 +23,20 @@ import {
   DeparturesReport,
 } from './panels/reports/ReservationReports';
 import { PoliceReport, DayWiseBookingReport, CheckInCheckOutReport } from './panels/reports/DocumentReports';
+import {
+  AdvanceReceivedReport,
+  RoomSaleReport,
+  GstBillReport,
+  PaymentReceiptsReport,
+  ProfitAndLossReport,
+  CreditAndDebitReport,
+  RoomWiseRevenueReport,
+  InvoiceBillsReport,
+  PaymentReport,
+  AccountBookReport,
+  AdvanceAdjustmentReport,
+  DayBookReport,
+} from './panels/reports/FinanceReports';
 import { Calendar } from './panels/channel-manager/Calendar';
 import { GuestMessaging } from './panels/channel-manager/GuestMessaging';
 import { OtaReviews } from './panels/channel-manager/OtaReviews';
@@ -245,6 +259,18 @@ function Shell() {
           'reports_sale',
           'reports_rooms',
           'reports_expenses',
+          'reports_account_book',
+          'reports_advance_adjustment',
+          'reports_invoice_bills',
+          'reports_payment_receipts',
+          'reports_payment_report',
+          'reports_profit_loss',
+          'reports_advance_received',
+          'reports_room_sale',
+          'reports_gst_bill',
+          'reports_credit_debit',
+          'reports_day_book',
+          'reports_room_wise_revenue',
         ] as Tab[])
       : []),
     // §user request — "Dues section ko Reports section ke under le jayenge": relocated into the
@@ -346,6 +372,18 @@ function Shell() {
           {activeTab === 'reports_sale' && canManagePms && <Reports hotelId={hotel.id} only="sale" />}
           {activeTab === 'reports_rooms' && canManagePms && <Reports hotelId={hotel.id} only="rooms" />}
           {activeTab === 'reports_expenses' && canManagePms && <Reports hotelId={hotel.id} only="expenses" />}
+          {activeTab === 'reports_account_book' && canManagePms && <AccountBookReport hotelId={hotel.id} />}
+          {activeTab === 'reports_advance_adjustment' && canManagePms && <AdvanceAdjustmentReport hotelId={hotel.id} />}
+          {activeTab === 'reports_invoice_bills' && canManagePms && <InvoiceBillsReport hotelId={hotel.id} />}
+          {activeTab === 'reports_payment_receipts' && canManagePms && <PaymentReceiptsReport hotelId={hotel.id} />}
+          {activeTab === 'reports_payment_report' && canManagePms && <PaymentReport hotelId={hotel.id} />}
+          {activeTab === 'reports_profit_loss' && canManagePms && <ProfitAndLossReport hotelId={hotel.id} />}
+          {activeTab === 'reports_advance_received' && canManagePms && <AdvanceReceivedReport hotelId={hotel.id} />}
+          {activeTab === 'reports_room_sale' && canManagePms && <RoomSaleReport hotelId={hotel.id} />}
+          {activeTab === 'reports_gst_bill' && canManagePms && <GstBillReport hotelId={hotel.id} />}
+          {activeTab === 'reports_credit_debit' && canManagePms && <CreditAndDebitReport hotelId={hotel.id} />}
+          {activeTab === 'reports_day_book' && canManagePms && <DayBookReport hotelId={hotel.id} />}
+          {activeTab === 'reports_room_wise_revenue' && canManagePms && <RoomWiseRevenueReport hotelId={hotel.id} />}
           {/* §user request — "Dues section ko Reports section ke under le jayenge": same page, now reached from Reports → Finance & Payment. */}
           {activeTab === 'dues' && hasPms && !isHousekeeping && <Dues hotelId={hotel.id} />}
           {(activeTab === 'settings_details' || activeTab === 'settings_brand' || activeTab === 'settings_rooms' || activeTab === 'settings_invoice' || activeTab === 'settings_ledger' || activeTab === 'settings_credentials' || activeTab === 'settings_billing') &&
