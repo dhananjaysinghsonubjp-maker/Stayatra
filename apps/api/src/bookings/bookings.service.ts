@@ -974,6 +974,18 @@ export class BookingsService {
         children: input.children ?? null,
       },
     });
+
+    // §bugfix — "calendar pe sync ho raha hai ki nahi": a longer/shorter checkout date changes
+    // how many room-nights this booking actually holds, but nothing here was telling the shared
+    // OTA-pooled availability count (the same pool Calendar/Channel Manager read) about it —
+    // Calendar kept showing the old date range as available/sold regardless of the real change.
+    // Release the old date range, then re-claim the new one (a no-op net effect when the date
+    // didn't actually change, so this is safe to always run).
+    if (input.checkOut.getTime() !== booking.checkOut.getTime()) {
+      await this.rates.adjustAvailabilityForStay({ hotelId: booking.hotelId, roomCategoryId: booking.roomCategoryId, checkIn: booking.checkIn, checkOut: booking.checkOut, delta: 1 });
+      await this.rates.adjustAvailabilityForStay({ hotelId: booking.hotelId, roomCategoryId: booking.roomCategoryId, checkIn: booking.checkIn, checkOut: input.checkOut, delta: -1 });
+    }
+
     await this.audit.log({
       hotelId: booking.hotelId,
       eventType: 'STAY_EDITED',
@@ -1063,6 +1075,16 @@ export class BookingsService {
 
       return result;
     });
+
+    // §bugfix — same Calendar/Channel Manager sync gap as modifyStay: an upgrade/downgrade moves
+    // this stay's room-nights from one category's pooled availability to another's — without this,
+    // the old category stayed short a room it no longer holds, and the new category never showed
+    // it as taken. A same-category room swap (just a different physical room) needs no change
+    // here, since the pool is per-category, not per-room.
+    if (newRoom.roomCategoryId !== booking.roomCategoryId) {
+      await this.rates.adjustAvailabilityForStay({ hotelId: booking.hotelId, roomCategoryId: booking.roomCategoryId, checkIn: booking.checkIn, checkOut: booking.checkOut, delta: 1 });
+      await this.rates.adjustAvailabilityForStay({ hotelId: booking.hotelId, roomCategoryId: newRoom.roomCategoryId!, checkIn: booking.checkIn, checkOut: booking.checkOut, delta: -1 });
+    }
 
     await this.audit.log({
       hotelId: booking.hotelId,
