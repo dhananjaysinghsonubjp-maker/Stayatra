@@ -90,10 +90,12 @@ export function ReservationMasterReport({ hotelId }: { hotelId: string }) {
   const [reservationFrom, setReservationFrom] = useState('');
   const [reservationTo, setReservationTo] = useState('');
   const [status, setStatus] = useState<ReservationReportRow['status'] | ''>('');
-  const [checkInFrom, setCheckInFrom] = useState('');
-  const [checkInTo, setCheckInTo] = useState('');
-  const [checkOutFrom, setCheckOutFrom] = useState('');
-  const [checkOutTo, setCheckOutTo] = useState('');
+  // §user request — "jaise reservation dates ka banaya hai, vaise hi check-in/check-out ka bhi 1
+  // mein hi": Check-in and Check-out used to be two separate range pickers; one combined "stay
+  // period" pill now covers both — its start is the check-in floor, its end is the check-out
+  // ceiling, same as Reservation Date's own single pill.
+  const [stayFrom, setStayFrom] = useState('');
+  const [stayTo, setStayTo] = useState('');
   const [source, setSource] = useState('');
   const [pageSize, setPageSize] = useState(20);
 
@@ -108,10 +110,8 @@ export function ReservationMasterReport({ hotelId }: { hotelId: string }) {
           statuses: status ? [status] : undefined,
           reservationFrom: reservationFrom || undefined,
           reservationTo: reservationTo || undefined,
-          checkInFrom: checkInFrom || undefined,
-          checkInTo: checkInTo || undefined,
-          checkOutFrom: checkOutFrom || undefined,
-          checkOutTo: checkOutTo || undefined,
+          checkInFrom: stayFrom || undefined,
+          checkOutTo: stayTo || undefined,
           search: search || undefined,
           source: source || undefined,
         },
@@ -174,11 +174,8 @@ export function ReservationMasterReport({ hotelId }: { hotelId: string }) {
                 ))}
               </select>
             </Field>
-            <Field label="Check-in">
-              <ReportDateRangePill from={checkInFrom} to={checkInTo} onChange={(f, t) => { setCheckInFrom(f); setCheckInTo(t); }} />
-            </Field>
-            <Field label="Check-out">
-              <ReportDateRangePill from={checkOutFrom} to={checkOutTo} onChange={(f, t) => { setCheckOutFrom(f); setCheckOutTo(t); }} />
+            <Field label="Check-in / Check-out">
+              <ReportDateRangePill from={stayFrom} to={stayTo} onChange={(f, t) => { setStayFrom(f); setStayTo(t); }} />
             </Field>
             <Field label="Source">
               <select className={`${inputClass} w-36`} value={source} onChange={(e) => setSource(e.target.value)}>
