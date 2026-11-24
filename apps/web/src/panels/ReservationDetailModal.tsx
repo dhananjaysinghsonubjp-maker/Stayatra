@@ -336,6 +336,16 @@ export function ReservationDetailModal({
   const [newAmount, setNewAmount] = useState(0);
   const [addRoomSaving, setAddRoomSaving] = useState(false);
   const [addRoomError, setAddRoomError] = useState<string | null>(null);
+  // §user request — "+ icon jisme extra mattress vagera add karne ka option aaye, same jaise
+  // reservation banate waqt hota hai": a new room doesn't exist yet to attach a real
+  // InvoiceLineItem to, so these stay a local draft list until "Add" actually creates the
+  // booking — then each one is persisted via addLineItem, same mechanism CreateReservationModal's
+  // own per-room add-on charges use.
+  const [newRoomLineItems, setNewRoomLineItems] = useState<{ key: string; description: string; quantity: number; amount: number }[]>([]);
+  const [addingNewRoomCharge, setAddingNewRoomCharge] = useState(false);
+  const [newChargeDesc, setNewChargeDesc] = useState('');
+  const [newChargeQty, setNewChargeQty] = useState<number | ''>(1);
+  const [newChargeUnitPrice, setNewChargeUnitPrice] = useState<number | ''>('');
   const canManage = ['owner', 'manager'].includes(role('pms') ?? '') || ['owner', 'manager'].includes(role('channel_manager') ?? '');
 
   const first = bookings[0];
@@ -411,20 +421,42 @@ export function ReservationDetailModal({
     onChanged();
   }
 
+  function addNewRoomCharge() {
+    if (!newChargeDesc.trim() || newChargeUnitPrice === '') return;
+    setNewRoomLineItems((prev) => [
+      ...prev,
+      { key: `${Date.now()}`, description: newChargeDesc.trim(), quantity: newChargeQty === '' ? 1 : newChargeQty, amount: newChargeUnitPrice * (newChargeQty === '' ? 1 : newChargeQty) },
+    ]);
+    setAddingNewRoomCharge(false);
+    setNewChargeDesc('');
+    setNewChargeQty(1);
+    setNewChargeUnitPrice('');
+  }
+
+  function removeNewRoomCharge(key: string) {
+    setNewRoomLineItems((prev) => prev.filter((li) => li.key !== key));
+  }
+
   async function addRoom() {
     if (!newRoomId || !first.reservationGroupId) return;
     setAddRoomSaving(true);
     setAddRoomError(null);
     try {
-      await mutate(
+      const created = await mutate<Booking>(
         'bookings.addRoomToReservation',
         { reservationGroupId: first.reservationGroupId, roomId: newRoomId, ratePlanId: newRatePlanId || undefined, totalAmount: newAmount },
         token ?? undefined,
+      );
+      await Promise.all(
+        newRoomLineItems.map((li) =>
+          mutate('bookings.addLineItem', { bookingId: created.id, description: li.description, quantity: li.quantity, unitPrice: li.amount / li.quantity }, token ?? undefined),
+        ),
       );
       setAddingRoom(false);
       setNewRoomId('');
       setNewRatePlanId('');
       setNewAmount(0);
+      setNewRoomLineItems([]);
       onChanged();
     } catch (err) {
       setAddRoomError(err instanceof ApiError ? err.message : 'Failed to add room');
@@ -591,51 +623,162 @@ export function ReservationDetailModal({
                           + Add Room
                         </button>
                       ) : (
-                        <div className="space-y-2 rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
-                          <div className="grid grid-cols-2 gap-2">
-                            <select
-                              className={`${inputClass} text-xs`}
-                              value={newRoomId}
-                              onChange={(e) => {
-                                setNewRoomId(e.target.value);
-                                setNewRatePlanId('');
-                              }}
-                            >
-                              <option value="">— pick a room —</option>
-                              {addRoomCandidates.map((r) => (
-                                <option key={r.id} value={r.id}>
-                                  {r.roomNumber} — {r.roomCategory?.name ?? 'Uncategorized'}
-                                </option>
-                              ))}
-                            </select>
-                            <select className={`${inputClass} text-xs`} value={newRatePlanId} onChange={(e) => setNewRatePlanId(e.target.value)} disabled={!newRoomId}>
-                              <option value="">— rate plan (optional) —</option>
-                              {ratePlansForNewRoom.map((rp) => (
-                                <option key={rp.id} value={rp.id}>
-                                  {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-500 dark:text-slate-400">Total amount</span>
-                            <input type="number" min={0} className={`${inputClass} w-28 text-xs`} value={newAmount} onChange={(e) => setNewAmount(Number(e.target.value))} />
-                            <div className="ml-auto flex gap-2">
-                              <button
-                                onClick={() => {
-                                  setAddingRoom(false);
-                                  setAddRoomError(null);
+                        // §user request, with CreateReservationModal's own Rooms Selection row as the
+                        // explicit target — room dropdown, a pill-style Meal Plan select, a Base
+                        // Price pill-input, and the same "+" add-on button (extra mattress etc.) next
+                        // to it, so adding a room to an already-created reservation looks and works
+                        // exactly like picking one while creating it.
+                        <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                            <div className="flex min-w-0 flex-1 items-center gap-3">
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-base shadow-sm dark:bg-slate-800">🛏️</span>
+                              <select
+                                className={`${inputClass} w-full`}
+                                value={newRoomId}
+                                onChange={(e) => {
+                                  setNewRoomId(e.target.value);
+                                  setNewRatePlanId('');
                                 }}
-                                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                               >
-                                Cancel
+                                <option value="">— pick a room —</option>
+                                {addRoomCandidates.map((r) => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.roomNumber} — {r.roomCategory?.name ?? 'Uncategorized'}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="flex flex-wrap shrink-0 items-end gap-2.5">
+                              <div className="w-32">
+                                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Meal Plan</p>
+                                <select
+                                  className="w-full truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600 outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                                  value={newRatePlanId}
+                                  onChange={(e) => setNewRatePlanId(e.target.value)}
+                                  disabled={!newRoomId}
+                                >
+                                  <option value="">— none —</option>
+                                  {ratePlansForNewRoom.map((rp) => (
+                                    <option key={rp.id} value={rp.id}>
+                                      {rp.mealPlan ? `${rp.name} (${rp.mealPlan})` : rp.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="w-28">
+                                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Total amount</p>
+                                <div className="relative">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-2.5 pr-6 text-sm font-semibold text-slate-900 outline-none focus:border-brand-400 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                                    value={newAmount}
+                                    onChange={(e) => setNewAmount(Number(e.target.value))}
+                                  />
+                                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-300 dark:text-slate-600">✎</span>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setAddingNewRoomCharge((o) => !o)}
+                                title="Add-on / extra charge"
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-base font-bold text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-brand-500/10"
+                              >
+                                +
                               </button>
-                              <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!newRoomId || addRoomSaving} onClick={addRoom}>
-                                {addRoomSaving ? 'Adding…' : 'Add'}
-                              </Button>
                             </div>
                           </div>
-                          {addRoomError && <p className="text-xs text-red-600">{addRoomError}</p>}
+
+                          {newRoomLineItems.length > 0 && (
+                            <div className="mt-2.5 space-y-1.5 sm:pl-[52px]">
+                              {newRoomLineItems.map((li) => (
+                                <div key={li.key} className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs dark:bg-slate-900/40">
+                                  <span className="text-slate-600 dark:text-slate-300">
+                                    {li.description} {li.quantity > 1 ? `× ${li.quantity}` : ''}
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-slate-700 dark:text-slate-200">₹{li.amount.toFixed(2)}</span>
+                                    <button type="button" onClick={() => removeNewRoomCharge(li.key)} className="text-red-500 hover:underline">
+                                      Remove
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {addingNewRoomCharge && (
+                            <div className="mt-2.5 flex flex-wrap items-center gap-2 sm:pl-[52px]">
+                              <input
+                                className="min-w-[160px] flex-1 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm italic text-slate-900 outline-none placeholder:text-slate-400 focus:border-brand-400 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                                placeholder="Eg.   Extra Mattress"
+                                value={newChargeDesc}
+                                onChange={(e) => setNewChargeDesc(e.target.value)}
+                                autoFocus
+                              />
+                              <div className="flex shrink-0 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => setNewChargeQty((q) => Math.max(1, (q === '' ? 1 : q) - 1))}
+                                  className="text-lg font-bold leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                                >
+                                  −
+                                </button>
+                                <span className="text-sm font-semibold text-slate-900 dark:text-white">{newChargeQty === '' ? 1 : newChargeQty}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setNewChargeQty((q) => (q === '' ? 1 : q) + 1)}
+                                  className="text-lg font-bold leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <input
+                                className="w-28 shrink-0 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm italic text-slate-900 outline-none placeholder:text-slate-400 focus:border-brand-400 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                                type="number"
+                                placeholder="Price"
+                                min={0}
+                                value={newChargeUnitPrice}
+                                onChange={(e) => setNewChargeUnitPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                              />
+                              <button
+                                type="button"
+                                onClick={addNewRoomCharge}
+                                title="Add charge"
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-lg font-bold text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-brand-500/10"
+                              >
+                                +
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setAddingNewRoomCharge(false)}
+                                title="Cancel"
+                                className="flex h-9 w-9 shrink-0 items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="mt-3 flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => {
+                                setAddingRoom(false);
+                                setAddRoomError(null);
+                                setNewRoomLineItems([]);
+                              }}
+                              className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                            >
+                              Cancel
+                            </button>
+                            <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!newRoomId || addRoomSaving} onClick={addRoom}>
+                              {addRoomSaving ? 'Adding…' : 'Add'}
+                            </Button>
+                          </div>
+                          {addRoomError && <p className="mt-1.5 text-right text-xs text-red-600">{addRoomError}</p>}
                         </div>
                       )}
                     </div>
