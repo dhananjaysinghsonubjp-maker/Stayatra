@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mutate, uploadFile, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
@@ -189,6 +189,20 @@ export function MoreActionsPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // §user request, with CheckInModal's own slide-over treatment as the target — this panel used
+  // to appear/disappear instantly; it now slides in from the right on mount and slides back out
+  // before actually unmounting.
+  const [entered, setEntered] = useState(false);
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  function handleClose() {
+    setClosing(true);
+    setTimeout(onClose, 220);
+  }
+
   const [specialRequest, setSpecialRequest] = useState(lead.specialRequest ?? '');
   const [endReason, setEndReason] = useState('');
   const [cancellationCharge, setCancellationCharge] = useState(0);
@@ -218,7 +232,12 @@ export function MoreActionsPanel({
   // synchronously, unlike state) blocks the second one outright.
   const submittingRef = useRef(false);
 
-  async function run(action: () => Promise<unknown>, after: () => void = () => setView('menu')) {
+  // §bugfix — "close kar raha hoon toh ye More Actions wala menu bhi reh jaata hai": every action
+  // here used to fall back to the top-level menu on success (`setView('menu')`), so finishing a
+  // payment/VIP toggle/etc. dumped the user back into the full "More Actions" list instead of
+  // returning them to the Booking Details page they came from. Success now closes the whole
+  // slide-over; the header's own "←" back arrow still covers browsing between sub-views.
+  async function run(action: () => Promise<unknown>, after: () => void = handleClose) {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setBusy(true);
@@ -238,7 +257,7 @@ export function MoreActionsPanel({
   async function endGroup(status: 'cancelled' | 'no_show' | 'void') {
     await run(
       () => mutate('bookings.endReservationGroup', { bookingId: lead.id, status, reason: endReason.trim() || undefined, cancellationCharge: status === 'cancelled' ? cancellationCharge : undefined }, token ?? undefined),
-      onClose,
+      handleClose,
     );
   }
 
@@ -265,7 +284,7 @@ export function MoreActionsPanel({
       const changed = group.filter((b) => (mealPlans[b.id] || '') !== (b.ratePlanId ?? ''));
       await Promise.all(changed.map((b) => mutate('bookings.updateRatePlan', { bookingId: b.id, ratePlanId: mealPlans[b.id] || null }, token ?? undefined)));
       onChanged();
-      setView('menu');
+      handleClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update meal plan');
     } finally {
@@ -305,13 +324,21 @@ export function MoreActionsPanel({
   return createPortal(
     // §bugfix — the print views (z-[80]) render as siblings in this same portal, so this panel
     // must sit below that — z-50 matches ReservationDetailModal's own "major modal" layer.
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40">
+    <div
+      className={`fixed inset-0 z-50 flex justify-end bg-slate-900/40 transition-opacity duration-200 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}
+    >
       {/* §bugfix — "3 no wala box [No Show/Void] rectangular nahi tha, text/buttons right side se
           cut ho rahe the": flex children default to min-width:auto, so this panel refused to
           shrink below its own content's natural width (the description paragraph) on a narrow
           screen and overflowed past the viewport's right edge instead of wrapping — min-w-0 lets
           it actually shrink to the available space so text wraps inside it instead. */}
-      <div className="flex h-full w-full min-w-0 max-w-md flex-col overflow-hidden bg-white shadow-2xl dark:bg-slate-800">
+      {/* §user request, with CheckInModal's own slide-over as the target — opens sliding in from
+          the right and closes sliding back out, instead of appearing/disappearing instantly. */}
+      <div
+        className={`flex h-full w-full min-w-0 max-w-md flex-col overflow-hidden bg-white shadow-2xl transition-transform duration-200 ease-out dark:bg-slate-800 ${
+          entered && !closing ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
           <div className="min-w-0">
             <h3 className="truncate text-lg font-bold text-slate-900 dark:text-white">{view === 'menu' ? 'More Actions' : MENU_ITEMS.find((m) => m.view === view)?.label}</h3>
@@ -319,7 +346,7 @@ export function MoreActionsPanel({
           </div>
           <button
             type="button"
-            onClick={view === 'menu' ? onClose : () => setView('menu')}
+            onClick={view === 'menu' ? handleClose : () => setView('menu')}
             aria-label={view === 'menu' ? 'Close' : 'Back'}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
           >

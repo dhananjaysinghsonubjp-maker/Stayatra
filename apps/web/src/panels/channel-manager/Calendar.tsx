@@ -1601,6 +1601,20 @@ function MaintenanceBlockPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // §user request, with CheckInModal's own slide-over as the target — this panel used to
+  // appear/disappear instantly; it now slides in from the right on mount and slides back out
+  // before actually unmounting.
+  const [entered, setEntered] = useState(false);
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  function handleClose() {
+    setClosing(true);
+    setTimeout(onClose, 220);
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function check() {
@@ -1658,7 +1672,8 @@ function MaintenanceBlockPanel({
           token ?? undefined,
         );
       }
-      onSaved();
+      setClosing(true);
+      setTimeout(onSaved, 220);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save maintenance block');
     } finally {
@@ -1667,14 +1682,20 @@ function MaintenanceBlockPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/40" onClick={() => !saving && onClose()}>
-      <div className="h-full w-full max-w-sm overflow-y-auto bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div
+      className={`fixed inset-0 z-40 flex justify-end bg-slate-900/40 transition-opacity duration-200 ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}
+      onClick={() => !saving && handleClose()}
+    >
+      <div
+        className={`h-full w-full max-w-sm overflow-y-auto bg-white shadow-2xl transition-transform duration-200 ease-out ${entered && !closing ? 'translate-x-0' : 'translate-x-full'}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Room {roomNumber}</p>
             <p className="mt-1 text-lg font-bold text-slate-900">{isEdit ? 'Edit Maintenance Block' : 'Create Maintenance Block'}</p>
           </div>
-          <button onClick={() => !saving && onClose()} className="text-slate-400 hover:text-slate-600">
+          <button onClick={() => !saving && handleClose()} className="text-slate-400 hover:text-slate-600">
             ✕
           </button>
         </div>
@@ -1711,7 +1732,7 @@ function MaintenanceBlockPanel({
         {error && <p className="px-6 pb-2 text-sm text-red-600">{error}</p>}
 
         <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
-          <button type="button" onClick={() => !saving && onClose()} className="text-sm font-medium text-slate-500 hover:underline" disabled={saving}>
+          <button type="button" onClick={() => !saving && handleClose()} className="text-sm font-medium text-slate-500 hover:underline" disabled={saving}>
             Cancel
           </button>
           <Button type="button" onClick={() => void submit()} disabled={saving || checking || (availability ? !availability.available : false)}>
