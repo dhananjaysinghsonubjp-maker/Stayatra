@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { mutate, query, ApiError } from '../api';
+import { query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Card, CardBody, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
-import { CheckInModal } from './checkin/CheckInModal';
 import { CreateReservationModal } from './checkin/CreateReservationModal';
-import { AddPaymentModal } from './AddPaymentModal';
-import { BookingViewModal } from './BookingViewModal';
 import { ReservationDetailModal } from './ReservationDetailModal';
 import { computeInvoiceTotals } from '../invoice';
 import { SOURCE_LABEL } from './channel-manager/ota-labels';
@@ -52,9 +49,6 @@ export function Bookings({
   const [rooms, setRooms] = useState<Room[]>([]);
   const [ratePlans, setRatePlans] = useState<RatePlan[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [payingBooking, setPayingBooking] = useState<Booking | null>(null);
-  const [checkingInBooking, setCheckingInBooking] = useState<Booking | null>(null);
-  const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
   const [viewingGroupKey, setViewingGroupKey] = useState<string | null>(null);
   const [actionsGroupKey, setActionsGroupKey] = useState<string | null>(null);
   const [actionsInitialView, setActionsInitialView] = useState<MoreActionsView | undefined>(undefined);
@@ -185,17 +179,6 @@ export function Bookings({
     [actionsGroupKey, bookings],
   );
 
-  async function cancelBooking(bookingId: string) {
-    if (!confirm('Cancel this reservation? This cannot be undone.')) return;
-    try {
-      await mutate('bookings.cancelBooking', { bookingId }, token ?? undefined);
-      setViewingBooking(null);
-      void refresh();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to cancel');
-    }
-  }
-
   return (
     <div className="relative">
       {/* §user request — "itna stretch na kare, thoda mid tak rahega toh better rahega, kyunki
@@ -270,7 +253,7 @@ export function Bookings({
                     group={group}
                     categories={categories}
                     roomsById={roomsById}
-                    onClick={() => (group.length > 1 ? setViewingGroupKey(group[0].reservationGroupId ?? group[0].id) : setViewingBooking(group[0]))}
+                    onClick={() => setViewingGroupKey(group[0].reservationGroupId ?? group[0].id)}
                     onMoreActions={() => setActionsGroupKey(group[0].reservationGroupId ?? group[0].id)}
                   />
                 ))}
@@ -305,12 +288,6 @@ export function Bookings({
         />
       )}
 
-      {payingBooking && (
-        <AddPaymentModal booking={payingBooking} onClose={() => setPayingBooking(null)} onDone={refresh} />
-      )}
-      {checkingInBooking && (
-        <CheckInModal hotelId={hotelId} reservation={checkingInBooking} onClose={() => setCheckingInBooking(null)} onDone={refresh} />
-      )}
       {viewingGroup && viewingGroup.length > 0 && (
         <ReservationDetailModal
           hotelId={hotelId}
@@ -354,30 +331,6 @@ export function Bookings({
             setEditingGroup(null);
             void refresh();
           }}
-        />
-      )}
-      {viewingBooking && (
-        <BookingViewModal
-          booking={viewingBooking}
-          roomType={categories.find((c) => c.id === viewingBooking.roomCategoryId)?.name ?? '—'}
-          onClose={() => setViewingBooking(null)}
-          onCheckIn={
-            hasPms && viewingBooking.status === 'confirmed'
-              ? () => {
-                  setCheckingInBooking(viewingBooking);
-                  setViewingBooking(null);
-                }
-              : undefined
-          }
-          onCancel={hasPms && viewingBooking.status === 'confirmed' ? () => cancelBooking(viewingBooking.id) : undefined}
-          onAddPayment={
-            hasPms
-              ? () => {
-                  setPayingBooking(viewingBooking);
-                  setViewingBooking(null);
-                }
-              : undefined
-          }
         />
       )}
     </div>

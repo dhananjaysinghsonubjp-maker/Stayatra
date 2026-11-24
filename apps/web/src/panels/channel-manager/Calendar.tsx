@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button, Card, PageHeader, StatCard, inputClass } from '../../components/ui';
-import { BookingViewModal } from '../BookingViewModal';
 import { CheckInModal } from '../checkin/CheckInModal';
 import { CreateReservationModal } from '../checkin/CreateReservationModal';
+import { ReservationDetailModal } from '../ReservationDetailModal';
+import { MoreActionsPanel, type MoreActionsView } from '../MoreActionsPanel';
 import { DateFilterPill, MultiDatePicker, dateRangeKeys, istDateKey, istDateLabel, addDaysKey } from '../../components/DateRangePicker';
 import { OTA_LABEL, CHANNEL_META } from './ota-labels';
 import { ChannelIcon } from './ChannelBadge';
-import type { Booking, InventoryRate, OtaConnection, RatePlan, Restriction, Room, RoomMaintenanceBlock } from '../../types';
+import type { Booking, InventoryRate, OtaConnection, RatePlan, Restriction, Room, RoomCategory, RoomMaintenanceBlock } from '../../types';
 import type { Tab } from '../../layout/Sidebar';
 
 type ViewMode = 'both' | 'rates' | 'stays';
@@ -67,10 +68,13 @@ export function Calendar({
   const [otaConnectionId, setOtaConnectionId] = useState('');
   const [ratePlans, setRatePlans] = useState<RatePlan[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [categories, setCategories] = useState<RoomCategory[]>([]);
   const [ratesByPlan, setRatesByPlan] = useState<Record<string, InventoryRate[]>>({});
   const [restrictionsByPlan, setRestrictionsByPlan] = useState<Record<string, Restriction[]>>({});
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
+  const [viewingGroupKey, setViewingGroupKey] = useState<string | null>(null);
+  const [actionsGroupKey, setActionsGroupKey] = useState<string | null>(null);
+  const [actionsInitialView, setActionsInitialView] = useState<MoreActionsView | undefined>(undefined);
   // §user request, with a reference app's own calendar-bar click (a tooltip on hover, a
   // View/Edit/Start check-in menu on click) as the target — the bar itself no longer jumps
   // straight to the read-only detail view.
@@ -168,6 +172,7 @@ export function Calendar({
     });
     query<RatePlan[]>('rates.listAllRatePlansForHotel', { hotelId }, token ?? undefined).then(setRatePlans);
     query<Room[]>('hotels.listRooms', { hotelId }, token ?? undefined).then(setRooms);
+    query<RoomCategory[]>('hotels.listRoomCategories', { hotelId }, token ?? undefined).then(setCategories);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId]);
 
@@ -280,6 +285,18 @@ export function Calendar({
     () => (editingGroupKey ? bookings.filter((b) => (b.reservationGroupId ?? b.id) === editingGroupKey) : null),
     [editingGroupKey, bookings],
   );
+  // §user request — "koi bhi booking pr click karu toh uski detail khul jani chahiye, hume vo full
+  // page vala booking details chahiye": "View reservation" now opens the same full-page Booking
+  // Details view as the Reservations list, not the old read-only BookingViewModal popup.
+  const viewingGroup = useMemo(
+    () => (viewingGroupKey ? bookings.filter((b) => (b.reservationGroupId ?? b.id) === viewingGroupKey) : null),
+    [viewingGroupKey, bookings],
+  );
+  const actionsGroup = useMemo(
+    () => (actionsGroupKey ? bookings.filter((b) => (b.reservationGroupId ?? b.id) === actionsGroupKey) : null),
+    [actionsGroupKey, bookings],
+  );
+  const roomsById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
 
   async function refreshRatePlanRates(ratePlanId: string) {
     if (!otaConnectionId) return;
@@ -1317,7 +1334,7 @@ export function Calendar({
             <button
               type="button"
               onClick={() => {
-                setViewingBooking(menuFor.booking);
+                setViewingGroupKey(menuFor.booking.reservationGroupId ?? menuFor.booking.id);
                 setMenuFor(null);
               }}
               className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
@@ -1398,13 +1415,37 @@ export function Calendar({
         </div>
       )}
 
-      {/* §user request — "koi bhi booking pr click karu toh uski detail khul jani chahiye" —
-          same read-only billing view the Reservations table's own "View" opens. */}
-      {viewingBooking && (
-        <BookingViewModal
-          booking={viewingBooking}
-          roomType={categoriesInOrder.find(([id]) => id === viewingBooking.roomCategoryId)?.[1] ?? '—'}
-          onClose={() => setViewingBooking(null)}
+      {/* §user request — "koi bhi booking pr click karu toh uski detail khul jani chahiye, hume vo
+          full page vala booking details chahiye" — same full-page Booking Details view the
+          Reservations list's own card opens. */}
+      {viewingGroup && viewingGroup.length > 0 && (
+        <ReservationDetailModal
+          hotelId={hotelId}
+          bookings={viewingGroup}
+          rooms={rooms}
+          ratePlans={ratePlans}
+          onClose={() => setViewingGroupKey(null)}
+          onChanged={() => void refreshBookings()}
+          onMoreActions={(initialView) => {
+            setActionsGroupKey(viewingGroup[0].reservationGroupId ?? viewingGroup[0].id);
+            setActionsInitialView(initialView);
+          }}
+          onEdit={() => setEditingGroupKey(viewingGroup[0].reservationGroupId ?? viewingGroup[0].id)}
+        />
+      )}
+      {actionsGroup && actionsGroup.length > 0 && (
+        <MoreActionsPanel
+          hotelId={hotelId}
+          group={actionsGroup}
+          roomsById={roomsById}
+          categories={categories}
+          ratePlans={ratePlans}
+          initialView={actionsInitialView}
+          onClose={() => {
+            setActionsGroupKey(null);
+            setActionsInitialView(undefined);
+          }}
+          onChanged={() => void refreshBookings()}
         />
       )}
 
