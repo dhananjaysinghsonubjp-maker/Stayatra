@@ -4,6 +4,7 @@ import { useAuth } from '../../AuthContext';
 import { Badge, Button, Card, CardBody, EmptyState, Field, PageHeader, inputClass } from '../../components/ui';
 import { SOURCE_LABEL } from '../channel-manager/ota-labels';
 import { formatDateShort, formatDateTimeShort } from '../../dateFormat';
+import { ReportDateRangePill } from './ReportDateRangePill';
 import type { ReservationReportRow } from '../../types';
 
 const STATUS_LABEL: Record<ReservationReportRow['status'], string> = {
@@ -161,11 +162,7 @@ export function ReservationMasterReport({ hotelId }: { hotelId: string }) {
               <input className={`${inputClass} w-56`} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="e.g. BK-A1B2C3 or guest name" />
             </Field>
             <Field label="Reservation Date">
-              <div className="flex items-center gap-1.5">
-                <input type="date" className={`${inputClass} w-36`} value={reservationFrom} onChange={(e) => setReservationFrom(e.target.value)} />
-                <span className="text-slate-400">–</span>
-                <input type="date" className={`${inputClass} w-36`} value={reservationTo} onChange={(e) => setReservationTo(e.target.value)} />
-              </div>
+              <ReportDateRangePill from={reservationFrom} to={reservationTo} onChange={(f, t) => { setReservationFrom(f); setReservationTo(t); }} />
             </Field>
             <Field label="Status">
               <select className={`${inputClass} w-40`} value={status} onChange={(e) => setStatus(e.target.value as ReservationReportRow['status'] | '')}>
@@ -178,18 +175,10 @@ export function ReservationMasterReport({ hotelId }: { hotelId: string }) {
               </select>
             </Field>
             <Field label="Check-in">
-              <div className="flex items-center gap-1.5">
-                <input type="date" className={`${inputClass} w-36`} value={checkInFrom} onChange={(e) => setCheckInFrom(e.target.value)} />
-                <span className="text-slate-400">–</span>
-                <input type="date" className={`${inputClass} w-36`} value={checkInTo} onChange={(e) => setCheckInTo(e.target.value)} />
-              </div>
+              <ReportDateRangePill from={checkInFrom} to={checkInTo} onChange={(f, t) => { setCheckInFrom(f); setCheckInTo(t); }} />
             </Field>
             <Field label="Check-out">
-              <div className="flex items-center gap-1.5">
-                <input type="date" className={`${inputClass} w-36`} value={checkOutFrom} onChange={(e) => setCheckOutFrom(e.target.value)} />
-                <span className="text-slate-400">–</span>
-                <input type="date" className={`${inputClass} w-36`} value={checkOutTo} onChange={(e) => setCheckOutTo(e.target.value)} />
-              </div>
+              <ReportDateRangePill from={checkOutFrom} to={checkOutTo} onChange={(f, t) => { setCheckOutFrom(f); setCheckOutTo(t); }} />
             </Field>
             <Field label="Source">
               <select className={`${inputClass} w-36`} value={source} onChange={(e) => setSource(e.target.value)}>
@@ -348,9 +337,7 @@ export function ReservationStatusReport({ hotelId, title, subtitle, mode }: { ho
           <button onClick={run} disabled={loading} title="Refresh" className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-brand-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-slate-700">
             ⟳
           </button>
-          <input type="date" className={`${inputClass} w-36`} value={from} onChange={(e) => setFrom(e.target.value)} />
-          <span className="text-slate-400">–</span>
-          <input type="date" className={`${inputClass} w-36`} value={to} onChange={(e) => setTo(e.target.value)} />
+          <ReportDateRangePill from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
           <Button onClick={run} disabled={loading}>
             {loading ? '…' : 'Go'}
           </Button>

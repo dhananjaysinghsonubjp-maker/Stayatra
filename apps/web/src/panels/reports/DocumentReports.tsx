@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
-import { Button, PageHeader, inputClass } from '../../components/ui';
+import { Button, PageHeader } from '../../components/ui';
 import { SOURCE_LABEL } from '../channel-manager/ota-labels';
 import { formatDateShort, formatDateTimeShort } from '../../dateFormat';
 import { ReportPrintShell } from './ReportPrintShell';
+import { ReportDateRangePill } from './ReportDateRangePill';
 import type { IdType } from '../../types';
 
 function todayPlus(days: number) {
@@ -23,9 +24,7 @@ function DateRangeBar({ from, to, setFrom, setTo, onRefresh, loading }: { from: 
       <button onClick={onRefresh} disabled={loading} title="Refresh" className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-brand-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-brand-400 dark:hover:bg-slate-700">
         ⟳
       </button>
-      <input type="date" className={`${inputClass} w-36`} value={from} onChange={(e) => setFrom(e.target.value)} />
-      <span className="text-slate-400">–</span>
-      <input type="date" className={`${inputClass} w-36`} value={to} onChange={(e) => setTo(e.target.value)} />
+      <ReportDateRangePill from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
       <Button onClick={onRefresh} disabled={loading}>
         {loading ? '…' : 'Go'}
       </Button>
