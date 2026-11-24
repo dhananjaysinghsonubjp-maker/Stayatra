@@ -175,6 +175,9 @@ export interface Booking {
   totalAmount: string;
   discountAmount: string | null;
   gstExempt: boolean;
+  /** §user request — "Modify Stay"; null for every booking made before this existed. */
+  adults: number | null;
+  children: number | null;
   delayResolvedAt: string | null;
   delayResolvedNote: string | null;
   /** Set the moment status becomes checked_in — basis for the 1-hour post-check-in edit window. */

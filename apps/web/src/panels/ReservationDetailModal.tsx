@@ -10,6 +10,7 @@ import { SOURCE_LABEL } from './channel-manager/ota-labels';
 import { CheckInModal } from './checkin/CheckInModal';
 import { PaymentHistory, type PaymentHistoryEntry } from './PaymentHistory';
 import { InvoicePrintView } from './InvoicePrintView';
+import { RoomTransferPanel } from './RoomTransferPanel';
 import type { MoreActionsView } from './MoreActionsPanel';
 import type { Booking, Room, RatePlan } from '../types';
 
@@ -51,11 +52,10 @@ function RoomTableRow({
   ratePlans,
   today,
   canManage,
-  candidateRooms,
   checked,
   onToggleChecked,
   onCheckIn,
-  onReassignRoom,
+  onOpenRoomTransfer,
   onRemoveRoom,
   onAddCharge,
   onRemoveCharge,
@@ -66,21 +66,17 @@ function RoomTableRow({
   ratePlans: RatePlan[];
   today: string;
   canManage: boolean;
-  candidateRooms: Room[];
   checked: boolean;
   onToggleChecked: () => void;
   onCheckIn: () => void;
-  onReassignRoom: (roomId: string) => Promise<void>;
+  onOpenRoomTransfer: () => void;
   onRemoveRoom: () => void;
   onAddCharge: (description: string, quantity: number, unitPrice: number) => Promise<void>;
   onRemoveCharge: (lineItemId: string) => Promise<void>;
   onPrintInvoice: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [mode, setMode] = useState<'none' | 'reassign' | 'charge'>('none');
-  const [pickedRoomId, setPickedRoomId] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [reassignError, setReassignError] = useState<string | null>(null);
+  const [mode, setMode] = useState<'none' | 'charge'>('none');
   const [chargeDesc, setChargeDesc] = useState('');
   const [chargeQty, setChargeQty] = useState(1);
   const [chargeUnitPrice, setChargeUnitPrice] = useState(0);
@@ -98,21 +94,6 @@ function RoomTableRow({
   const guestCount = 1 + (booking.guests?.length ?? 0);
   const ratePlan = ratePlans.find((rp) => rp.id === booking.ratePlanId);
   const mealPlanLabel = ratePlan?.mealPlan ?? ratePlan?.name ?? '—';
-
-  async function confirmReassign() {
-    if (!pickedRoomId) return;
-    setSaving(true);
-    setReassignError(null);
-    try {
-      await onReassignRoom(pickedRoomId);
-      setMode('none');
-      setPickedRoomId('');
-    } catch (err) {
-      setReassignError(err instanceof ApiError ? err.message : 'Failed to change room');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function confirmAddCharge() {
     if (!chargeDesc.trim()) return;
@@ -192,15 +173,15 @@ function RoomTableRow({
                     {isFutureStay ? 'Check in early' : 'Check in'}
                   </button>
                 )}
-                {booking.status === 'confirmed' && (
+                {(booking.status === 'confirmed' || booking.status === 'checked_in') && (
                   <button
                     onClick={() => {
                       setMenuOpen(false);
-                      setMode('reassign');
+                      onOpenRoomTransfer();
                     }}
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
                   >
-                    Change room
+                    Room Transfer
                   </button>
                 )}
                 <button
@@ -253,26 +234,6 @@ function RoomTableRow({
               </span>
             </div>
           ))}
-        </div>
-      )}
-
-      {mode === 'reassign' && (
-        <div className="ml-12 mt-2 flex flex-wrap items-center gap-2">
-          <select className={`${inputClass} w-auto text-xs`} value={pickedRoomId} onChange={(e) => setPickedRoomId(e.target.value)}>
-            <option value="">— pick a room —</option>
-            {candidateRooms.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.roomNumber}
-              </option>
-            ))}
-          </select>
-          <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!pickedRoomId || saving} onClick={confirmReassign}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-          <button onClick={() => setMode('none')} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
-            Cancel
-          </button>
-          {reassignError && <p className="w-full text-xs text-red-600">{reassignError}</p>}
         </div>
       )}
 
@@ -329,6 +290,7 @@ export function ReservationDetailModal({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [checkInQueue, setCheckInQueue] = useState<Booking[]>([]);
   const [printingBooking, setPrintingBooking] = useState<Booking | null>(null);
+  const [transferringBooking, setTransferringBooking] = useState<Booking | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addingRoom, setAddingRoom] = useState(false);
   const [newRoomId, setNewRoomId] = useState('');
@@ -394,11 +356,6 @@ export function ReservationDetailModal({
 
   function roomFor(booking: Booking) {
     return rooms.find((r) => r.id === booking.assignedRoomId);
-  }
-
-  async function reassignRoom(booking: Booking, roomId: string) {
-    await mutate('bookings.reassignReservationRoom', { bookingId: booking.id, roomId }, token ?? undefined);
-    onChanged();
   }
 
   async function removeRoom(booking: Booking) {
@@ -600,11 +557,10 @@ export function ReservationDetailModal({
                         ratePlans={ratePlans}
                         today={today}
                         canManage={canManage}
-                        candidateRooms={rooms.filter((r) => r.roomCategoryId === b.roomCategoryId && r.status === 'available' && r.id !== b.assignedRoomId)}
                         checked={selected.has(b.id)}
                         onToggleChecked={() => toggleSelected(b.id)}
                         onCheckIn={() => startCheckIn([b])}
-                        onReassignRoom={(roomId) => reassignRoom(b, roomId)}
+                        onOpenRoomTransfer={() => setTransferringBooking(b)}
                         onRemoveRoom={() => removeRoom(b)}
                         onAddCharge={(description, quantity, unitPrice) => addCharge(b, description, quantity, unitPrice)}
                         onRemoveCharge={removeCharge}
@@ -954,6 +910,15 @@ export function ReservationDetailModal({
       )}
       {printingBooking && (
         <InvoicePrintView booking={printingBooking} roomType={roomFor(printingBooking)?.roomCategory?.name ?? '—'} onClose={() => setPrintingBooking(null)} />
+      )}
+      {transferringBooking && (
+        <RoomTransferPanel
+          hotelId={hotelId}
+          booking={transferringBooking}
+          rooms={rooms}
+          onClose={() => setTransferringBooking(null)}
+          onChanged={onChanged}
+        />
       )}
     </>
   );

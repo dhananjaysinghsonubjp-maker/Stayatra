@@ -261,6 +261,36 @@ export function createBookingsRouter(bookings: BookingsService) {
       .input(z.object({ bookingId: z.string(), roomId: z.string() }))
       .mutation(({ ctx, input }) => bookings.reassignReservationRoom({ ...input, actorId: ctx.user.userId })),
 
+    /** §user request — "Modify Stay": checkout date/occupancy/rate/discount, any time (not just
+     * updateBooking's 1-hour post-check-in window). */
+    modifyStay: frontDeskUp
+      .input(
+        z.object({
+          bookingId: z.string(),
+          checkOut: z.coerce.date(),
+          adults: z.number().int().min(0).nullable().optional(),
+          children: z.number().int().min(0).nullable().optional(),
+          ratePerNight: z.number().nonnegative(),
+          discountAmount: z.number().nonnegative().nullable().optional(),
+          reportedByUserId: z.string(),
+        }),
+      )
+      .mutation(({ ctx, input }) => bookings.modifyStay({ ...input, actorId: ctx.user.userId })),
+
+    /** §user request — "Room Transfer": move a reservation to a different room/category with a
+     * reason and a billing choice, for an upcoming or already checked-in stay. */
+    transferRoom: frontDeskUp
+      .input(
+        z.object({
+          bookingId: z.string(),
+          newRoomId: z.string(),
+          reason: z.enum(['maintenance', 'upgrade', 'other']),
+          billingMode: z.enum(['keep', 'category_rate', 'custom']),
+          customRatePerNight: z.number().positive().optional(),
+        }),
+      )
+      .mutation(({ ctx, input }) => bookings.transferRoom({ ...input, actorId: ctx.user.userId })),
+
     /** §user request — "+ Add Room" on an existing group reservation. */
     addRoomToReservation: frontDeskUp
       .input(

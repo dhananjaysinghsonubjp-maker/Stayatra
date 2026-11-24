@@ -919,6 +919,160 @@ export class BookingsService {
   }
 
   /**
+   * §user request, with a reference app's own "Modify Stay" panel as the target — extend/shorten
+   * an ongoing or upcoming stay (checkout date, occupancy, per-night rate, discount) any time, not
+   * just within updateBooking's 1-hour post-check-in correction window. `reportedByUserId` is
+   * logged (who told the front desk about this change), not stored on the booking itself — it's
+   * an audit-trail fact, not a bookable attribute.
+   */
+  async modifyStay(input: {
+    bookingId: string;
+    checkOut: Date;
+    adults?: number | null;
+    children?: number | null;
+    ratePerNight: number;
+    discountAmount?: number | null;
+    reportedByUserId: string;
+    actorId: string;
+  }) {
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    if (booking.status !== BookingStatus.confirmed && booking.status !== BookingStatus.checked_in) {
+      throw new ConflictException(`Booking is ${booking.status} — stay details can only be modified for an upcoming or in-house reservation`);
+    }
+    const nights = Math.round((input.checkOut.getTime() - booking.checkIn.getTime()) / (1000 * 60 * 60 * 24));
+    if (nights < 1) throw new BadRequestException('Check-out date must be after check-in');
+    if (input.ratePerNight < 0) throw new BadRequestException('Room rate cannot be negative');
+
+    if (booking.assignedRoomId) {
+      const overlap = await this.prisma.booking.findFirst({
+        where: {
+          hotelId: booking.hotelId,
+          assignedRoomId: booking.assignedRoomId,
+          id: { not: booking.id },
+          status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+          checkIn: { lt: input.checkOut },
+          checkOut: { gt: booking.checkIn },
+        },
+      });
+      if (overlap) throw new ConflictException('This room already has another reservation overlapping the new checkout date');
+    }
+
+    const reportedBy = await this.prisma.user.findFirst({ where: { id: input.reportedByUserId, hotelId: booking.hotelId } });
+    if (!reportedBy) throw new BadRequestException('Reported By must be a staff member of this hotel');
+
+    const totalAmount = input.ratePerNight * nights;
+    const updated = await this.prisma.booking.update({
+      where: { id: input.bookingId },
+      data: {
+        checkOut: input.checkOut,
+        nights,
+        totalAmount,
+        discountAmount: input.discountAmount ?? null,
+        adults: input.adults ?? null,
+        children: input.children ?? null,
+      },
+    });
+    await this.audit.log({
+      hotelId: booking.hotelId,
+      eventType: 'STAY_EDITED',
+      actorId: input.actorId,
+      subjectId: booking.id,
+      detail: { checkOut: dateLabel(input.checkOut), nights, ratePerNight: input.ratePerNight, adults: input.adults ?? null, children: input.children ?? null, reportedBy: reportedBy.name },
+    });
+    return updated;
+  }
+
+  /**
+   * §user request, with a reference app's own "Room Transfer" panel as the target — move an
+   * upcoming or in-house guest to a different room, in any category (upgrade/downgrade), with a
+   * recorded reason and a billing choice: keep the current per-night price, pick up the new
+   * category's own standard rate (today's InventoryRate for that rate plan — direct bookings have
+   * no other notion of a category's "standard" price), or set a custom one. Unlike
+   * reassignReservationRoom above, this is not limited to same-category swaps and also moves a
+   * checked-in guest's actual room occupancy, not just the booking's room pointer.
+   */
+  async transferRoom(input: {
+    bookingId: string;
+    newRoomId: string;
+    reason: 'maintenance' | 'upgrade' | 'other';
+    billingMode: 'keep' | 'category_rate' | 'custom';
+    customRatePerNight?: number;
+    actorId: string;
+  }) {
+    const booking = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
+    if (booking.status !== BookingStatus.confirmed && booking.status !== BookingStatus.checked_in) {
+      throw new ConflictException(`Booking is ${booking.status} — only an upcoming or in-house reservation can change rooms`);
+    }
+    if (booking.assignedRoomId === input.newRoomId) throw new ConflictException('This reservation is already in that room');
+
+    const newRoom = await this.prisma.room.findUniqueOrThrow({ where: { id: input.newRoomId } });
+    if (newRoom.hotelId !== booking.hotelId) throw new NotFoundException('Room not found at this hotel');
+    if (!newRoom.roomCategoryId) throw new ConflictException('This room has no category set yet');
+
+    const overlap = await this.prisma.booking.findFirst({
+      where: {
+        hotelId: booking.hotelId,
+        assignedRoomId: input.newRoomId,
+        id: { not: booking.id },
+        status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
+        checkIn: { lt: booking.checkOut },
+        checkOut: { gt: booking.checkIn },
+      },
+    });
+    if (overlap) throw new ConflictException(`Room ${newRoom.roomNumber} already has another reservation overlapping these dates`);
+
+    const oldRatePlan = booking.ratePlanId ? await this.prisma.ratePlan.findUnique({ where: { id: booking.ratePlanId } }) : null;
+    const newRatePlan =
+      (oldRatePlan?.mealPlan ? await this.prisma.ratePlan.findFirst({ where: { roomCategoryId: newRoom.roomCategoryId, mealPlan: oldRatePlan.mealPlan } }) : null) ??
+      (await this.prisma.ratePlan.findFirst({ where: { roomCategoryId: newRoom.roomCategoryId } }));
+
+    let totalAmount: number;
+    if (input.billingMode === 'keep') {
+      totalAmount = Number(booking.totalAmount);
+    } else if (input.billingMode === 'custom') {
+      if (!input.customRatePerNight || input.customRatePerNight <= 0) throw new BadRequestException('Enter a valid custom price');
+      totalAmount = input.customRatePerNight * booking.nights;
+    } else {
+      if (!newRatePlan) throw new BadRequestException('No rate plan configured for this room category — use Custom Price instead');
+      const standardRate = await this.prisma.inventoryRate.findFirst({
+        where: { ratePlanId: newRatePlan.id, date: booking.checkIn, occupancyTier: 1 },
+        orderBy: { changedAt: 'desc' },
+      });
+      if (!standardRate) throw new BadRequestException('No standard rate configured for this room category on this date — use Custom Price instead');
+      totalAmount = Number(standardRate.price) * booking.nights;
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.booking.update({
+        where: { id: input.bookingId },
+        data: { assignedRoomId: newRoom.id, roomCategoryId: newRoom.roomCategoryId!, ratePlanId: newRatePlan?.id ?? null, totalAmount },
+      });
+
+      if (booking.status === BookingStatus.checked_in) {
+        if (booking.assignedRoomId) {
+          await tx.room.update({ where: { id: booking.assignedRoomId }, data: { status: 'housekeeping', currentStayId: null, statusChangedAt: new Date() } });
+        }
+        const claimed = await tx.room.updateMany({
+          where: { id: newRoom.id, status: 'available' },
+          data: { status: 'occupied', currentStayId: booking.id, statusChangedAt: new Date() },
+        });
+        if (claimed.count === 0) throw new ConflictException('The new room was just taken — pick a different room');
+      }
+
+      return result;
+    });
+
+    await this.audit.log({
+      hotelId: booking.hotelId,
+      eventType: 'ROOM_CHANGED',
+      actorId: input.actorId,
+      subjectId: booking.id,
+      detail: { fromRoomId: booking.assignedRoomId, toRoomId: newRoom.id, reason: input.reason, billingMode: input.billingMode, totalAmount },
+    });
+    return updated;
+  }
+
+  /**
    * §user request, reference app's own check-in flow — "+ Add Room": a group reservation
    * (Neeraj ji's 5 rooms) grows by one more room, as its own new Booking row sharing the same
    * reservationGroupId/booker/dates — same shape createMultiRoomReservation produces, just added

@@ -1,23 +1,46 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Badge, Card, EmptyState, PageHeader } from '../components/ui';
 import { computeInvoiceTotals } from '../invoice';
 import { formatDateShort } from '../dateFormat';
-import { EditBookingModal } from './EditBookingModal';
-import type { InHouseRow } from '../types';
+import { ReservationDetailModal } from './ReservationDetailModal';
+import { MoreActionsPanel, type MoreActionsView } from './MoreActionsPanel';
+import { CreateReservationModal } from './checkin/CreateReservationModal';
+import type { Booking, InHouseRow, RatePlan, Room, RoomCategory } from '../types';
 
 export function InHouse({ hotelId }: { hotelId: string }) {
   const { token, role } = useAuth();
   const [rows, setRows] = useState<InHouseRow[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [categories, setCategories] = useState<RoomCategory[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [ratePlans, setRatePlans] = useState<RatePlan[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
+  // §user request, with the same full Booking Details page Bookings/Calendar already open as the
+  // target — "Manage" used to open the old, narrower EditBookingModal; it now opens the exact same
+  // page + More Actions + Edit flow those screens use.
+  const [viewingGroupKey, setViewingGroupKey] = useState<string | null>(null);
+  const [actionsGroupKey, setActionsGroupKey] = useState<string | null>(null);
+  const [actionsInitialView, setActionsInitialView] = useState<MoreActionsView | undefined>(undefined);
+  const [editingGroup, setEditingGroup] = useState<Booking[] | null>(null);
   const canResolve = ['owner', 'manager'].includes(role('pms') ?? '');
   const canManage = ['owner', 'manager', 'front_desk'].includes(role('pms') ?? '');
 
   async function refresh() {
     try {
-      setRows(await query<InHouseRow[]>('bookings.listInHouse', { hotelId }, token ?? undefined));
+      const [inHouse, b, c, r, rp] = await Promise.all([
+        query<InHouseRow[]>('bookings.listInHouse', { hotelId }, token ?? undefined),
+        query<Booking[]>('bookings.listReservations', { hotelId }, token ?? undefined),
+        query<RoomCategory[]>('hotels.listRoomCategories', { hotelId }, token ?? undefined),
+        query<Room[]>('hotels.listRooms', { hotelId }, token ?? undefined),
+        query<RatePlan[]>('rates.listAllRatePlansForHotel', { hotelId }, token ?? undefined),
+      ]);
+      setRows(inHouse);
+      setBookings(b);
+      setCategories(c);
+      setRooms(r);
+      setRatePlans(rp);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load in-house guests');
     }
@@ -51,6 +74,15 @@ export function InHouse({ hotelId }: { hotelId: string }) {
   }
 
   const delayedCount = rows.filter((r) => r.delayed).length;
+  const roomsById = useMemo(() => new Map(rooms.map((rm) => [rm.id, rm])), [rooms]);
+  const viewingGroup = useMemo(
+    () => (viewingGroupKey ? bookings.filter((row) => (row.reservationGroupId ?? row.id) === viewingGroupKey) : null),
+    [viewingGroupKey, bookings],
+  );
+  const actionsGroup = useMemo(
+    () => (actionsGroupKey ? bookings.filter((row) => (row.reservationGroupId ?? row.id) === actionsGroupKey) : null),
+    [actionsGroupKey, bookings],
+  );
 
   return (
     <div>
@@ -111,7 +143,10 @@ export function InHouse({ hotelId }: { hotelId: string }) {
                       <td className="px-5 py-3 text-right">
                         <div className="flex justify-end gap-3">
                           {canManage && (
-                            <button onClick={() => setEditingBookingId(r.booking.id)} className="text-xs font-medium text-brand-600 hover:underline">
+                            <button
+                              onClick={() => setViewingGroupKey(r.booking.reservationGroupId ?? r.booking.id)}
+                              className="text-xs font-medium text-brand-600 hover:underline"
+                            >
                               Manage
                             </button>
                           )}
@@ -140,12 +175,45 @@ export function InHouse({ hotelId }: { hotelId: string }) {
         )}
       </Card>
 
-      {editingBookingId && (
-        <EditBookingModal
+      {viewingGroup && viewingGroup.length > 0 && (
+        <ReservationDetailModal
           hotelId={hotelId}
-          bookingId={editingBookingId}
-          onClose={() => setEditingBookingId(null)}
-          onDone={refresh}
+          bookings={viewingGroup}
+          rooms={rooms}
+          ratePlans={ratePlans}
+          onClose={() => setViewingGroupKey(null)}
+          onChanged={() => void refresh()}
+          onMoreActions={(initialView) => {
+            setActionsGroupKey(viewingGroup[0].reservationGroupId ?? viewingGroup[0].id);
+            setActionsInitialView(initialView);
+          }}
+          onEdit={() => setEditingGroup(viewingGroup)}
+        />
+      )}
+      {actionsGroup && actionsGroup.length > 0 && (
+        <MoreActionsPanel
+          hotelId={hotelId}
+          group={actionsGroup}
+          roomsById={roomsById}
+          categories={categories}
+          ratePlans={ratePlans}
+          initialView={actionsInitialView}
+          onClose={() => {
+            setActionsGroupKey(null);
+            setActionsInitialView(undefined);
+          }}
+          onChanged={() => void refresh()}
+        />
+      )}
+      {editingGroup && editingGroup.length > 0 && (
+        <CreateReservationModal
+          hotelId={hotelId}
+          editGroup={editingGroup}
+          onClose={() => setEditingGroup(null)}
+          onDone={() => {
+            setEditingGroup(null);
+            void refresh();
+          }}
         />
       )}
     </div>

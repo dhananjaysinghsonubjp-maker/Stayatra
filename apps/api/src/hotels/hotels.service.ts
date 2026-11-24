@@ -511,4 +511,11 @@ export class HotelsService {
     });
     return users.map((u) => ({ id: u.id, name: u.name, role: u.moduleRoles[0]?.role ?? null, createdAt: u.createdAt }));
   }
+
+  /** §user request — "Modify Stay"'s "Reported By" dropdown: just names, for any front-desk-and-up
+   * staffer to pick who's reporting a stay change (not necessarily themselves). */
+  async listStaffNames(hotelId: string) {
+    const users = await this.prisma.user.findMany({ where: { hotelId }, orderBy: { name: 'asc' } });
+    return users.map((u) => ({ id: u.id, name: u.name }));
+  }
 }

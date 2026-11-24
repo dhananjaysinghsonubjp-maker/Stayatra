@@ -775,6 +775,10 @@ model Booking {
   totalAmount      Decimal       @map("total_amount") @db.Decimal(10, 2) // base room charge — the payable grand total also includes lineItems and subtracts discountAmount, see common/invoice.ts
   discountAmount   Decimal?      @map("discount_amount") @db.Decimal(10, 2) // added beyond MD spec — flat discount off the grand total
   gstExempt        Boolean       @default(false) @map("gst_exempt") // added beyond MD spec — bypasses the §5.1 GST slab entirely when true
+  // §user request — "Modify Stay" (adults/children weren't captured anywhere before this; every
+  // older booking is simply null, not "0 guests"). Nullable so nothing has to backfill.
+  adults           Int?
+  children         Int?
   // set the moment status becomes checked_in (both walk-in and reservation
   // check-in) — the basis for the 1-hour post-check-in edit window (§ added
   // beyond MD spec, at user request). Distinct from `createdAt`: for a

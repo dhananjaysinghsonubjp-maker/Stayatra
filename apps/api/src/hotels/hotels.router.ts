@@ -246,6 +246,11 @@ export function createHotelsRouter(hotels: HotelsService) {
 
     listStaff: ownerOrManager.input(z.object({ hotelId: z.string() })).query(({ input }) => hotels.listStaff(input.hotelId)),
 
+    // §user request — Modify Stay's "Reported By" dropdown: any front-desk-and-up staffer should
+    // be able to see who's on the roster, not just owner/manager (unlike listStaff above, which
+    // also exposes each person's role and is reserved for actual staff administration).
+    listStaffNames: frontDeskUp.input(z.object({ hotelId: z.string() })).query(({ input }) => hotels.listStaffNames(input.hotelId)),
+
     // §user request, matching a reference app's Calendar empty-cell "Add Maintenance Block" panel.
     checkRoomAvailability: frontDeskUp
       .input(z.object({ roomId: z.string(), startAt: z.coerce.date(), endAt: z.coerce.date(), excludeMaintenanceBlockId: z.string().optional() }))

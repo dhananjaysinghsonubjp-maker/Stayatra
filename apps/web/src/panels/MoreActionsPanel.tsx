@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { mutate, uploadFile, ApiError } from '../api';
+import { mutate, query, uploadFile, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Button, Combobox, Field, inputClass } from '../components/ui';
 import { computeInvoiceTotals } from '../invoice';
@@ -11,7 +11,7 @@ import { BookingVoucherPrintView } from './checkin/BookingVoucherPrintView';
 import type { ReservationSuccessData } from './checkin/ReservationSuccessModal';
 import type { Booking, IdType, Payment, PaymentMethod, PaymentType, RatePlan, Room, RoomCategory } from '../types';
 
-export type MoreActionsView = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'payment' | 'identity' | 'receipts' | 'mealplan';
+export type MoreActionsView = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'payment' | 'identity' | 'receipts' | 'mealplan' | 'modifystay' | 'notes' | 'expectedtimes';
 type View = MoreActionsView;
 
 const ID_TYPE_OPTIONS: IdType[] = ['aadhaar', 'passport', 'driving_license', 'voter_id', 'other'];
@@ -214,6 +214,59 @@ export function MoreActionsPanel({
   const [uploadingSide, setUploadingSide] = useState<'front' | 'back' | null>(null);
   const [mealPlans, setMealPlans] = useState<Record<string, string>>(() => Object.fromEntries(group.map((b) => [b.id, b.ratePlanId ?? ''])));
   const [printing, setPrinting] = useState<'receipt' | 'voucher' | null>(null);
+  const [internalNotes, setInternalNotes] = useState(lead.internalNotes ?? '');
+  const [expectedArrivalTime, setExpectedArrivalTime] = useState(lead.expectedArrivalTime ?? '');
+  const [expectedDepartureTime, setExpectedDepartureTime] = useState(lead.expectedDepartureTime ?? '');
+
+  // §user request, with a reference app's own "Modify Stay" panel as the target — a multi-room
+  // group has its own checkout/rate per room, so this needs its own room picker the same way
+  // Record Payment does, instead of silently only ever touching the lead row.
+  const [modifyTargetId, setModifyTargetId] = useState(lead.id);
+  const modifyTarget = group.find((b) => b.id === modifyTargetId) ?? lead;
+  const [modifyCheckOut, setModifyCheckOut] = useState(lead.checkOut.slice(0, 10));
+  const [modifyAdults, setModifyAdults] = useState<number | ''>(lead.adults ?? '');
+  const [modifyChildren, setModifyChildren] = useState<number | ''>(lead.children ?? '');
+  const [modifyRate, setModifyRate] = useState(lead.nights > 0 ? Number(lead.totalAmount) / lead.nights : Number(lead.totalAmount));
+  const [modifyDiscount, setModifyDiscount] = useState<number | ''>(lead.discountAmount ? Number(lead.discountAmount) : '');
+  const [reportedByUserId, setReportedByUserId] = useState('');
+  const [staffNames, setStaffNames] = useState<{ id: string; name: string }[]>([]);
+
+  function pickModifyTarget(id: string) {
+    const b = group.find((row) => row.id === id) ?? lead;
+    setModifyTargetId(id);
+    setModifyCheckOut(b.checkOut.slice(0, 10));
+    setModifyAdults(b.adults ?? '');
+    setModifyChildren(b.children ?? '');
+    setModifyRate(b.nights > 0 ? Number(b.totalAmount) / b.nights : Number(b.totalAmount));
+    setModifyDiscount(b.discountAmount ? Number(b.discountAmount) : '');
+  }
+
+  useEffect(() => {
+    if (view !== 'modifystay' || staffNames.length > 0) return;
+    query<{ id: string; name: string }[]>('hotels.listStaffNames', { hotelId }, token ?? undefined)
+      .then(setStaffNames)
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  async function submitModifyStay() {
+    if (!reportedByUserId) return;
+    await run(() =>
+      mutate(
+        'bookings.modifyStay',
+        {
+          bookingId: modifyTarget.id,
+          checkOut: new Date(`${modifyCheckOut}T00:00:00`).toISOString(),
+          adults: modifyAdults === '' ? null : modifyAdults,
+          children: modifyChildren === '' ? null : modifyChildren,
+          ratePerNight: modifyRate,
+          discountAmount: modifyDiscount === '' ? null : modifyDiscount,
+          reportedByUserId,
+        },
+        token ?? undefined,
+      ),
+    );
+  }
 
   const [allocate, setAllocate] = useState<'group' | 'room'>('group');
   const [targetBookingId, setTargetBookingId] = useState(lead.id);
@@ -310,15 +363,18 @@ export function MoreActionsPanel({
   }
 
   const MENU_ITEMS: { view: View; icon: string; label: string; disabled?: boolean }[] = [
-    { view: 'cancel', icon: '✕', label: 'Cancel entire reservation', disabled: !canEnd },
-    { view: 'noshow', icon: '🧳', label: 'Mark as No Show', disabled: !canEnd },
-    { view: 'void', icon: '🚫', label: 'Void Reservation', disabled: !canEnd },
+    { view: 'modifystay', icon: '🗓️', label: 'Modify Stay' },
     { view: 'special', icon: '📋', label: 'Add special request' },
     { view: 'vip', icon: '👑', label: lead.isVip ? 'Remove VIP status' : 'Mark as VIP' },
+    { view: 'notes', icon: '📝', label: 'Add internal notes' },
     { view: 'payment', icon: '💰', label: 'Record Payment' },
+    { view: 'expectedtimes', icon: '⏱️', label: 'Update Expected Times' },
     { view: 'identity', icon: '🪪', label: 'Identity Verification' },
     { view: 'receipts', icon: '🧾', label: 'Receipt Management' },
     { view: 'mealplan', icon: '🍽️', label: 'Change meal plan' },
+    { view: 'cancel', icon: '✕', label: 'Cancel entire reservation', disabled: !canEnd },
+    { view: 'noshow', icon: '🧳', label: 'Mark as No Show', disabled: !canEnd },
+    { view: 'void', icon: '🚫', label: 'Void Reservation', disabled: !canEnd },
   ];
 
   return createPortal(
@@ -376,6 +432,68 @@ export function MoreActionsPanel({
                   <span className="text-slate-300 dark:text-slate-600">›</span>
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* §user request, with a reference app's own "Modify Stay" panel as the target — extend/
+              shorten an ongoing or upcoming stay any time, not just within the 1-hour post-check-in
+              correction window updateBooking covers. */}
+          {view === 'modifystay' && (
+            <div className="min-w-0 space-y-4 p-5">
+              {group.length > 1 && (
+                <Field label="Room">
+                  <select className={inputClass} value={modifyTargetId} onChange={(e) => pickModifyTarget(e.target.value)}>
+                    {group.map((b) => {
+                      const room = roomsById.get(b.assignedRoomId ?? '');
+                      return (
+                        <option key={b.id} value={b.id}>
+                          Room {room?.roomNumber ?? '—'}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </Field>
+              )}
+              <Field label="Room No.">
+                <div className={`${inputClass} bg-slate-100 text-slate-500 dark:bg-slate-700/60 dark:text-slate-400`}>
+                  {roomsById.get(modifyTarget.assignedRoomId ?? '')?.roomNumber ?? '—'}
+                </div>
+              </Field>
+              <Field label="Check-out Date">
+                <input type="date" className={inputClass} min={modifyTarget.checkIn.slice(0, 10)} value={modifyCheckOut} onChange={(e) => setModifyCheckOut(e.target.value)} />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Adults">
+                  <input type="number" min={0} className={inputClass} placeholder="Adults" value={modifyAdults} onChange={(e) => setModifyAdults(e.target.value === '' ? '' : Number(e.target.value))} />
+                </Field>
+                <Field label="Children">
+                  <input type="number" min={0} className={inputClass} placeholder="Children" value={modifyChildren} onChange={(e) => setModifyChildren(e.target.value === '' ? '' : Number(e.target.value))} />
+                </Field>
+              </div>
+              <Field label="Room Rate (per night)">
+                <input type="number" min={0} className={inputClass} value={modifyRate} onChange={(e) => setModifyRate(Number(e.target.value))} />
+              </Field>
+              <Field label="Discount">
+                <input type="number" min={0} className={inputClass} placeholder="Discount" value={modifyDiscount} onChange={(e) => setModifyDiscount(e.target.value === '' ? '' : Number(e.target.value))} />
+              </Field>
+              <Field label="Reported By *">
+                <select className={inputClass} value={reportedByUserId} onChange={(e) => setReportedByUserId(e.target.value)}>
+                  <option value="">— select employee —</option>
+                  {staffNames.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" className="flex-1" onClick={() => setView('menu')}>
+                  Cancel
+                </Button>
+                <Button type="button" className="flex-1" disabled={busy || !reportedByUserId} onClick={submitModifyStay}>
+                  {busy ? 'Saving…' : 'Confirm'}
+                </Button>
+              </div>
             </div>
           )}
 
@@ -526,6 +644,56 @@ export function MoreActionsPanel({
                   {busy ? 'Saving…' : lead.isVip ? 'Remove VIP' : 'Mark as VIP'}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {view === 'notes' && (
+            <div className="min-w-0 space-y-3 p-5">
+              <Field label="Internal notes">
+                <textarea
+                  className={`${inputClass} w-full min-h-28 resize-none`}
+                  value={internalNotes}
+                  onChange={(e) => setInternalNotes(e.target.value)}
+                  placeholder="Staff-only notes about this reservation — not visible to the guest"
+                />
+              </Field>
+              <Button
+                type="button"
+                disabled={busy}
+                onClick={() => run(() => mutate('bookings.updateInternalNotes', { bookingId: lead.id, internalNotes: internalNotes.trim() || null }, token ?? undefined))}
+                className="w-full"
+              >
+                {busy ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          )}
+
+          {view === 'expectedtimes' && (
+            <div className="min-w-0 space-y-3 p-5">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Expected arrival">
+                  <input type="time" className={inputClass} value={expectedArrivalTime} onChange={(e) => setExpectedArrivalTime(e.target.value)} />
+                </Field>
+                <Field label="Expected departure">
+                  <input type="time" className={inputClass} value={expectedDepartureTime} onChange={(e) => setExpectedDepartureTime(e.target.value)} />
+                </Field>
+              </div>
+              <Button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  run(() =>
+                    mutate(
+                      'bookings.updateExpectedTimes',
+                      { bookingId: lead.id, expectedArrivalTime: expectedArrivalTime || null, expectedDepartureTime: expectedDepartureTime || null },
+                      token ?? undefined,
+                    ),
+                  )
+                }
+                className="w-full"
+              >
+                {busy ? 'Saving…' : 'Save'}
+              </Button>
             </div>
           )}
 
