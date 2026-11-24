@@ -31,5 +31,17 @@ export function createReportsRouter(reports: ReportsService) {
         }),
       )
       .query(({ input }) => reports.getReservationReport(input)),
+
+    police: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getPoliceReport(input)),
+
+    dayWiseBookings: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getDayWiseBookingReport(input)),
+
+    checkInCheckOut: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getCheckInCheckOutReport(input)),
   });
 }

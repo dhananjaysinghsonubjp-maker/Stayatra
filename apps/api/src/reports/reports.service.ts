@@ -238,4 +238,184 @@ export class ReportsService {
       };
     });
   }
+
+  /**
+   * §user request, with a reference app's own "Police Report" as the target — the daily
+   * guest-occupancy list Indian hotels submit to local police: name, address, phone, room,
+   * stay dates, ID type/number, for everyone in-house at any point during the selected range
+   * (not just new arrivals that day) — a stay that started before `from` and is still going
+   * must still show up. Scoped to checked_in/checked_out since a merely confirmed reservation
+   * has no ID captured yet.
+   */
+  async getPoliceReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const rows = await this.prisma.booking.findMany({
+      where: {
+        hotelId: input.hotelId,
+        status: { in: ['checked_in', 'checked_out'] },
+        checkIn: { lte: toInclusive },
+        checkOut: { gte: input.from },
+      },
+      include: { assignedRoom: true, guest: true },
+      orderBy: { checkIn: 'asc' },
+    });
+    return rows.map((b) => ({
+      id: b.id,
+      guestName: b.guestName,
+      address: b.guest ? [b.guest.address, b.guest.city, b.guest.state, b.guest.pincode].filter(Boolean).join(', ') : '',
+      phone: b.guestPhone ?? '',
+      adults: b.adults ?? 1,
+      children: b.children ?? 0,
+      roomNumber: b.assignedRoom?.roomNumber ?? '—',
+      checkIn: b.checkIn.toISOString(),
+      checkOut: b.checkOut.toISOString(),
+      idType: b.idType,
+      idNumber: b.idNumber,
+    }));
+  }
+
+  /**
+   * §user request, with a reference app's own "Day Wise Booking Report" as the target — bookings
+   * and revenue by check-in day (same convention this app's own Sale Report already uses:
+   * "revenue counted on check-in day, never per night").
+   */
+  async getDayWiseBookingReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const rows = await this.prisma.booking.findMany({
+      where: {
+        hotelId: input.hotelId,
+        checkIn: { gte: input.from, lte: toInclusive },
+        status: { not: 'void' },
+      },
+      include: { lineItems: true },
+    });
+    const byDay = new Map<string, { bookings: number; amount: number }>();
+    for (const b of rows) {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      const key = dayKey(b.checkIn);
+      const entry = byDay.get(key) ?? { bookings: 0, amount: 0 };
+      entry.bookings += 1;
+      entry.amount += totals.grandTotal;
+      byDay.set(key, entry);
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, { bookings, amount }]) => ({ date, bookings, totalAmount: amount, averageAmount: bookings > 0 ? amount / bookings : 0 }));
+  }
+
+  /**
+   * §user request, with a reference app's own "Check-In and Check-Out Report" as the target —
+   * one day's occupancy snapshot: how many rooms are occupied, checking in, and staying over,
+   * plus the revenue/GST/collected/pending behind it, with a per-booking breakdown and a
+   * per-channel (OTA) revenue summary. Commission is read from the booking's own stored
+   * `channelBreakdown` (set per §channel-economics) when present — a direct/walk-in booking
+   * has none, so its commission is simply 0.
+   */
+  async getCheckInCheckOutReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const rows = await this.prisma.booking.findMany({
+      where: {
+        hotelId: input.hotelId,
+        status: { in: ['confirmed', 'checked_in', 'checked_out'] },
+        checkIn: { lte: toInclusive },
+        checkOut: { gte: input.from },
+      },
+      include: { assignedRoom: true, lineItems: true },
+    });
+
+    let occupancy = 0;
+    let checkedIn = 0;
+    let stayOver = 0;
+    let revenue = 0;
+    let totalGst = 0;
+    let totalCommission = 0;
+    let collected = 0;
+    const details: {
+      id: string;
+      guestName: string;
+      roomNumber: string;
+      source: string;
+      checkIn: string;
+      checkOut: string;
+      gst: number;
+      commission: number;
+      paid: number;
+      total: number;
+      payable: number;
+    }[] = [];
+    const byOta = new Map<string, { bookings: number; gross: number; commission: number; gst: number; paid: number }>();
+
+    for (const b of rows) {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      const paid = Number(b.paidAmount ?? 0);
+      const breakdown = (b.channelBreakdown ?? {}) as Record<string, unknown>;
+      const commission = typeof breakdown.commission === 'number' ? breakdown.commission : 0;
+
+      occupancy += 1;
+      if (b.status === 'checked_in' || b.status === 'checked_out') checkedIn += 1;
+      if (b.checkIn < input.from) stayOver += 1;
+      revenue += totals.grandTotal;
+      totalGst += totals.gst.amount;
+      totalCommission += commission;
+      collected += paid;
+
+      details.push({
+        id: b.id,
+        guestName: b.guestName,
+        roomNumber: b.assignedRoom?.roomNumber ?? '—',
+        source: b.source,
+        checkIn: b.checkIn.toISOString(),
+        checkOut: b.checkOut.toISOString(),
+        gst: totals.gst.amount,
+        commission,
+        paid,
+        total: totals.grandTotal,
+        payable: totals.grandTotal - commission,
+      });
+
+      if (b.source !== 'direct' && b.source !== 'walk_in') {
+        const entry = byOta.get(b.source) ?? { bookings: 0, gross: 0, commission: 0, gst: 0, paid: 0 };
+        entry.bookings += 1;
+        entry.gross += totals.grandTotal;
+        entry.commission += commission;
+        entry.gst += totals.gst.amount;
+        entry.paid += paid;
+        byOta.set(b.source, entry);
+      }
+    }
+
+    const netPayable = revenue - totalCommission;
+    return {
+      occupancy,
+      checkedIn,
+      stayOver,
+      revenue,
+      totalGst,
+      totalCommission,
+      netPayable,
+      collected,
+      pending: Math.max(0, revenue - collected),
+      details,
+      otaRevenue: [...byOta.entries()].map(([source, v]) => ({
+        source,
+        bookings: v.bookings,
+        gross: v.gross,
+        commission: v.commission,
+        gst: v.gst,
+        net: v.gross - v.commission,
+        paid: v.paid,
+        pending: Math.max(0, v.gross - v.paid),
+      })),
+    };
+  }
 }

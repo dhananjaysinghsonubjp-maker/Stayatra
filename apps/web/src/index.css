@@ -87,11 +87,14 @@ body {
   .invoice-print-root,
   .invoice-print-root *,
   .staff-id-print-root,
-  .staff-id-print-root * {
+  .staff-id-print-root *,
+  .report-print-root,
+  .report-print-root * {
     visibility: visible;
   }
   .invoice-print-root,
-  .staff-id-print-root {
+  .staff-id-print-root,
+  .report-print-root {
     position: fixed;
     inset: 0;
     background: white;

@@ -19,6 +19,9 @@ export type Tab =
   | 'reports_noshow'
   | 'reports_arrivals'
   | 'reports_departures'
+  | 'reports_police'
+  | 'reports_daywise'
+  | 'reports_checkinout'
   | 'reports_rooms'
   | 'reports_sale'
   | 'reports_expenses'
@@ -118,6 +121,9 @@ const NAV: NavEntry[] = [
           { id: 'reports_noshow', label: 'No-Show', icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h8m6-5v4m0 0v2m0-2h2m-2 0h-2') },
           { id: 'reports_arrivals', label: 'Arrivals', icon: Icon('M12 4v12m0 0l-4-4m4 4l4-4M4 20h16') },
           { id: 'reports_departures', label: 'Departures', icon: Icon('M12 20V8m0 0l-4 4m4-4l4 4M4 4h16') },
+          { id: 'reports_police', label: 'Police Report', icon: Icon('M12 3l7 4v5c0 4.5-3 8.5-7 9-4-.5-7-4.5-7-9V7l7-4z') },
+          { id: 'reports_daywise', label: 'Day Wise Booking Report', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
+          { id: 'reports_checkinout', label: 'Check-In and Check-Out Report', icon: Icon('M11 16l-4-4m0 0l4-4m-4 4h14') },
         ],
       },
       {

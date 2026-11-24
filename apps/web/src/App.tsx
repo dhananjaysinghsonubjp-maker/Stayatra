@@ -22,6 +22,7 @@ import {
   ArrivalsReport,
   DeparturesReport,
 } from './panels/reports/ReservationReports';
+import { PoliceReport, DayWiseBookingReport, CheckInCheckOutReport } from './panels/reports/DocumentReports';
 import { Calendar } from './panels/channel-manager/Calendar';
 import { GuestMessaging } from './panels/channel-manager/GuestMessaging';
 import { OtaReviews } from './panels/channel-manager/OtaReviews';
@@ -238,6 +239,9 @@ function Shell() {
           'reports_noshow',
           'reports_arrivals',
           'reports_departures',
+          'reports_police',
+          'reports_daywise',
+          'reports_checkinout',
           'reports_sale',
           'reports_rooms',
           'reports_expenses',
@@ -336,6 +340,9 @@ function Shell() {
           {activeTab === 'reports_noshow' && canManagePms && <NoShowReservationsReport hotelId={hotel.id} />}
           {activeTab === 'reports_arrivals' && canManagePms && <ArrivalsReport hotelId={hotel.id} />}
           {activeTab === 'reports_departures' && canManagePms && <DeparturesReport hotelId={hotel.id} />}
+          {activeTab === 'reports_police' && canManagePms && <PoliceReport hotelId={hotel.id} />}
+          {activeTab === 'reports_daywise' && canManagePms && <DayWiseBookingReport hotelId={hotel.id} />}
+          {activeTab === 'reports_checkinout' && canManagePms && <CheckInCheckOutReport hotelId={hotel.id} />}
           {activeTab === 'reports_sale' && canManagePms && <Reports hotelId={hotel.id} only="sale" />}
           {activeTab === 'reports_rooms' && canManagePms && <Reports hotelId={hotel.id} only="rooms" />}
           {activeTab === 'reports_expenses' && canManagePms && <Reports hotelId={hotel.id} only="expenses" />}
