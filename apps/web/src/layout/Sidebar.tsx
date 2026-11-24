@@ -11,7 +11,17 @@ export type Tab =
   | 'ledger'
   | 'contacts'
   | 'housekeeping'
-  | 'reports'
+  // §user request — "Reports" grew from one 3-tab page into a reference app's own full
+  // "Reservation Reports" tree; each leaf is now its own Tab/page instead of an in-page tab.
+  | 'reports_master'
+  | 'reports_completed'
+  | 'reports_cancelled'
+  | 'reports_noshow'
+  | 'reports_arrivals'
+  | 'reports_departures'
+  | 'reports_rooms'
+  | 'reports_sale'
+  | 'reports_expenses'
   | 'cm_calendar'
   | 'cm_guest_messaging'
   | 'cm_reviews'
@@ -89,9 +99,39 @@ const NAV: NavEntry[] = [
   // calendar-with-ring-binding icon, not a plain 3×3 grid.
   { id: 'cm_calendar', label: 'Calendar View', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
   { id: 'bookings', label: 'Reservations', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
-  { id: 'dues', label: 'Dues', icon: Icon('M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z') },
   { id: 'ledger', label: 'Ledger', icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z') },
-  { id: 'reports', label: 'Reports', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
+  // §user request, with a reference app's own "Reports" sidebar tree as the target — one group
+  // nesting "Reservation Reports" (every booking-list style report) and "Finance & Payment"
+  // (Dues, plus this app's own existing Rooms/Sale/Expenses reports, folded in here since the
+  // reference's own Finance & Payment contents weren't shown yet).
+  {
+    label: 'Reports',
+    icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z'),
+    children: [
+      {
+        label: 'Reservation Reports',
+        icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'),
+        children: [
+          { id: 'reports_master', label: 'Reservation Master Report', icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z') },
+          { id: 'reports_completed', label: 'Completed', icon: Icon('M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z') },
+          { id: 'reports_cancelled', label: 'Cancelled', icon: Icon('M18 6L6 18M6 6l12 12') },
+          { id: 'reports_noshow', label: 'No-Show', icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h8m6-5v4m0 0v2m0-2h2m-2 0h-2') },
+          { id: 'reports_arrivals', label: 'Arrivals', icon: Icon('M12 4v12m0 0l-4-4m4 4l4-4M4 20h16') },
+          { id: 'reports_departures', label: 'Departures', icon: Icon('M12 20V8m0 0l-4 4m4-4l4 4M4 4h16') },
+        ],
+      },
+      {
+        label: 'Finance & Payment',
+        icon: Icon('M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 2v8m0 0v2m0-2c-1.11 0-2.08-.402-2.599-1M5 12a7 7 0 1014 0 7 7 0 00-14 0z'),
+        children: [
+          { id: 'dues', label: 'Dues', icon: Icon('M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z') },
+          { id: 'reports_sale', label: 'Sale Report', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
+          { id: 'reports_rooms', label: 'Rooms Report', icon: Icon('M4 6h16M4 6a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2M4 6l8-3 8 3M9 13h6') },
+          { id: 'reports_expenses', label: 'Daily Expenses', icon: Icon('M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 2v8m0 0v2m0-2c-1.11 0-2.08-.402-2.599-1M5 12a7 7 0 1014 0 7 7 0 00-14 0z') },
+        ],
+      },
+    ],
+  },
   {
     // §user request — "Bulk Update ka naam change hoke Room Management hoga"
     label: 'Room Management',

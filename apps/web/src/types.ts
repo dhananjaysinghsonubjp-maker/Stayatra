@@ -368,6 +368,25 @@ export interface SaleReportDay {
   bookings: { id: string; guestName: string; roomNumber: string | null; grandTotal: number; paidAmount: number; due: number }[];
 }
 
+/** §user request, with a reference app's own "Reservation Reports" section as the target — shared
+ * row shape behind the Master Report and its narrower siblings (Completed/Cancelled/No-Show,
+ * Arrivals/Departures). */
+export interface ReservationReportRow {
+  id: string;
+  bookingCode: string;
+  reservationDate: string;
+  guestName: string;
+  guestPhone: string | null;
+  checkIn: string;
+  checkOut: string;
+  source: BookingSource;
+  roomNumber: string | null;
+  roomCategoryName: string | null;
+  status: Booking['status'];
+  amount: number;
+  paidAmount: number;
+}
+
 export type PaymentType = 'advance' | 'partial' | 'full';
 
 export interface Payment {

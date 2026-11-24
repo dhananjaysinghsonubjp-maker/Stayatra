@@ -169,4 +169,73 @@ export class ReportsService {
 
     return Array.from(days.values()).sort((a, b) => a.date.localeCompare(b.date));
   }
+
+  /**
+   * §user request, with a reference app's own "Reservation Reports" section as the target — one
+   * shared query behind the Master Report (every booking, every filter) and its narrower
+   * siblings (Completed/Cancelled/No-Show status views, Arrivals/Departures date views): each
+   * just calls this with a different default status list or date field, so there's one place that
+   * actually reads the Booking table instead of six near-duplicates.
+   */
+  async getReservationReport(input: {
+    hotelId: string;
+    statuses?: ('confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show' | 'void')[];
+    checkInFrom?: Date;
+    checkInTo?: Date;
+    checkOutFrom?: Date;
+    checkOutTo?: Date;
+    reservationFrom?: Date;
+    reservationTo?: Date;
+    search?: string;
+    source?: string;
+  }) {
+    const where: Record<string, unknown> = { hotelId: input.hotelId };
+    if (input.statuses?.length) where.status = { in: input.statuses };
+    if (input.source) where.source = input.source;
+    if (input.checkInFrom || input.checkInTo) {
+      where.checkIn = { gte: input.checkInFrom, lte: input.checkInTo ? endOfDay(input.checkInTo) : undefined };
+    }
+    if (input.checkOutFrom || input.checkOutTo) {
+      where.checkOut = { gte: input.checkOutFrom, lte: input.checkOutTo ? endOfDay(input.checkOutTo) : undefined };
+    }
+    if (input.reservationFrom || input.reservationTo) {
+      where.createdAt = { gte: input.reservationFrom, lte: input.reservationTo ? endOfDay(input.reservationTo) : undefined };
+    }
+    if (input.search?.trim()) {
+      // A booking code on screen is "BK-" + the id's last 6 chars, uppercased — strip that prefix
+      // back off and match it against the tail of the real id, alongside a plain guest-name search.
+      const needle = input.search.trim().replace(/^bk-?/i, '').toLowerCase();
+      where.OR = [{ guestName: { contains: input.search.trim(), mode: 'insensitive' } }, { id: { endsWith: needle } }];
+    }
+
+    const rows = await this.prisma.booking.findMany({
+      where,
+      include: { assignedRoom: { include: { roomCategory: true } }, lineItems: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return rows.map((b) => {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      return {
+        id: b.id,
+        bookingCode: `BK-${b.id.slice(-6).toUpperCase()}`,
+        reservationDate: b.createdAt.toISOString(),
+        guestName: b.guestName,
+        guestPhone: b.guestPhone,
+        checkIn: b.checkIn.toISOString(),
+        checkOut: b.checkOut.toISOString(),
+        source: b.source,
+        roomNumber: b.assignedRoom?.roomNumber ?? null,
+        roomCategoryName: b.assignedRoom?.roomCategory?.name ?? null,
+        status: b.status,
+        amount: totals.grandTotal,
+        paidAmount: Number(b.paidAmount ?? 0),
+      };
+    });
+  }
 }

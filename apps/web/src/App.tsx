@@ -14,6 +14,14 @@ import { Contacts } from './panels/Contacts';
 import { HotelTeamStaffPage } from './panels/staff/HotelTeamStaffPage';
 import { HousekeepingApp } from './panels/housekeeping/HousekeepingApp';
 import { Reports } from './panels/Reports';
+import {
+  ReservationMasterReport,
+  CompletedReservationsReport,
+  CancelledReservationsReport,
+  NoShowReservationsReport,
+  ArrivalsReport,
+  DeparturesReport,
+} from './panels/reports/ReservationReports';
 import { Calendar } from './panels/channel-manager/Calendar';
 import { GuestMessaging } from './panels/channel-manager/GuestMessaging';
 import { OtaReviews } from './panels/channel-manager/OtaReviews';
@@ -209,7 +217,6 @@ function Shell() {
     ...((hasPms ? ['rooms'] : []) as Tab[]),
     ...((hasPms && !isHousekeeping ? ['inhouse'] : []) as Tab[]),
     ...((canSeeReservations ? ['bookings'] : []) as Tab[]),
-    ...((hasPms && !isHousekeeping ? ['dues'] : []) as Tab[]),
     ...((hasPms && !isHousekeeping ? ['ledger'] : []) as Tab[]),
     ...((hasPms && !isHousekeeping ? ['contacts'] : []) as Tab[]),
     ...((canSeeReservations ? ['cm_calendar'] : []) as Tab[]),
@@ -223,7 +230,22 @@ function Shell() {
     // owner would just hit FORBIDDEN on every query, so this stays on the
     // narrower PMS check while Setup (which also covers shared Room
     // Categories) stays on the broader either-module check.
-    ...(canManagePms ? (['reports'] as Tab[]) : []),
+    ...(canManagePms
+      ? ([
+          'reports_master',
+          'reports_completed',
+          'reports_cancelled',
+          'reports_noshow',
+          'reports_arrivals',
+          'reports_departures',
+          'reports_sale',
+          'reports_rooms',
+          'reports_expenses',
+        ] as Tab[])
+      : []),
+    // §user request — "Dues section ko Reports section ke under le jayenge": relocated into the
+    // new Reports → Finance & Payment subgroup, same visibility rule it always had.
+    ...((hasPms && !isHousekeeping ? ['dues'] : []) as Tab[]),
     ...(canManage ? (['settings_details', 'settings_brand', 'settings_rooms', 'settings_invoice', 'settings_ledger'] as Tab[]) : []),
     ...(canManage && hasChannelManager ? (['settings_credentials'] as Tab[]) : []),
     ...(canManage && isOwner ? (['settings_billing'] as Tab[]) : []),
@@ -305,11 +327,20 @@ function Shell() {
               onInitialConsumed={() => setPendingReservationGroupKey(null)}
             />
           )}
-          {activeTab === 'dues' && hasPms && !isHousekeeping && <Dues hotelId={hotel.id} />}
           {activeTab === 'ledger' && hasPms && !isHousekeeping && <Ledger hotelId={hotel.id} />}
           {activeTab === 'contacts' && hasPms && !isHousekeeping && <Contacts hotelId={hotel.id} isOwner={pmsRole === 'owner'} />}
           {activeTab === 'housekeeping' && canManagePms && <HotelTeamStaffPage hotelId={hotel.id} token={token} isOwner={isOwner} />}
-          {activeTab === 'reports' && canManagePms && <Reports hotelId={hotel.id} />}
+          {activeTab === 'reports_master' && canManagePms && <ReservationMasterReport hotelId={hotel.id} />}
+          {activeTab === 'reports_completed' && canManagePms && <CompletedReservationsReport hotelId={hotel.id} />}
+          {activeTab === 'reports_cancelled' && canManagePms && <CancelledReservationsReport hotelId={hotel.id} />}
+          {activeTab === 'reports_noshow' && canManagePms && <NoShowReservationsReport hotelId={hotel.id} />}
+          {activeTab === 'reports_arrivals' && canManagePms && <ArrivalsReport hotelId={hotel.id} />}
+          {activeTab === 'reports_departures' && canManagePms && <DeparturesReport hotelId={hotel.id} />}
+          {activeTab === 'reports_sale' && canManagePms && <Reports hotelId={hotel.id} only="sale" />}
+          {activeTab === 'reports_rooms' && canManagePms && <Reports hotelId={hotel.id} only="rooms" />}
+          {activeTab === 'reports_expenses' && canManagePms && <Reports hotelId={hotel.id} only="expenses" />}
+          {/* §user request — "Dues section ko Reports section ke under le jayenge": same page, now reached from Reports → Finance & Payment. */}
+          {activeTab === 'dues' && hasPms && !isHousekeeping && <Dues hotelId={hotel.id} />}
           {(activeTab === 'settings_details' || activeTab === 'settings_brand' || activeTab === 'settings_rooms' || activeTab === 'settings_invoice' || activeTab === 'settings_ledger' || activeTab === 'settings_credentials' || activeTab === 'settings_billing') &&
             canManage && (
               <Onboarding

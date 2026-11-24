@@ -14,5 +14,22 @@ export function createReportsRouter(reports: ReportsService) {
     sale: ownerOrManager
       .input(z.object({ hotelId: z.string(), month: z.string().regex(/^\d{4}-\d{2}$/) }))
       .query(({ input }) => reports.getSaleReport(input)),
+
+    reservations: ownerOrManager
+      .input(
+        z.object({
+          hotelId: z.string(),
+          statuses: z.array(z.enum(['confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show', 'void'])).optional(),
+          checkInFrom: z.coerce.date().optional(),
+          checkInTo: z.coerce.date().optional(),
+          checkOutFrom: z.coerce.date().optional(),
+          checkOutTo: z.coerce.date().optional(),
+          reservationFrom: z.coerce.date().optional(),
+          reservationTo: z.coerce.date().optional(),
+          search: z.string().optional(),
+          source: z.string().optional(),
+        }),
+      )
+      .query(({ input }) => reports.getReservationReport(input)),
   });
 }

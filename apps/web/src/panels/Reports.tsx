@@ -41,29 +41,22 @@ function MethodsCell({ methods }: { methods: MethodBreakdown }) {
   );
 }
 
-export function Reports({ hotelId }: { hotelId: string }) {
-  const [tab, setTab] = useState<'rooms' | 'sale' | 'expenses'>('rooms');
+/** §user request — "Dues section ko Reports section ke under le jayenge": Rooms/Sale/Expenses
+ * moved from this page's own in-page tab switcher to three separate Reports → Finance & Payment
+ * sidebar leaves, each passing its own `only` so this renders just that one view instead of all
+ * three behind a switcher nobody can see from the sidebar anymore. */
+export function Reports({ hotelId, only }: { hotelId: string; only: 'rooms' | 'sale' | 'expenses' }) {
+  const TITLE = { rooms: 'Rooms Report', sale: 'Sale Report', expenses: 'Daily Expenses' }[only];
+  const SUBTITLE = {
+    rooms: 'Check-ins, cleanings, checkouts, delays and collections by day',
+    sale: 'Revenue counted on check-in day, by day',
+    expenses: 'Cash Out entries from the Ledger, grouped by day',
+  }[only];
 
   return (
     <div>
-      <PageHeader title="Reports" subtitle="Rooms Report, Sale Report, and Daily Expenses" />
-      <div className="mb-6 flex gap-2">
-        <Button variant={tab === 'rooms' ? 'primary' : 'secondary'} onClick={() => setTab('rooms')}>
-          Rooms Report
-        </Button>
-        <Button variant={tab === 'sale' ? 'primary' : 'secondary'} onClick={() => setTab('sale')}>
-          Sale Report
-        </Button>
-        {/* §user request — "ek daily expense ka column add karna hai, Day Book ki tarah... poora
-            expense calculate hota chala jayega aur reports section mein properly dikhega": the
-            data entry already exists (Ledger's Cash Out, with its own date/time, remarks as the
-            "what was bought" field, and amount) — this just surfaces it here as a proper day-by-
-            day expense report instead of leaving it buried in Ledger's single flat table. */}
-        <Button variant={tab === 'expenses' ? 'primary' : 'secondary'} onClick={() => setTab('expenses')}>
-          Daily Expenses
-        </Button>
-      </div>
-      {tab === 'rooms' ? <RoomsReportView hotelId={hotelId} /> : tab === 'sale' ? <SaleReportView hotelId={hotelId} /> : <ExpensesReportView hotelId={hotelId} />}
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      {only === 'rooms' ? <RoomsReportView hotelId={hotelId} /> : only === 'sale' ? <SaleReportView hotelId={hotelId} /> : <ExpensesReportView hotelId={hotelId} />}
     </div>
   );
 }
