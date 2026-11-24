@@ -7,6 +7,7 @@ import { computeInvoiceTotals } from '../common/invoice.js';
 import { GuestsService } from '../guests/guests.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { RatesService } from '../rates/rates.service.js';
+import { LedgerService } from '../ledger/ledger.service.js';
 
 const CHECK_IN_IDEMPOTENCY_WINDOW_MS = 1000 * 60 * 5;
 const BOOKING_EDIT_WINDOW_MS = 1000 * 60 * 60; // 1 hour after check-in (§ added beyond MD spec, at user request)
@@ -42,6 +43,7 @@ export class BookingsService {
     private readonly guests: GuestsService,
     private readonly notifications: NotificationsService,
     private readonly rates: RatesService,
+    private readonly ledger: LedgerService,
   ) {}
 
   /**
@@ -1717,26 +1719,51 @@ export class BookingsService {
    * as No Show" / "Void Reservation" all generalize cancelBooking above to every room in a group
    * reservation at once (the menu is opened from one room's card, but a wedding booking's 7 rooms
    * should all end together, not just the one the menu happened to be on). Each lands on its own
-   * distinct BookingStatus so cancellation/no-show/void reporting stays separable later — same
-   * confirmed-only rule as cancelBooking (an already-checked-in room keeps its own status,
-   * untouched, exactly like cancelBooking already left it alone).
+   * distinct BookingStatus so cancellation/no-show/void reporting stays separable later.
+   *
+   * §user request — "checked-in guest, 20 min baad cancel karna ho toh refund ka kya banega":
+   * No Show/Void stay confirmed-only (neither makes sense once someone has actually arrived), but
+   * Cancel now also accepts an already checked-in stay — the room is released to Housekeeping
+   * exactly like a normal Check-out Guest would (same status/currentStayId transition), and any
+   * refund (Advance Paid − Cancellation Charge, same figures the Cancel confirmation already
+   * shows) is logged as a Ledger Cash Out entry automatically instead of a manual note.
    */
   async endReservationGroup(input: { bookingId: string; status: BookingStatus; reason?: string; cancellationCharge?: number; actorId: string }) {
     const first = await this.prisma.booking.findUniqueOrThrow({ where: { id: input.bookingId } });
     const rows = first.reservationGroupId ? await this.prisma.booking.findMany({ where: { reservationGroupId: first.reservationGroupId } }) : [first];
-    const targets = rows.filter((b) => b.status === BookingStatus.confirmed);
-    if (targets.length === 0) throw new ConflictException('Only a confirmed (not yet arrived) reservation can be ended this way');
+    const eligibleStatuses: BookingStatus[] =
+      input.status === BookingStatus.cancelled ? [BookingStatus.confirmed, BookingStatus.checked_in] : [BookingStatus.confirmed];
+    const targets = rows.filter((b) => eligibleStatuses.includes(b.status));
+    if (targets.length === 0) {
+      throw new ConflictException(
+        input.status === BookingStatus.cancelled
+          ? 'Only an upcoming or already checked-in reservation can be cancelled'
+          : 'Only a confirmed (not yet arrived) reservation can be ended this way',
+      );
+    }
 
-    await this.prisma.booking.updateMany({
-      where: { id: { in: targets.map((b) => b.id) } },
-      data: {
-        status: input.status,
-        endReason: input.reason,
-        // Only cancel carries a fee — a no-show/void never had money collected against a
-        // cancellation policy, so there's nothing to "charge" there.
-        cancellationCharge: input.status === BookingStatus.cancelled ? input.cancellationCharge : undefined,
-      },
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.booking.updateMany({
+        where: { id: { in: targets.map((b) => b.id) } },
+        data: {
+          status: input.status,
+          endReason: input.reason,
+          // Only cancel carries a fee — a no-show/void never had money collected against a
+          // cancellation policy, so there's nothing to "charge" there.
+          cancellationCharge: input.status === BookingStatus.cancelled ? input.cancellationCharge : undefined,
+        },
+      });
+      for (const b of targets) {
+        if (b.status === BookingStatus.checked_in && b.assignedRoomId) {
+          await tx.room.updateMany({
+            where: { id: b.assignedRoomId, currentStayId: b.id },
+            data: { status: 'housekeeping', currentStayId: null, statusChangedAt: now },
+          });
+        }
+      }
     });
+
     await Promise.all(
       targets.map((b) =>
         this.rates.adjustAvailabilityForStay({ hotelId: b.hotelId, roomCategoryId: b.roomCategoryId, checkIn: b.checkIn, checkOut: b.checkOut, delta: 1 }),
@@ -1751,6 +1778,21 @@ export class BookingsService {
       body: `${first.guestName}, ${dateLabel(first.checkIn)} → ${dateLabel(first.checkOut)}`,
       link: 'bookings',
     });
+
+    if (input.status === BookingStatus.cancelled) {
+      const groupPaid = targets.reduce((sum, b) => sum + Number(b.paidAmount ?? 0), 0);
+      const refund = Math.max(0, groupPaid - (input.cancellationCharge ?? 0));
+      if (refund > 0) {
+        await this.ledger.createEntry({
+          hotelId: first.hotelId,
+          type: 'cash_out',
+          amount: refund,
+          paymentMethod: 'cash',
+          remarks: `Refund — cancelled reservation BK-${first.id.slice(-6).toUpperCase()}, ${first.guestName}`,
+          actorId: input.actorId,
+        });
+      }
+    }
 
     return this.prisma.booking.findMany({ where: { id: { in: targets.map((b) => b.id) } } });
   }

@@ -277,6 +277,11 @@ export function MoreActionsPanel({
   const [referenceNumber, setReferenceNumber] = useState('');
 
   const canEnd = group.some((b) => b.status === 'confirmed');
+  // §user request — "checked-in guest cancel karna ho toh refund ka option bhi ho": unlike No
+  // Show/Void (which only make sense before anyone arrives), Cancel now also covers an
+  // already-checked-in stay — the room gets released to Housekeeping and any refund is logged
+  // automatically, same backend path as endReservationGroup's own checked_in handling.
+  const canCancel = group.some((b) => b.status === 'confirmed' || b.status === 'checked_in');
   const canTransfer = group.some((b) => b.status === 'confirmed' || b.status === 'checked_in');
   const outstandingForScope = allocate === 'group' && group.length > 1 ? groupDue : (dues.get(targetBookingId) ?? 0);
 
@@ -381,7 +386,7 @@ export function MoreActionsPanel({
     { view: 'identity', icon: '🪪', label: 'Identity Verification' },
     { view: 'receipts', icon: '🧾', label: 'Receipt Management' },
     { view: 'mealplan', icon: '🍽️', label: 'Change meal plan' },
-    { view: 'cancel', icon: '✕', label: 'Cancel entire reservation', disabled: !canEnd },
+    { view: 'cancel', icon: '✕', label: 'Cancel entire reservation', disabled: !canCancel },
     { view: 'noshow', icon: '🧳', label: 'Mark as No Show', disabled: !canEnd },
     { view: 'void', icon: '🚫', label: 'Void Reservation', disabled: !canEnd },
   ];
@@ -592,6 +597,9 @@ export function MoreActionsPanel({
                   <span className="font-bold text-emerald-600 dark:text-emerald-400">Refund Amount</span>
                   <span className="font-bold text-emerald-600 dark:text-emerald-400">₹{Math.max(0, groupPaid - cancellationCharge).toFixed(2)}</span>
                 </div>
+                {groupPaid - cancellationCharge > 0 && (
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">Logged automatically in Ledger → Cash Out on confirm.</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Button type="button" variant="secondary" className="w-full" onClick={() => setView('menu')}>
