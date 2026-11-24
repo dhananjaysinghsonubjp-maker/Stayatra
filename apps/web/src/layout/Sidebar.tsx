@@ -115,15 +115,15 @@ const NAV: NavEntry[] = [
         label: 'Reservation Reports',
         icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'),
         children: [
-          { id: 'reports_master', label: 'Reservation Master Report', icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z') },
+          { id: 'reports_master', label: 'Master Report', icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z') },
           { id: 'reports_completed', label: 'Completed', icon: Icon('M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z') },
           { id: 'reports_cancelled', label: 'Cancelled', icon: Icon('M18 6L6 18M6 6l12 12') },
           { id: 'reports_noshow', label: 'No-Show', icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h8m6-5v4m0 0v2m0-2h2m-2 0h-2') },
           { id: 'reports_arrivals', label: 'Arrivals', icon: Icon('M12 4v12m0 0l-4-4m4 4l4-4M4 20h16') },
           { id: 'reports_departures', label: 'Departures', icon: Icon('M12 20V8m0 0l-4 4m4-4l4 4M4 4h16') },
           { id: 'reports_police', label: 'Police Report', icon: Icon('M12 3l7 4v5c0 4.5-3 8.5-7 9-4-.5-7-4.5-7-9V7l7-4z') },
-          { id: 'reports_daywise', label: 'Day Wise Booking Report', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
-          { id: 'reports_checkinout', label: 'Check-In and Check-Out Report', icon: Icon('M11 16l-4-4m0 0l4-4m-4 4h14') },
+          { id: 'reports_daywise', label: 'Day Wise Report', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
+          { id: 'reports_checkinout', label: 'Check-In/Out Report', icon: Icon('M11 16l-4-4m0 0l4-4m-4 4h14') },
         ],
       },
       {
