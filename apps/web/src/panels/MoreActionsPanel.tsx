@@ -9,9 +9,10 @@ import { PAYMENT_METHODS, paymentMethodLabel } from '../paymentMethods';
 import { AdvanceReceiptPrintView } from './checkin/AdvanceReceiptPrintView';
 import { BookingVoucherPrintView } from './checkin/BookingVoucherPrintView';
 import type { ReservationSuccessData } from './checkin/ReservationSuccessModal';
+import { RoomTransferPanel } from './RoomTransferPanel';
 import type { Booking, IdType, Payment, PaymentMethod, PaymentType, RatePlan, Room, RoomCategory } from '../types';
 
-export type MoreActionsView = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'payment' | 'identity' | 'receipts' | 'mealplan' | 'modifystay' | 'notes' | 'expectedtimes';
+export type MoreActionsView = 'menu' | 'cancel' | 'noshow' | 'void' | 'special' | 'vip' | 'payment' | 'identity' | 'receipts' | 'mealplan' | 'modifystay' | 'roomtransfer' | 'notes' | 'expectedtimes';
 type View = MoreActionsView;
 
 const ID_TYPE_OPTIONS: IdType[] = ['aadhaar', 'passport', 'driving_license', 'voter_id', 'other'];
@@ -276,7 +277,14 @@ export function MoreActionsPanel({
   const [referenceNumber, setReferenceNumber] = useState('');
 
   const canEnd = group.some((b) => b.status === 'confirmed');
+  const canTransfer = group.some((b) => b.status === 'confirmed' || b.status === 'checked_in');
   const outstandingForScope = allocate === 'group' && group.length > 1 ? groupDue : (dues.get(targetBookingId) ?? 0);
+
+  // §user request — "Room Transfer More Actions mein bhi, Modify Stay ke neeche": a multi-room
+  // group needs to say which room first (its own view below); a single-room reservation skips
+  // straight to the transfer panel itself, same as the per-room "⋮" menu's own shortcut.
+  const [transferBooking, setTransferBooking] = useState<Booking | null>(null);
+  const allRooms = [...roomsById.values()];
 
   // §user request — "ye pehli baar advance aaya hai toh ye 2 baar kyun hai": a fast double-click
   // on a submit button fires two click events before React's `disabled={busy}` re-render has
@@ -364,6 +372,7 @@ export function MoreActionsPanel({
 
   const MENU_ITEMS: { view: View; icon: string; label: string; disabled?: boolean }[] = [
     { view: 'modifystay', icon: '🗓️', label: 'Modify Stay' },
+    { view: 'roomtransfer', icon: '🔄', label: 'Room Transfer', disabled: !canTransfer },
     { view: 'special', icon: '📋', label: 'Add special request' },
     { view: 'vip', icon: '👑', label: lead.isVip ? 'Remove VIP status' : 'Mark as VIP' },
     { view: 'notes', icon: '📝', label: 'Add internal notes' },
@@ -424,7 +433,10 @@ export function MoreActionsPanel({
                   key={item.view}
                   type="button"
                   disabled={item.disabled}
-                  onClick={() => setView(item.view)}
+                  onClick={() => {
+                    if (item.view === 'roomtransfer' && group.length === 1) setTransferBooking(lead);
+                    else setView(item.view);
+                  }}
                   className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-700/50"
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-base dark:bg-brand-500/10">{item.icon}</span>
@@ -494,6 +506,33 @@ export function MoreActionsPanel({
                   {busy ? 'Saving…' : 'Confirm'}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {/* Only reached for a multi-room group — a single-room reservation's menu item jumps
+              straight to RoomTransferPanel below, same shortcut the per-room "⋮" menu uses. */}
+          {view === 'roomtransfer' && (
+            <div className="min-w-0 space-y-2 p-5">
+              <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">Which room are you moving?</p>
+              {group
+                .filter((b) => b.status === 'confirmed' || b.status === 'checked_in')
+                .map((b) => {
+                  const room = roomsById.get(b.assignedRoomId ?? '');
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => setTransferBooking(b)}
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-200 p-3 text-left hover:border-brand-300 dark:border-slate-600 dark:hover:border-brand-500"
+                    >
+                      <span>
+                        <span className="block text-sm font-bold text-slate-900 dark:text-white">Room {room?.roomNumber ?? '—'}</span>
+                        <span className="block text-xs text-slate-400 dark:text-slate-500">{room?.roomCategory?.name ?? '—'}</span>
+                      </span>
+                      <span className="text-slate-300 dark:text-slate-600">›</span>
+                    </button>
+                  );
+                })}
             </div>
           )}
 
@@ -900,6 +939,19 @@ export function MoreActionsPanel({
 
       {printing === 'receipt' && <AdvanceReceiptPrintView data={buildReceiptData(hotelId, group, roomsById, categories, ratePlans)} onClose={() => setPrinting(null)} />}
       {printing === 'voucher' && <BookingVoucherPrintView data={buildReceiptData(hotelId, group, roomsById, categories, ratePlans)} onClose={() => setPrinting(null)} />}
+      {transferBooking && (
+        <RoomTransferPanel
+          hotelId={hotelId}
+          booking={transferBooking}
+          rooms={allRooms}
+          onClose={() => setTransferBooking(null)}
+          onChanged={() => {
+            onChanged();
+            setTransferBooking(null);
+            handleClose();
+          }}
+        />
+      )}
     </div>,
     document.body,
   );
