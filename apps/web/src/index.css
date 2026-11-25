@@ -93,11 +93,47 @@ body {
     visibility: visible;
   }
   .invoice-print-root,
-  .staff-id-print-root,
-  .report-print-root {
+  .staff-id-print-root {
     position: fixed;
     inset: 0;
     background: white;
+  }
+  /* §bugfix — "print nikale toh sab kuch dikh jaye, scroll na karna pade": a report can run many
+     pages long (a month of Day Book entries, a wide Rooms Report table), unlike the one-page
+     invoice/staff-ID views above that `position: fixed; inset: 0` was written for — a fixed-
+     position element stays pinned to a single viewport-sized box when printed, so only the first
+     page's worth ever reached the printer and the rest was only reachable by scrolling on screen.
+     `absolute` still lifts it out of the hidden sidebar/header's normal flow (so their now-
+     invisible-but-still-space-occupying layout doesn't shove this sideways or down) without that
+     same one-page ceiling — it paginates across as many printed pages as the content actually
+     needs, the way static content would. */
+  .report-print-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+  }
+  .report-zoom-box {
+    transform: none !important;
+    max-width: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  /* Discrepancy row colours and table header backgrounds (Rooms Report's red/green rows, every
+     report's brand-coloured header row) are the data, not decoration — browsers strip background
+     colours from print by default, which would print those rows as plain white. */
+  .report-print-root * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  /* A long table's header row repeats on every printed page instead of only the first, and a row
+     never gets sliced in half across a page break. */
+  .report-print-root thead {
+    display: table-header-group;
+  }
+  .report-print-root tr {
+    break-inside: avoid;
   }
   .no-print {
     display: none !important;

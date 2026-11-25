@@ -8,8 +8,18 @@ import type { Hotel } from '../../types';
  * and Check-Out Report as the target — these generate straight into a printable document instead
  * of staying an on-screen table, the same way InvoicePrintView already does for a single booking's
  * invoice: the browser's own print dialog (`window.print()`, "Save as PDF" covers "download"),
- * isolated on the page via `.report-print-root`/`.no-print` in index.css. Zoom is a plain CSS
- * `zoom` (Chrome/Edge/Safari only, same family of browsers Fit page/Fit width belongs to).
+ * isolated on the page via `.report-print-root`/`.no-print` in index.css.
+ *
+ * §bugfix — "print nikale toh sab kuch dikh jaye, scroll na karna pade": this used to cap itself
+ * at `max-h-[75vh] overflow-auto` (a boxed preview with its own inner scrollbar) and the zoom
+ * control resized that same box with a literal `width: <zoom>%` inline style — which also applied
+ * at print time, since an inline style isn't scoped to a media query. A wide report (the Rooms
+ * Report's 11-column table, for instance) printed cropped to whatever that box happened to be
+ * sized to, with the rest only reachable by scrolling on screen, never in the actual printout.
+ * Zoom is now a `transform: scale()` on its own class, explicitly cancelled in print (index.css),
+ * and the preview box itself just flows in the normal page instead of boxing itself in — the
+ * browser's own page scroll covers a tall report, and the print output always gets the full,
+ * unscaled, un-clipped content regardless of whatever zoom level was last picked on screen.
  */
 export function ReportPrintShell({ hotelId, title, children }: { hotelId: string; title: string; children: React.ReactNode }) {
   const { token } = useAuth();
@@ -24,7 +34,7 @@ export function ReportPrintShell({ hotelId, title, children }: { hotelId: string
   const addressParts = hotel ? [hotel.addressLine, hotel.city, hotel.state, hotel.pincode].filter(Boolean) : [];
 
   return (
-    <div className="report-print-root overflow-hidden rounded-xl border border-slate-700 shadow-sm">
+    <div className="report-print-root overflow-hidden rounded-xl border border-slate-700 shadow-sm print:overflow-visible print:rounded-none print:border-0 print:shadow-none">
       <div className="no-print flex flex-wrap items-center justify-between gap-2 bg-slate-800 px-4 py-2.5 text-sm text-white">
         <span className="font-semibold">{title}</span>
         <div className="flex items-center gap-1.5">
@@ -51,8 +61,11 @@ export function ReportPrintShell({ hotelId, title, children }: { hotelId: string
           </button>
         </div>
       </div>
-      <div className="max-h-[75vh] overflow-auto bg-slate-100 p-6 print:max-h-none print:overflow-visible print:bg-white print:p-0">
-        <div className="mx-auto bg-white p-8 shadow print:w-full print:shadow-none" style={{ width: `${zoom}%`, maxWidth: zoom <= 100 ? '900px' : 'none' }}>
+      <div className="bg-slate-100 p-6 print:bg-white print:p-0">
+        <div
+          className="report-zoom-box mx-auto max-w-[900px] origin-top bg-white p-8 shadow print:max-w-none print:p-0 print:shadow-none"
+          style={{ transform: `scale(${zoom / 100})` }}
+        >
           {hotel && (
             <div className="mb-5 border-b border-slate-200 pb-3">
               <p className="text-lg font-bold text-brand-700">{hotel.name}</p>
