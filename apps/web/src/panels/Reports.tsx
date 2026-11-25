@@ -341,6 +341,57 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
               </table>
             </div>
           </Card>
+
+          {/* §user request — "konsa room kab kab laga, kis guest tha, check-in/check-out kab tha,
+              aur housekeeping mein clean kisne kiya hai aur kya time hai, check-out FMO dashboard
+              se hua ya housekeeping se": one row per stay, joining the actual check-in/check-out
+              timestamps to whoever's Checkout Cleaning closed the room out (or the FMO's own
+              explicit Check-out Guest action, when that ran instead). */}
+          <Card className="mt-6">
+            <CardHeader title="Room-wise Stay & Housekeeping Log" subtitle="Every stay in this range, who cleaned it, and how it was checked out" />
+            {report.stayLog.length === 0 ? (
+              <CardBody>
+                <EmptyState title="No completed stays in this range" />
+              </CardBody>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
+                      <th className="px-5 py-3">Room</th>
+                      <th className="px-5 py-3">Guest</th>
+                      <th className="px-5 py-3">Check-in</th>
+                      <th className="px-5 py-3">Check-out</th>
+                      <th className="px-5 py-3">Cleaned By</th>
+                      <th className="px-5 py-3">Cleaned At</th>
+                      <th className="px-5 py-3">Checked Out Via</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {report.stayLog.map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-50">
+                        <td className="px-5 py-3 font-medium text-slate-900">{r.roomNumber}</td>
+                        <td className="px-5 py-3">{r.guestName}</td>
+                        <td className="px-5 py-3">{r.checkInAt ? formatDateTimeShort(r.checkInAt) : '—'}</td>
+                        <td className="px-5 py-3">{r.checkOutAt ? formatDateTimeShort(r.checkOutAt) : '—'}</td>
+                        <td className="px-5 py-3">{r.cleanedBy ?? '—'}</td>
+                        <td className="px-5 py-3">{r.cleanedAt ? formatDateTimeShort(r.cleanedAt) : '—'}</td>
+                        <td className="px-5 py-3">
+                          {r.checkedOutVia === 'fmo' ? (
+                            <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">FMO Dashboard{r.checkedOutByName ? ` · ${r.checkedOutByName}` : ''}</span>
+                          ) : r.checkedOutVia === 'housekeeping' ? (
+                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Housekeeping</span>
+                          ) : (
+                            <span className="text-slate-400">Not checked out yet</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
         </>
       )}
     </div>
@@ -378,6 +429,11 @@ function SaleReportView({ hotelId }: { hotelId: string }) {
   }
 
   const monthTotal = report?.reduce((sum, d) => sum + d.totalSale, 0) ?? 0;
+  // §user request — "poora sale report share karo: Total Sale, Through Cash, Through Online,
+  // Through NEFT": summed straight from each day's own method breakdown, already fetched.
+  const cashTotal = report?.reduce((sum, d) => sum + (d.methods.cash ?? 0), 0) ?? 0;
+  const onlineTotal = report?.reduce((sum, d) => sum + (d.methods.online ?? 0), 0) ?? 0;
+  const neftTotal = report?.reduce((sum, d) => sum + (d.methods.bank_transfer ?? 0), 0) ?? 0;
 
   return (
     <div>
@@ -403,8 +459,11 @@ function SaleReportView({ hotelId }: { hotelId: string }) {
 
       {report && (
         <>
-          <div className="mb-6">
-            <SummaryTile label="Month total sale" value={`₹${monthTotal.toLocaleString('en-IN')}`} />
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <SummaryTile label="Total Sale" value={`₹${monthTotal.toLocaleString('en-IN')}`} />
+            <SummaryTile label="Through Cash" value={`₹${cashTotal.toLocaleString('en-IN')}`} />
+            <SummaryTile label="Through Online" value={`₹${onlineTotal.toLocaleString('en-IN')}`} />
+            <SummaryTile label="Through NEFT" value={`₹${neftTotal.toLocaleString('en-IN')}`} />
           </div>
 
           <Card>

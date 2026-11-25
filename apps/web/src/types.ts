@@ -355,9 +355,24 @@ export interface RoomsReportRoomRow {
   discrepancies: number;
 }
 
+/** §user request — "konsa room kab kab laga, kis guest tha... housekeeping mein clean kisne kiya
+ * hai... check-out FMO dashboard se hua ya housekeeping se": one row per stay. */
+export interface RoomStayLogRow {
+  id: string;
+  roomNumber: string;
+  guestName: string;
+  checkInAt: string | null;
+  checkOutAt: string | null;
+  cleanedBy: string | null;
+  cleanedAt: string | null;
+  checkedOutVia: 'fmo' | 'housekeeping' | null;
+  checkedOutByName: string | null;
+}
+
 export interface RoomsReport {
   days: RoomsReportDay[];
   rooms: RoomsReportRoomRow[];
+  stayLog: RoomStayLogRow[];
 }
 
 export interface SaleReportDay {

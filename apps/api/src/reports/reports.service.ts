@@ -109,9 +109,46 @@ export class ReportsService {
       discrepancies: cleanings.filter((c) => c.roomId === r.id && c.flagged).length,
     }));
 
+    // §user request — "konsa room kab kab laga, kis guest tha, check-in/check-out kab tha, aur
+    // housekeeping mein clean kisne kiya hai aur kya time hai, check-out FMO dashboard se hua ya
+    // housekeeping se": one row per stay, joining the booking's own checked-in/out timestamps to
+    // its Checkout Cleaning record (matched by CleaningRecord.stayId, which is just the booking id
+    // as a plain string — no declared FK, set in cleaning.service.ts at submission time) —
+    // `checkedOutBy` set means the FMO's own "Check-out Guest" ran; left null but checkedOutAt
+    // still set means a Checkout Cleaning closed it out on its own (cleaning.service.ts's
+    // `if (room.currentStay!.checkedOutAt ? {} : { checkedOutAt: new Date() })`).
+    const roomsById = new Map(rooms.map((r) => [r.id, r]));
+    const userIds = new Set<string>();
+    for (const b of bookings) if (b.checkedOutBy) userIds.add(b.checkedOutBy);
+    for (const c of cleanings) {
+      userIds.add(c.primaryHousekeeperId);
+      if (c.secondHousekeeperId) userIds.add(c.secondHousekeeperId);
+    }
+    const users = userIds.size > 0 ? await this.prisma.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true } }) : [];
+    const userName = new Map(users.map((u) => [u.id, u.name]));
+
+    const stayLog = bookings
+      .filter((b) => b.assignedRoomId && (b.status === 'checked_in' || b.status === 'checked_out'))
+      .map((b) => {
+        const checkoutCleaning = cleanings.find((c) => c.stayId === b.id && c.kind === 'checkout');
+        return {
+          id: b.id,
+          roomNumber: roomsById.get(b.assignedRoomId!)?.roomNumber ?? '—',
+          guestName: b.guestName,
+          checkInAt: b.checkedInAt ? b.checkedInAt.toISOString() : null,
+          checkOutAt: b.checkedOutAt ? b.checkedOutAt.toISOString() : null,
+          cleanedBy: checkoutCleaning ? (userName.get(checkoutCleaning.primaryHousekeeperId) ?? '—') : null,
+          cleanedAt: checkoutCleaning ? checkoutCleaning.createdAt.toISOString() : null,
+          checkedOutVia: b.checkedOutAt ? (b.checkedOutBy ? ('fmo' as const) : ('housekeeping' as const)) : null,
+          checkedOutByName: b.checkedOutBy ? (userName.get(b.checkedOutBy) ?? '—') : null,
+        };
+      })
+      .sort((a, b) => (a.checkInAt ?? '').localeCompare(b.checkInAt ?? ''));
+
     return {
       days: Array.from(days.values()).sort((a, b) => a.date.localeCompare(b.date)),
       rooms: perRoom,
+      stayLog,
     };
   }
 
