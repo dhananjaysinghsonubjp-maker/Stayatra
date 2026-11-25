@@ -297,7 +297,7 @@ function NavNode({
     return (
       <button
         onClick={() => selectTab(entry.id)}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+        className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
           active ? 'bg-white/15 text-white ring-1 ring-inset ring-white/20' : 'text-blue-100 hover:bg-white/10 hover:text-white'
         }`}
       >
@@ -308,7 +308,7 @@ function NavNode({
   return (
     <button
       onClick={() => selectTab(entry.id)}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
         active ? 'bg-white/15 text-white ring-1 ring-inset ring-white/20' : 'text-blue-100 hover:bg-white/10 hover:text-white'
       }`}
     >
