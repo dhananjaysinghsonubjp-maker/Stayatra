@@ -341,7 +341,10 @@ export function Sidebar({
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
 }) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ 'Stay View': true, 'Room Management': true });
+  // §user request — "Room Management wala dropdown hamesha khula rehta hai": only "Stay View"
+  // stays open by default now; every other group (Room Management included) starts collapsed,
+  // like Reports/Finance & Payment/Settings already do, and only opens when clicked.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ 'Stay View': true });
 
   function selectTab(id: Tab) {
     onTab(id);
