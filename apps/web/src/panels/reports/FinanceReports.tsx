@@ -538,7 +538,7 @@ export function ProfitAndLossReport({ hotelId }: { hotelId: string }) {
             <thead>
               <tr className="bg-slate-100 text-left">
                 <th className="border border-slate-200 px-3 py-2">Expense Category</th>
-                <th className="border border-slate-200 px-3 py-2 text-right">Amount</th>
+                <th className="border border-slate-200 px-3 py-2 text-right">Amount (₹)</th>
               </tr>
             </thead>
             <tbody>
@@ -556,12 +556,35 @@ export function ProfitAndLossReport({ hotelId }: { hotelId: string }) {
                 </tr>
               )}
             </tbody>
+            <tfoot>
+              <tr className="bg-slate-50 font-bold">
+                <td className="border border-slate-200 px-3 py-2">Total Operating Expenses</td>
+                <td className="border border-slate-200 px-3 py-2 text-right">₹{data.totalExpenses.toFixed(2)}</td>
+              </tr>
+            </tfoot>
           </table>
 
-          <div className="rounded-lg bg-brand-50 px-4 py-3 text-right">
-            <span className="text-sm font-semibold text-slate-600">NET PROFIT </span>
-            <span className="text-lg font-bold text-brand-700">₹{data.netProfit.toFixed(2)}</span>
-          </div>
+          {/* §user request, with a reference app's own P&L layout as the target — a third "Profit
+              Summary" section instead of a single NET PROFIT bar. Reinvestment has no backing data
+              anywhere in this app (no such ledger concept exists), so it's a fixed ₹0 for now —
+              before and after reinvestment are the same number until that's ever tracked. */}
+          <p className="mb-2 bg-brand-600 px-3 py-2 text-sm font-bold text-white">3. Profit Summary</p>
+          <table className="w-full border-collapse text-sm">
+            <tbody>
+              <tr className="bg-brand-50">
+                <td className="border border-slate-200 px-3 py-2 font-bold text-slate-900">Net Profit (Before Reinvestment)</td>
+                <td className="border border-slate-200 px-3 py-2 text-right font-bold text-emerald-600">₹{data.netProfit.toFixed(2)}</td>
+              </tr>
+              <tr>
+                <td className="border border-slate-200 px-3 py-1.5 text-slate-600">Reinvestment</td>
+                <td className="border border-slate-200 px-3 py-1.5 text-right">₹0.00</td>
+              </tr>
+              <tr className="bg-brand-50">
+                <td className="border border-slate-200 px-3 py-2 font-bold text-slate-900">Net Profit (After Reinvestment)</td>
+                <td className="border border-slate-200 px-3 py-2 text-right font-bold text-emerald-600">₹{data.netProfit.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
         </ReportPrintShell>
       )}
     </div>
