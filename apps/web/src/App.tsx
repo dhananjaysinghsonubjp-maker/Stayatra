@@ -37,6 +37,7 @@ import {
   AdvanceAdjustmentReport,
   DayBookReport,
 } from './panels/reports/FinanceReports';
+import { OtaBookingReport, OtaRevenueReport } from './panels/reports/OtaReports';
 import { Calendar } from './panels/channel-manager/Calendar';
 import { GuestMessaging } from './panels/channel-manager/GuestMessaging';
 import { OtaReviews } from './panels/channel-manager/OtaReviews';
@@ -271,6 +272,8 @@ function Shell() {
           'reports_credit_debit',
           'reports_day_book',
           'reports_room_wise_revenue',
+          'reports_ota_booking',
+          'reports_ota_revenue',
         ] as Tab[])
       : []),
     // §user request — "Dues section ko Reports section ke under le jayenge": relocated into the
@@ -384,6 +387,8 @@ function Shell() {
           {activeTab === 'reports_credit_debit' && canManagePms && <CreditAndDebitReport hotelId={hotel.id} />}
           {activeTab === 'reports_day_book' && canManagePms && <DayBookReport hotelId={hotel.id} />}
           {activeTab === 'reports_room_wise_revenue' && canManagePms && <RoomWiseRevenueReport hotelId={hotel.id} />}
+          {activeTab === 'reports_ota_booking' && canManagePms && <OtaBookingReport hotelId={hotel.id} />}
+          {activeTab === 'reports_ota_revenue' && canManagePms && <OtaRevenueReport hotelId={hotel.id} />}
           {/* §user request — "Dues section ko Reports section ke under le jayenge": same page, now reached from Reports → Finance & Payment. */}
           {activeTab === 'dues' && hasPms && !isHousekeeping && <Dues hotelId={hotel.id} />}
           {(activeTab === 'settings_details' || activeTab === 'settings_brand' || activeTab === 'settings_rooms' || activeTab === 'settings_invoice' || activeTab === 'settings_ledger' || activeTab === 'settings_credentials' || activeTab === 'settings_billing') &&

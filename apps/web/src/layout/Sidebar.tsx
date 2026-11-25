@@ -37,6 +37,8 @@ export type Tab =
   | 'reports_credit_debit'
   | 'reports_day_book'
   | 'reports_room_wise_revenue'
+  | 'reports_ota_booking'
+  | 'reports_ota_revenue'
   | 'cm_calendar'
   | 'cm_guest_messaging'
   | 'cm_reviews'
@@ -158,6 +160,14 @@ const NAV: NavEntry[] = [
           { id: 'reports_sale', label: 'Sale Report', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
           { id: 'reports_rooms', label: 'Rooms Report', icon: Icon('M4 6h16M4 6a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2M4 6l8-3 8 3M9 13h6') },
           { id: 'reports_expenses', label: 'Daily Expenses', icon: Icon('M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 2v8m0 0v2m0-2c-1.11 0-2.08-.402-2.599-1M5 12a7 7 0 1014 0 7 7 0 00-14 0z') },
+        ],
+      },
+      {
+        label: 'OTA Booking',
+        icon: Icon('M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18M3 12a9 9 0 0118 0'),
+        children: [
+          { id: 'reports_ota_booking', label: 'OTA Booking Report', icon: Icon('M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18M3 12a9 9 0 0118 0') },
+          { id: 'reports_ota_revenue', label: 'OTA Revenue Report', icon: Icon('M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18M3 12a9 9 0 0118 0') },
         ],
       },
     ],

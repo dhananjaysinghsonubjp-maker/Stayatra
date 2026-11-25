@@ -975,4 +975,132 @@ export class ReportsService {
           })),
       }));
   }
+
+  /** §user request, with a reference app's own "OTA Booking Report" as the target — per-OTA
+   * revenue/commission/GST for the selected range, plus a fixed "this calendar month" context
+   * (Previous Revenue MTD = the month so far, not counting today; Today's Revenue; the two
+   * summed as Month-to-Date) alongside it — independent of whatever range is picked below. */
+  async getOtaBookingReport(input: { hotelId: string; from: Date; to: Date }) {
+    const toInclusive = endOfDay(input.to);
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayEnd = endOfDay(todayStart);
+
+    const sumRevenue = (rows: { totalAmount: unknown; lineItems: { unitPrice: unknown; amount: unknown; description: string; quantity: number }[]; discountAmount: unknown; gstExempt: boolean }[]) =>
+      rows.reduce((sum, b) => {
+        const totals = computeInvoiceTotals({
+          totalAmount: Number(b.totalAmount),
+          lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+          discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+          gstExempt: b.gstExempt,
+        });
+        return sum + totals.grandTotal;
+      }, 0);
+
+    const [monthBookings, todayBookings, rangeBookings] = await Promise.all([
+      this.prisma.booking.findMany({ where: { hotelId: input.hotelId, checkIn: { gte: monthStart, lt: todayStart }, status: { not: 'void' } }, include: { lineItems: true } }),
+      this.prisma.booking.findMany({ where: { hotelId: input.hotelId, checkIn: { gte: todayStart, lte: todayEnd }, status: { not: 'void' } }, include: { lineItems: true } }),
+      this.prisma.booking.findMany({
+        where: { hotelId: input.hotelId, checkIn: { gte: input.from, lte: toInclusive }, status: { not: 'void' }, source: { notIn: ['direct', 'walk_in'] } },
+        include: { lineItems: true },
+      }),
+    ]);
+
+    const previousRevenueMtd = sumRevenue(monthBookings);
+    const todaysRevenue = sumRevenue(todayBookings);
+
+    const byOta = new Map<string, { totalAmount: number; totalCommission: number; totalGst: number }>();
+    for (const b of rangeBookings) {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      const breakdown = (b.channelBreakdown ?? {}) as Record<string, unknown>;
+      const commission = typeof breakdown.commission === 'number' ? breakdown.commission : 0;
+      const entry = byOta.get(b.source) ?? { totalAmount: 0, totalCommission: 0, totalGst: 0 };
+      entry.totalAmount += totals.grandTotal;
+      entry.totalCommission += commission;
+      entry.totalGst += totals.gst.amount;
+      byOta.set(b.source, entry);
+    }
+
+    return {
+      previousRevenueMtd,
+      todaysRevenue,
+      monthToDateRevenue: previousRevenueMtd + todaysRevenue,
+      rows: [...byOta.entries()].map(([source, v]) => ({
+        source,
+        totalAmount: v.totalAmount,
+        totalCommission: v.totalCommission,
+        totalGst: v.totalGst,
+        amountToHotel: v.totalAmount - v.totalCommission,
+      })),
+    };
+  }
+
+  /** §user request, with a reference app's own "OTA Revenue Report" as the target — every source
+   * (OTA or not — the reference's own example includes a "walk-in" row, so this follows suit),
+   * with totals and a per-source Bookings/Revenue/Payments breakdown, optionally narrowed to one
+   * source via the "Select OTA" filter. */
+  async getOtaRevenueReport(input: { hotelId: string; from: Date; to: Date; source?: string }) {
+    const toInclusive = endOfDay(input.to);
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        hotelId: input.hotelId,
+        checkIn: { gte: input.from, lte: toInclusive },
+        status: { not: 'void' },
+        ...(input.source ? { source: input.source as never } : {}),
+      },
+      include: { lineItems: true },
+    });
+
+    let totalRevenue = 0;
+    let collected = 0;
+    let commission = 0;
+    const byOta = new Map<string, { bookings: number; nights: number; gross: number; commission: number; paid: number }>();
+    for (const b of bookings) {
+      const totals = computeInvoiceTotals({
+        totalAmount: Number(b.totalAmount),
+        lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+        discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+        gstExempt: b.gstExempt,
+      });
+      const paid = Number(b.paidAmount ?? 0);
+      const breakdown = (b.channelBreakdown ?? {}) as Record<string, unknown>;
+      const comm = typeof breakdown.commission === 'number' ? breakdown.commission : 0;
+      totalRevenue += totals.grandTotal;
+      collected += paid;
+      commission += comm;
+      const entry = byOta.get(b.source) ?? { bookings: 0, nights: 0, gross: 0, commission: 0, paid: 0 };
+      entry.bookings += 1;
+      entry.nights += b.nights;
+      entry.gross += totals.grandTotal;
+      entry.commission += comm;
+      entry.paid += paid;
+      byOta.set(b.source, entry);
+    }
+
+    return {
+      totalRooms: bookings.length,
+      totalRevenue,
+      collected,
+      pending: Math.max(0, totalRevenue - collected),
+      commission,
+      netPayment: totalRevenue - commission,
+      rows: [...byOta.entries()].map(([source, v]) => ({
+        source,
+        bookings: v.bookings,
+        nights: v.nights,
+        gross: v.gross,
+        commissionPercent: v.gross > 0 ? (v.commission / v.gross) * 100 : 0,
+        commission: v.commission,
+        net: v.gross - v.commission,
+        paid: v.paid,
+        pending: Math.max(0, v.gross - v.paid),
+      })),
+    };
+  }
 }

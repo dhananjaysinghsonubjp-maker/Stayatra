@@ -103,5 +103,13 @@ export function createReportsRouter(reports: ReportsService) {
     dayBook: ownerOrManager
       .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
       .query(({ input }) => reports.getDayBookReport(input)),
+
+    otaBooking: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
+      .query(({ input }) => reports.getOtaBookingReport(input)),
+
+    otaRevenue: ownerOrManager
+      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date(), source: z.string().optional() }))
+      .query(({ input }) => reports.getOtaRevenueReport(input)),
   });
 }
