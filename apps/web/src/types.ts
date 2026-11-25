@@ -355,18 +355,24 @@ export interface RoomsReportRoomRow {
   discrepancies: number;
 }
 
-/** §user request — "konsa room kab kab laga, kis guest tha... housekeeping mein clean kisne kiya
- * hai... check-out FMO dashboard se hua ya housekeeping se": one row per stay. */
+/** §user request — "Room No, Guest Name, Phone No, Room Rent, Check In, Check In Via, Check Out,
+ * Check Out Via, Cleaned By, Cleaned At, Discrepancy Reason": one row per stay, or — for a
+ * flagged cleaning with no matching stay at all — its own standalone row (guest columns null). */
 export interface RoomStayLogRow {
   id: string;
   roomNumber: string;
-  guestName: string;
+  guestName: string | null;
+  guestPhone: string | null;
+  roomRent: number | null;
   checkInAt: string | null;
+  checkInVia: BookingSource | null;
   checkOutAt: string | null;
-  cleanedBy: string | null;
-  cleanedAt: string | null;
   checkedOutVia: 'fmo' | 'housekeeping' | null;
   checkedOutByName: string | null;
+  cleanedBy: string | null;
+  cleanedAt: string | null;
+  discrepancy: 'none' | 'unresolved' | 'resolved';
+  discrepancyReason: string | null;
 }
 
 export interface RoomsReport {

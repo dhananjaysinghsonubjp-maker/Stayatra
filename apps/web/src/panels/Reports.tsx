@@ -7,6 +7,7 @@ import { istDateKey, istDateLabel } from '../components/DateRangePicker';
 import { formatDateShort, formatDateTimeShort } from '../dateFormat';
 import { ReportPrintShell } from './reports/ReportPrintShell';
 import { DateRangeBar } from './reports/DocumentReports';
+import { SOURCE_LABEL } from './channel-manager/ota-labels';
 import type { LedgerTransaction, MethodBreakdown, RoomsReport, SaleReportDay } from '../types';
 
 function todayPlus(days: number) {
@@ -269,43 +270,55 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
             </div>
           </div>
 
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="bg-brand-600 text-left text-white">
-                {['Room', 'Guest', 'Check-in', 'Check-out', 'Cleaned By', 'Cleaned At', 'Checked Out Via'].map((h) => (
-                  <th key={h} className="border border-brand-700 px-3 py-2 whitespace-nowrap">
-                    {h}
-                  </th>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="bg-brand-600 text-left text-white">
+                  {['Room No', 'Guest Name', 'Phone No', 'Room Rent', 'Check In', 'Check In Via', 'Check Out', 'Check Out Via', 'Cleaned By', 'Cleaned At', 'Discrepancy Reason'].map((h) => (
+                    <th key={h} className="border border-brand-700 px-2 py-2 whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {/* §user request — "agar discrepancy rehti hai toh poora red box ban jayega, solve
+                    hone par green ho jayega aur Discrepancy Reason (green box) bhi aa jayega": the
+                    whole row's background carries the colour, not just one cell. */}
+                {report.stayLog.map((r) => (
+                  <tr
+                    key={r.id}
+                    className={r.discrepancy === 'unresolved' ? 'bg-red-100' : r.discrepancy === 'resolved' ? 'bg-emerald-100' : 'even:bg-slate-50'}
+                  >
+                    <td className="border border-slate-200 px-2 py-1.5 font-medium text-slate-900">{r.roomNumber}</td>
+                    <td className="border border-slate-200 px-2 py-1.5">{r.guestName ?? '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1.5">{r.guestPhone ?? '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1.5">{r.roomRent != null ? `₹${r.roomRent.toFixed(2)}` : '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1.5 whitespace-nowrap">{r.checkInAt ? formatDateTimeShort(r.checkInAt) : '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1.5">{r.checkInVia ? (SOURCE_LABEL[r.checkInVia] ?? r.checkInVia) : '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1.5 whitespace-nowrap">{r.checkOutAt ? formatDateTimeShort(r.checkOutAt) : '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1.5">
+                      {r.checkedOutVia === 'fmo'
+                        ? `FMO Dashboard${r.checkedOutByName ? ` · ${r.checkedOutByName}` : ''}`
+                        : r.checkedOutVia === 'housekeeping'
+                          ? 'Housekeeping'
+                          : '—'}
+                    </td>
+                    <td className="border border-slate-200 px-2 py-1.5">{r.cleanedBy ?? '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1.5 whitespace-nowrap">{r.cleanedAt ? formatDateTimeShort(r.cleanedAt) : '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1.5 font-medium">{r.discrepancyReason ?? '—'}</td>
+                  </tr>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {report.stayLog.map((r) => (
-                <tr key={r.id} className="even:bg-slate-50">
-                  <td className="border border-slate-200 px-3 py-1.5 font-medium text-slate-900">{r.roomNumber}</td>
-                  <td className="border border-slate-200 px-3 py-1.5">{r.guestName}</td>
-                  <td className="border border-slate-200 px-3 py-1.5 whitespace-nowrap">{r.checkInAt ? formatDateTimeShort(r.checkInAt) : '—'}</td>
-                  <td className="border border-slate-200 px-3 py-1.5 whitespace-nowrap">{r.checkOutAt ? formatDateTimeShort(r.checkOutAt) : '—'}</td>
-                  <td className="border border-slate-200 px-3 py-1.5">{r.cleanedBy ?? '—'}</td>
-                  <td className="border border-slate-200 px-3 py-1.5 whitespace-nowrap">{r.cleanedAt ? formatDateTimeShort(r.cleanedAt) : '—'}</td>
-                  <td className="border border-slate-200 px-3 py-1.5">
-                    {r.checkedOutVia === 'fmo'
-                      ? `FMO Dashboard${r.checkedOutByName ? ` · ${r.checkedOutByName}` : ''}`
-                      : r.checkedOutVia === 'housekeeping'
-                        ? 'Housekeeping'
-                        : 'Not checked out yet'}
-                  </td>
-                </tr>
-              ))}
-              {report.stayLog.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="border border-slate-200 px-3 py-6 text-center text-slate-400">
-                    No completed stays in this range
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                {report.stayLog.length === 0 && (
+                  <tr>
+                    <td colSpan={11} className="border border-slate-200 px-2 py-6 text-center text-slate-400">
+                      No completed stays in this range
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </ReportPrintShell>
       )}
     </div>
