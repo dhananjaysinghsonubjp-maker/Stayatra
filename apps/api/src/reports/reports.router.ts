@@ -7,9 +7,21 @@ const ownerOrManager = requireRole('pms', ['owner', 'manager']);
 
 export function createReportsRouter(reports: ReportsService) {
   return router({
-    rooms: ownerOrManager
-      .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() }))
-      .query(({ input }) => reports.getRoomsReport(input)),
+    // §user request — "discrepancy wala section owner ke alawa kisi ko nahi dikhega, FMO ko
+    // discrepancy wala word dikhega hi nahi": same redact-by-role shape cleaning.list already
+    // uses for resolvedNote — a manager still sees the Rooms Report itself, just with every
+    // discrepancy signal (the flagged-cleaning rows, the reason text, the summary count) stripped
+    // out before it ever leaves the server, not just hidden in the UI.
+    rooms: ownerOrManager.input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date() })).query(async ({ ctx, input }) => {
+      const report = await reports.getRoomsReport(input);
+      if (ctx.user.roles.pms === 'owner') return report;
+      return {
+        ...report,
+        days: report.days.map((d) => ({ ...d, discrepancies: 0 })),
+        rooms: report.rooms.map((r) => ({ ...r, discrepancies: 0 })),
+        stayLog: report.stayLog.filter((r) => r.discrepancy === 'none'),
+      };
+    }),
 
     sale: ownerOrManager
       .input(z.object({ hotelId: z.string(), month: z.string().regex(/^\d{4}-\d{2}$/) }))

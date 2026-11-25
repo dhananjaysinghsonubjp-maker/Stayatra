@@ -203,7 +203,12 @@ function ExpensesReportView({ hotelId }: { hotelId: string }) {
  * summary strip and the stay log as the one table.
  */
 function RoomsReportView({ hotelId }: { hotelId: string }) {
-  const { token } = useAuth();
+  const { token, role } = useAuth();
+  // §user request — "discrepancy wala section owner ke alawa kisi ko nahi dikhega, FMO ko
+  // discrepancy wala word dikhega hi nahi": the server already strips every discrepancy signal
+  // from the response for a non-owner, so this is really just not rendering a column/tile that
+  // would otherwise always read empty for them — belt-and-suspenders, not the actual guard.
+  const isOwner = role('pms') === 'owner';
   const [from, setFrom] = useState(todayPlus(-7));
   const [to, setTo] = useState(todayPlus(0));
   const [report, setReport] = useState<RoomsReport | null>(null);
@@ -251,7 +256,7 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
               {formatDateShort(from)} to {formatDateShort(to)}
             </p>
           </div>
-          <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-center text-xs sm:grid-cols-4">
+          <div className={`mb-5 grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-center text-xs ${isOwner ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
             <div>
               <p className="text-slate-500">Check-ins</p>
               <p className="font-bold text-slate-900">{totals.checkIns}</p>
@@ -260,10 +265,12 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
               <p className="text-slate-500">Cleanings</p>
               <p className="font-bold text-slate-900">{totals.cleanings}</p>
             </div>
-            <div>
-              <p className="text-slate-500">Discrepancies</p>
-              <p className={`font-bold ${totals.discrepancies > 0 ? 'text-red-600' : 'text-slate-900'}`}>{totals.discrepancies}</p>
-            </div>
+            {isOwner && (
+              <div>
+                <p className="text-slate-500">Discrepancies</p>
+                <p className={`font-bold ${totals.discrepancies > 0 ? 'text-red-600' : 'text-slate-900'}`}>{totals.discrepancies}</p>
+              </div>
+            )}
             <div>
               <p className="text-slate-500">Collected</p>
               <p className="font-bold text-slate-900">₹{totals.collected.toLocaleString('en-IN')}</p>
@@ -274,7 +281,19 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
             <table className="w-full border-collapse text-xs">
               <thead>
                 <tr className="bg-brand-600 text-left text-white">
-                  {['Room No', 'Guest Name', 'Phone No', 'Room Rent', 'Check In', 'Check In Via', 'Check Out', 'Check Out Via', 'Cleaned By', 'Cleaned At', 'Discrepancy Reason'].map((h) => (
+                  {[
+                    'Room No',
+                    'Guest Name',
+                    'Phone No',
+                    'Room Rent',
+                    'Check In',
+                    'Check In Via',
+                    'Check Out',
+                    'Check Out Via',
+                    'Cleaned By',
+                    'Cleaned At',
+                    ...(isOwner ? ['Discrepancy Reason'] : []),
+                  ].map((h) => (
                     <th key={h} className="border border-brand-700 px-2 py-2 whitespace-nowrap">
                       {h}
                     </th>
@@ -288,7 +307,7 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
                 {report.stayLog.map((r) => (
                   <tr
                     key={r.id}
-                    className={r.discrepancy === 'unresolved' ? 'bg-red-100' : r.discrepancy === 'resolved' ? 'bg-emerald-100' : 'even:bg-slate-50'}
+                    className={isOwner && r.discrepancy === 'unresolved' ? 'bg-red-100' : isOwner && r.discrepancy === 'resolved' ? 'bg-emerald-100' : 'even:bg-slate-50'}
                   >
                     <td className="border border-slate-200 px-2 py-1.5 font-medium text-slate-900">{r.roomNumber}</td>
                     <td className="border border-slate-200 px-2 py-1.5">{r.guestName ?? '—'}</td>
@@ -306,12 +325,12 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
                     </td>
                     <td className="border border-slate-200 px-2 py-1.5">{r.cleanedBy ?? '—'}</td>
                     <td className="border border-slate-200 px-2 py-1.5 whitespace-nowrap">{r.cleanedAt ? formatDateTimeShort(r.cleanedAt) : '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1.5 font-medium">{r.discrepancyReason ?? '—'}</td>
+                    {isOwner && <td className="border border-slate-200 px-2 py-1.5 font-medium">{r.discrepancyReason ?? '—'}</td>}
                   </tr>
                 ))}
                 {report.stayLog.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="border border-slate-200 px-2 py-6 text-center text-slate-400">
+                    <td colSpan={isOwner ? 11 : 10} className="border border-slate-200 px-2 py-6 text-center text-slate-400">
                       No completed stays in this range
                     </td>
                   </tr>
