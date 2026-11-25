@@ -116,6 +116,35 @@ const NAV: NavEntry[] = [
   // calendar-with-ring-binding icon, not a plain 3×3 grid.
   { id: 'cm_calendar', label: 'Calendar View', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
   { id: 'bookings', label: 'Reservations', icon: Icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
+  // §user request — explicit reorder: Guest Messaging/OTA Reviews/Room Management/Ledger/Reports/
+  // Business Reports/Connected Channels/Linked Inventory/Settings, in that order, right after
+  // Reservations.
+  {
+    id: 'cm_guest_messaging',
+    label: 'Guest Messaging',
+    icon: Icon('M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'),
+  },
+  { id: 'cm_reviews', label: 'OTA Reviews', icon: Icon('M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.588 0l-4.725 2.885a.562.562 0 01-.84-.61l1.285-5.385a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345l2.125-5.11z') },
+  {
+    // §user request — "Bulk Update ka naam change hoke Room Management hoga"
+    label: 'Room Management',
+    icon: ROOM_MANAGEMENT_ICON,
+    children: [
+      {
+        // §user request — "Rate Update/Inventory Update ko sort/simple karo": those two separate
+        // pages are gone, folded into this one tool (now the only place for bulk rate+inventory,
+        // plus the Walk-in/Manual Room Block moved down from the old Inventory Update page).
+        id: 'cm_rate_inventory_update',
+        label: 'Rate & Invt. Update',
+        icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z'),
+      },
+      {
+        id: 'cm_advance_bulk_update',
+        label: 'Advance Update',
+        icon: Icon('M12 15a3 3 0 100-6 3 3 0 000 6z M3 12h2m14 0h2M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M5.6 18.4l1.4-1.4m10-10l1.4-1.4'),
+      },
+    ],
+  },
   { id: 'ledger', label: 'Ledger', icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z') },
   // §user request, with a reference app's own "Reports" sidebar tree as the target — one group
   // nesting "Reservation Reports" (every booking-list style report) and "Finance & Payment"
@@ -172,32 +201,6 @@ const NAV: NavEntry[] = [
       },
     ],
   },
-  {
-    // §user request — "Bulk Update ka naam change hoke Room Management hoga"
-    label: 'Room Management',
-    icon: ROOM_MANAGEMENT_ICON,
-    children: [
-      {
-        // §user request — "Rate Update/Inventory Update ko sort/simple karo": those two separate
-        // pages are gone, folded into this one tool (now the only place for bulk rate+inventory,
-        // plus the Walk-in/Manual Room Block moved down from the old Inventory Update page).
-        id: 'cm_rate_inventory_update',
-        label: 'Rate & Invt. Update',
-        icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z'),
-      },
-      {
-        id: 'cm_advance_bulk_update',
-        label: 'Advance Update',
-        icon: Icon('M12 15a3 3 0 100-6 3 3 0 000 6z M3 12h2m14 0h2M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M5.6 18.4l1.4-1.4m10-10l1.4-1.4'),
-      },
-    ],
-  },
-  {
-    id: 'cm_guest_messaging',
-    label: 'Guest Messaging',
-    icon: Icon('M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'),
-  },
-  { id: 'cm_reviews', label: 'OTA Reviews', icon: Icon('M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.588 0l-4.725 2.885a.562.562 0 01-.84-.61l1.285-5.385a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345l2.125-5.11z') },
   { id: 'cm_reports', label: 'Business Reports', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
   { id: 'cm_channels', label: 'Connected Channels', icon: Icon('M13 10V3L4 14h7v7l9-11h-7z') },
   { id: 'cm_inventory', label: 'Linked Inventory', icon: Icon('M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4') },
@@ -230,9 +233,10 @@ const NAV: NavEntry[] = [
       { id: 'settings_ledger', label: 'Ledger Categories', icon: Icon('M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z') },
       { id: 'settings_credentials', label: 'Credentials', icon: Icon('M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v2') },
       { id: 'settings_billing', label: 'Billing', icon: Icon('M3 10h18M7 15h2m4 0h4M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z') },
+      // §user request — "Audit Log ko Settings ke under daalo": moved in from the top level.
+      { id: 'audit_log', label: 'Audit Log', icon: Icon('M3 3v5h5M3.05 13a9 9 0 102.13-7.65M12 7v5l3 3') },
     ],
   },
-  { id: 'audit_log', label: 'Audit Log', icon: Icon('M3 3v5h5M3.05 13a9 9 0 102.13-7.65M12 7v5l3 3') },
 ];
 
 function visibleChildren(group: GroupItem, visibleTabs: Tab[]) {
