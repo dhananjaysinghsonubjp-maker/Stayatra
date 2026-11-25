@@ -1,10 +1,12 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
 import { PAYMENT_METHODS, paymentMethodLabel } from '../paymentMethods';
 import { istDateKey, istDateLabel } from '../components/DateRangePicker';
-import { formatDateTimeShort } from '../dateFormat';
+import { formatDateShort, formatDateTimeShort } from '../dateFormat';
+import { ReportPrintShell } from './reports/ReportPrintShell';
+import { DateRangeBar } from './reports/DocumentReports';
 import type { LedgerTransaction, MethodBreakdown, RoomsReport, SaleReportDay } from '../types';
 
 function todayPlus(days: number) {
@@ -191,6 +193,14 @@ function ExpensesReportView({ hotelId }: { hotelId: string }) {
   );
 }
 
+/**
+ * §user request — "isko bhi proper PDF mein banao jaise sabme banaya hai, aur clean/simple banao
+ * taaki dekhne wale ko easily samajh mein aaye": the old 3-table layout (daily counts, per-room
+ * counts, then the stay log) buried the one table that actually answers "which room, which guest,
+ * who cleaned it" under two aggregate tables repeating the same numbers in a less readable shape —
+ * this now matches the other PDF reports (ReportPrintShell + a date range bar) with a single
+ * summary strip and the stay log as the one table.
+ */
 function RoomsReportView({ hotelId }: { hotelId: string }) {
   const { token } = useAuth();
   const [from, setFrom] = useState(todayPlus(-7));
@@ -211,24 +221,10 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
     }
   }
 
-  function exportCsv() {
-    if (!report) return;
-    const methodCols = PAYMENT_METHODS.map((m) => m.label);
-    const rows: (string | number)[][] = [
-      ['Date', 'Check-ins', 'Cleanings', 'Guest cleanings', 'Checkouts', 'Discrepancies', 'Delays resolved', ...methodCols],
-      ...report.days.map((d) => [
-        d.date,
-        d.checkIns,
-        d.cleanings,
-        d.guestCleanings,
-        d.checkouts,
-        d.discrepancies,
-        d.delaysResolved,
-        ...PAYMENT_METHODS.map((m) => d.methods[m.value] ?? 0),
-      ]),
-    ];
-    downloadCsv(`rooms-report-${from}-to-${to}.csv`, rows);
-  }
+  useEffect(() => {
+    void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hotelId]);
 
   const totals = report?.days.reduce(
     (acc, d) => ({
@@ -242,157 +238,75 @@ function RoomsReportView({ hotelId }: { hotelId: string }) {
 
   return (
     <div>
-      <Card className="mb-6">
-        <CardBody>
-          <div className="flex flex-wrap items-end gap-4">
-            <Field label="From">
-              <input className={inputClass} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-            </Field>
-            <Field label="To">
-              <input className={inputClass} type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-            </Field>
-            <Button onClick={run} disabled={loading}>
-              {loading ? 'Loading…' : 'Run report'}
-            </Button>
-            {report && (
-              <Button variant="secondary" onClick={exportCsv}>
-                Download CSV
-              </Button>
-            )}
-          </div>
-        </CardBody>
-      </Card>
-
+      <PageHeader title="Rooms Report" subtitle="Every stay in the range, who cleaned it, and how it was checked out" />
+      <DateRangeBar from={from} to={to} setFrom={setFrom} setTo={setTo} onRefresh={run} loading={loading} />
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 
       {report && totals && (
-        <>
-          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <SummaryTile label="Check-ins" value={totals.checkIns} />
-            <SummaryTile label="Cleanings" value={totals.cleanings} />
-            <SummaryTile label="Discrepancies" value={totals.discrepancies} tone={totals.discrepancies > 0 ? 'red' : undefined} />
-            <SummaryTile label="Collected" value={`₹${totals.collected.toLocaleString('en-IN')}`} />
+        <ReportPrintShell hotelId={hotelId} title="Rooms Report">
+          <div className="mb-4 flex items-start justify-between">
+            <h2 className="text-lg font-bold text-slate-900">Rooms Report</h2>
+            <p className="text-xs text-slate-500">
+              {formatDateShort(from)} to {formatDateShort(to)}
+            </p>
+          </div>
+          <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-center text-xs sm:grid-cols-4">
+            <div>
+              <p className="text-slate-500">Check-ins</p>
+              <p className="font-bold text-slate-900">{totals.checkIns}</p>
+            </div>
+            <div>
+              <p className="text-slate-500">Cleanings</p>
+              <p className="font-bold text-slate-900">{totals.cleanings}</p>
+            </div>
+            <div>
+              <p className="text-slate-500">Discrepancies</p>
+              <p className={`font-bold ${totals.discrepancies > 0 ? 'text-red-600' : 'text-slate-900'}`}>{totals.discrepancies}</p>
+            </div>
+            <div>
+              <p className="text-slate-500">Collected</p>
+              <p className="font-bold text-slate-900">₹{totals.collected.toLocaleString('en-IN')}</p>
+            </div>
           </div>
 
-          <Card className="mb-6">
-            <CardHeader title="Daily breakdown" />
-            {report.days.length === 0 ? (
-              <CardBody>
-                <EmptyState title="No activity in this range" />
-              </CardBody>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
-                      <th className="px-5 py-3">Date</th>
-                      <th className="px-5 py-3">Check-ins</th>
-                      <th className="px-5 py-3">Cleanings</th>
-                      <th className="px-5 py-3">Guest cleanings</th>
-                      <th className="px-5 py-3">Checkouts</th>
-                      <th className="px-5 py-3">Discrepancies</th>
-                      <th className="px-5 py-3">Delays resolved</th>
-                      <th className="px-5 py-3">Collections</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {report.days.map((d) => (
-                      <tr key={d.date} className="hover:bg-slate-50">
-                        <td className="px-5 py-3 font-medium text-slate-900">{d.date}</td>
-                        <td className="px-5 py-3">{d.checkIns}</td>
-                        <td className="px-5 py-3">{d.cleanings}</td>
-                        <td className="px-5 py-3">{d.guestCleanings}</td>
-                        <td className="px-5 py-3">{d.checkouts}</td>
-                        <td className="px-5 py-3">{d.discrepancies > 0 ? <span className="font-medium text-red-600">{d.discrepancies}</span> : 0}</td>
-                        <td className="px-5 py-3">{d.delaysResolved}</td>
-                        <td className="px-5 py-3">
-                          <MethodsCell methods={d.methods} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Per-room breakdown" />
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
-                    <th className="px-5 py-3">Room</th>
-                    <th className="px-5 py-3">Check-ins</th>
-                    <th className="px-5 py-3">Cleanings</th>
-                    <th className="px-5 py-3">Discrepancies</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {report.rooms.map((r) => (
-                    <tr key={r.roomId} className="hover:bg-slate-50">
-                      <td className="px-5 py-3 font-medium text-slate-900">{r.roomNumber}</td>
-                      <td className="px-5 py-3">{r.checkIns}</td>
-                      <td className="px-5 py-3">{r.cleanings}</td>
-                      <td className="px-5 py-3">{r.discrepancies > 0 ? <span className="font-medium text-red-600">{r.discrepancies}</span> : 0}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {/* §user request — "konsa room kab kab laga, kis guest tha, check-in/check-out kab tha,
-              aur housekeeping mein clean kisne kiya hai aur kya time hai, check-out FMO dashboard
-              se hua ya housekeeping se": one row per stay, joining the actual check-in/check-out
-              timestamps to whoever's Checkout Cleaning closed the room out (or the FMO's own
-              explicit Check-out Guest action, when that ran instead). */}
-          <Card className="mt-6">
-            <CardHeader title="Room-wise Stay & Housekeeping Log" subtitle="Every stay in this range, who cleaned it, and how it was checked out" />
-            {report.stayLog.length === 0 ? (
-              <CardBody>
-                <EmptyState title="No completed stays in this range" />
-              </CardBody>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
-                      <th className="px-5 py-3">Room</th>
-                      <th className="px-5 py-3">Guest</th>
-                      <th className="px-5 py-3">Check-in</th>
-                      <th className="px-5 py-3">Check-out</th>
-                      <th className="px-5 py-3">Cleaned By</th>
-                      <th className="px-5 py-3">Cleaned At</th>
-                      <th className="px-5 py-3">Checked Out Via</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {report.stayLog.map((r) => (
-                      <tr key={r.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-3 font-medium text-slate-900">{r.roomNumber}</td>
-                        <td className="px-5 py-3">{r.guestName}</td>
-                        <td className="px-5 py-3">{r.checkInAt ? formatDateTimeShort(r.checkInAt) : '—'}</td>
-                        <td className="px-5 py-3">{r.checkOutAt ? formatDateTimeShort(r.checkOutAt) : '—'}</td>
-                        <td className="px-5 py-3">{r.cleanedBy ?? '—'}</td>
-                        <td className="px-5 py-3">{r.cleanedAt ? formatDateTimeShort(r.cleanedAt) : '—'}</td>
-                        <td className="px-5 py-3">
-                          {r.checkedOutVia === 'fmo' ? (
-                            <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">FMO Dashboard{r.checkedOutByName ? ` · ${r.checkedOutByName}` : ''}</span>
-                          ) : r.checkedOutVia === 'housekeeping' ? (
-                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Housekeeping</span>
-                          ) : (
-                            <span className="text-slate-400">Not checked out yet</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-        </>
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-brand-600 text-left text-white">
+                {['Room', 'Guest', 'Check-in', 'Check-out', 'Cleaned By', 'Cleaned At', 'Checked Out Via'].map((h) => (
+                  <th key={h} className="border border-brand-700 px-3 py-2 whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {report.stayLog.map((r) => (
+                <tr key={r.id} className="even:bg-slate-50">
+                  <td className="border border-slate-200 px-3 py-1.5 font-medium text-slate-900">{r.roomNumber}</td>
+                  <td className="border border-slate-200 px-3 py-1.5">{r.guestName}</td>
+                  <td className="border border-slate-200 px-3 py-1.5 whitespace-nowrap">{r.checkInAt ? formatDateTimeShort(r.checkInAt) : '—'}</td>
+                  <td className="border border-slate-200 px-3 py-1.5 whitespace-nowrap">{r.checkOutAt ? formatDateTimeShort(r.checkOutAt) : '—'}</td>
+                  <td className="border border-slate-200 px-3 py-1.5">{r.cleanedBy ?? '—'}</td>
+                  <td className="border border-slate-200 px-3 py-1.5 whitespace-nowrap">{r.cleanedAt ? formatDateTimeShort(r.cleanedAt) : '—'}</td>
+                  <td className="border border-slate-200 px-3 py-1.5">
+                    {r.checkedOutVia === 'fmo'
+                      ? `FMO Dashboard${r.checkedOutByName ? ` · ${r.checkedOutByName}` : ''}`
+                      : r.checkedOutVia === 'housekeeping'
+                        ? 'Housekeeping'
+                        : 'Not checked out yet'}
+                  </td>
+                </tr>
+              ))}
+              {report.stayLog.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="border border-slate-200 px-3 py-6 text-center text-slate-400">
+                    No completed stays in this range
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </ReportPrintShell>
       )}
     </div>
   );
