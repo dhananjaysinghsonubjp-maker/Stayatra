@@ -267,7 +267,9 @@ export function createBookingsRouter(bookings: BookingsService) {
       .input(
         z.object({
           bookingId: z.string(),
+          checkIn: z.coerce.date().optional(),
           checkOut: z.coerce.date(),
+          guestName: z.string().optional(),
           adults: z.number().int().min(0).nullable().optional(),
           children: z.number().int().min(0).nullable().optional(),
           ratePerNight: z.number().nonnegative(),

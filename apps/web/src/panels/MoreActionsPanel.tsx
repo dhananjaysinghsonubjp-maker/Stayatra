@@ -224,6 +224,13 @@ export function MoreActionsPanel({
   // Record Payment does, instead of silently only ever touching the lead row.
   const [modifyTargetId, setModifyTargetId] = useState(lead.id);
   const modifyTarget = group.find((b) => b.id === modifyTargetId) ?? lead;
+  // §bugfix/§user request — "jab 103 ka check-in and check-out date change karna chahta hoon aur
+  // naam vagera change karna chahta hoon vo option nahi hai": Modify Stay only ever let the
+  // checkout date move and never touched the guest's name — e.g. a room added with the wrong date
+  // (the Add Room dates glitch) or a room whose own occupant differs from the group's booker had no
+  // way to be corrected here.
+  const [modifyGuestName, setModifyGuestName] = useState(lead.guestName);
+  const [modifyCheckIn, setModifyCheckIn] = useState(lead.checkIn.slice(0, 10));
   const [modifyCheckOut, setModifyCheckOut] = useState(lead.checkOut.slice(0, 10));
   const [modifyAdults, setModifyAdults] = useState<number | ''>(lead.adults ?? '');
   const [modifyChildren, setModifyChildren] = useState<number | ''>(lead.children ?? '');
@@ -235,6 +242,8 @@ export function MoreActionsPanel({
   function pickModifyTarget(id: string) {
     const b = group.find((row) => row.id === id) ?? lead;
     setModifyTargetId(id);
+    setModifyGuestName(b.guestName);
+    setModifyCheckIn(b.checkIn.slice(0, 10));
     setModifyCheckOut(b.checkOut.slice(0, 10));
     setModifyAdults(b.adults ?? '');
     setModifyChildren(b.children ?? '');
@@ -257,6 +266,8 @@ export function MoreActionsPanel({
         'bookings.modifyStay',
         {
           bookingId: modifyTarget.id,
+          guestName: modifyGuestName.trim() || undefined,
+          checkIn: new Date(`${modifyCheckIn}T00:00:00`).toISOString(),
           checkOut: new Date(`${modifyCheckOut}T00:00:00`).toISOString(),
           adults: modifyAdults === '' ? null : modifyAdults,
           children: modifyChildren === '' ? null : modifyChildren,
@@ -476,9 +487,17 @@ export function MoreActionsPanel({
                   {roomsById.get(modifyTarget.assignedRoomId ?? '')?.roomNumber ?? '—'}
                 </div>
               </Field>
-              <Field label="Check-out Date">
-                <input type="date" className={inputClass} min={modifyTarget.checkIn.slice(0, 10)} value={modifyCheckOut} onChange={(e) => setModifyCheckOut(e.target.value)} />
+              <Field label="Guest Name">
+                <input className={inputClass} value={modifyGuestName} onChange={(e) => setModifyGuestName(e.target.value)} />
               </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Check-in Date">
+                  <input type="date" className={inputClass} max={modifyCheckOut} value={modifyCheckIn} onChange={(e) => setModifyCheckIn(e.target.value)} />
+                </Field>
+                <Field label="Check-out Date">
+                  <input type="date" className={inputClass} min={modifyCheckIn} value={modifyCheckOut} onChange={(e) => setModifyCheckOut(e.target.value)} />
+                </Field>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Adults">
                   <input type="number" min={0} className={inputClass} placeholder="Adults" value={modifyAdults} onChange={(e) => setModifyAdults(e.target.value === '' ? '' : Number(e.target.value))} />

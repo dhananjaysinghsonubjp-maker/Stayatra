@@ -958,7 +958,9 @@ export class BookingsService {
    */
   async modifyStay(input: {
     bookingId: string;
+    checkIn?: Date;
     checkOut: Date;
+    guestName?: string;
     adults?: number | null;
     children?: number | null;
     ratePerNight: number;
@@ -970,7 +972,13 @@ export class BookingsService {
     if (booking.status !== BookingStatus.confirmed && booking.status !== BookingStatus.checked_in) {
       throw new ConflictException(`Booking is ${booking.status} — stay details can only be modified for an upcoming or in-house reservation`);
     }
-    const nights = Math.round((input.checkOut.getTime() - booking.checkIn.getTime()) / (1000 * 60 * 60 * 24));
+    // §bugfix/§user request — "jab 103 ka check-in and check-out date change karna chahta hoon ...
+    // vo option nahi hai": Modify Stay only ever let the checkout date move; a wrong check-in date
+    // (e.g. one left over from the Add Room dates glitch) had no way to be corrected short of
+    // cancelling and re-adding the room. checkIn is now optional input here too, defaulting to the
+    // booking's existing one so every other caller keeps working unchanged.
+    const checkIn = input.checkIn ?? booking.checkIn;
+    const nights = Math.round((input.checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
     if (nights < 1) throw new BadRequestException('Check-out date must be after check-in');
     if (input.ratePerNight < 0) throw new BadRequestException('Room rate cannot be negative');
 
@@ -982,10 +990,10 @@ export class BookingsService {
           id: { not: booking.id },
           status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
           checkIn: { lt: input.checkOut },
-          checkOut: { gt: booking.checkIn },
+          checkOut: { gt: checkIn },
         },
       });
-      if (overlap) throw new ConflictException('This room already has another reservation overlapping the new checkout date');
+      if (overlap) throw new ConflictException('This room already has another reservation overlapping the new dates');
     }
 
     const reportedBy = await this.prisma.user.findFirst({ where: { id: input.reportedByUserId, hotelId: booking.hotelId } });
@@ -995,24 +1003,27 @@ export class BookingsService {
     const updated = await this.prisma.booking.update({
       where: { id: input.bookingId },
       data: {
+        checkIn,
         checkOut: input.checkOut,
         nights,
         totalAmount,
         discountAmount: input.discountAmount ?? null,
         adults: input.adults ?? null,
         children: input.children ?? null,
+        guestName: input.guestName?.trim() || undefined,
       },
     });
 
-    // §bugfix — "calendar pe sync ho raha hai ki nahi": a longer/shorter checkout date changes
-    // how many room-nights this booking actually holds, but nothing here was telling the shared
-    // OTA-pooled availability count (the same pool Calendar/Channel Manager read) about it —
-    // Calendar kept showing the old date range as available/sold regardless of the real change.
-    // Release the old date range, then re-claim the new one (a no-op net effect when the date
-    // didn't actually change, so this is safe to always run).
-    if (input.checkOut.getTime() !== booking.checkOut.getTime()) {
+    // §bugfix — "calendar pe sync ho raha hai ki nahi": a changed date range changes how many
+    // room-nights this booking actually holds, but nothing here was telling the shared OTA-pooled
+    // availability count (the same pool Calendar/Channel Manager read) about it — Calendar kept
+    // showing the old date range as available/sold regardless of the real change. Release the old
+    // date range, then re-claim the new one (a no-op net effect when the dates didn't actually
+    // change, so this is safe to always run). Now keys off check-in too, not just checkout, since
+    // check-in can move as well.
+    if (input.checkOut.getTime() !== booking.checkOut.getTime() || checkIn.getTime() !== booking.checkIn.getTime()) {
       await this.rates.adjustAvailabilityForStay({ hotelId: booking.hotelId, roomCategoryId: booking.roomCategoryId, checkIn: booking.checkIn, checkOut: booking.checkOut, delta: 1 });
-      await this.rates.adjustAvailabilityForStay({ hotelId: booking.hotelId, roomCategoryId: booking.roomCategoryId, checkIn: booking.checkIn, checkOut: input.checkOut, delta: -1 });
+      await this.rates.adjustAvailabilityForStay({ hotelId: booking.hotelId, roomCategoryId: booking.roomCategoryId, checkIn, checkOut: input.checkOut, delta: -1 });
     }
 
     await this.audit.log({
@@ -1020,7 +1031,16 @@ export class BookingsService {
       eventType: 'STAY_EDITED',
       actorId: input.actorId,
       subjectId: booking.id,
-      detail: { checkOut: dateLabel(input.checkOut), nights, ratePerNight: input.ratePerNight, adults: input.adults ?? null, children: input.children ?? null, reportedBy: reportedBy.name },
+      detail: {
+        checkIn: dateLabel(checkIn),
+        checkOut: dateLabel(input.checkOut),
+        nights,
+        ratePerNight: input.ratePerNight,
+        adults: input.adults ?? null,
+        children: input.children ?? null,
+        guestName: input.guestName?.trim() || undefined,
+        reportedBy: reportedBy.name,
+      },
     });
     return updated;
   }

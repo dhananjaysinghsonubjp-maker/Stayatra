@@ -11,9 +11,8 @@ import { CheckInModal } from './checkin/CheckInModal';
 import { PaymentHistory, type PaymentHistoryEntry } from './PaymentHistory';
 import { InvoicePrintView } from './InvoicePrintView';
 import { RoomTransferPanel } from './RoomTransferPanel';
-import { PAYMENT_METHODS } from '../paymentMethods';
 import type { MoreActionsView } from './MoreActionsPanel';
-import type { Booking, Room, RatePlan, PaymentMethod } from '../types';
+import type { Booking, Room, RatePlan } from '../types';
 
 const STATUS_LABEL: Record<Booking['status'], string> = {
   confirmed: 'Upcoming',
@@ -303,11 +302,6 @@ export function ReservationDetailModal({
   // whenever the reservation was first made) instead of always being the group's original dates.
   const [newCheckIn, setNewCheckIn] = useState('');
   const [newCheckOut, setNewCheckOut] = useState('');
-  // §user request — "Add Room click karte hi payment daalne ka option aaye": an optional advance
-  // right there, same addPayment call AddPaymentModal already uses — so a walk-in extra room's
-  // bill and its payment both land under the one reservation instead of needing a separate flow.
-  const [newPaymentAmount, setNewPaymentAmount] = useState<number | ''>('');
-  const [newPaymentMethod, setNewPaymentMethod] = useState<PaymentMethod>('cash');
   const [addRoomSaving, setAddRoomSaving] = useState(false);
   const [addRoomError, setAddRoomError] = useState<string | null>(null);
   // §user request — "+ icon jisme extra mattress vagera add karne ka option aaye, same jaise
@@ -322,11 +316,20 @@ export function ReservationDetailModal({
   const [newChargeUnitPrice, setNewChargeUnitPrice] = useState<number | ''>('');
   const canManage = ['owner', 'manager'].includes(role('pms') ?? '') || ['owner', 'manager'].includes(role('channel_manager') ?? '');
 
-  const first = bookings[0];
-  const status = groupStatus(bookings);
+  // §user request — "jab hum room remove kar rahe hain toh usme vo cancelled aa raha hai, vo room
+  // hat jana chahiye": removeRoom only ever sets that Booking row's status to cancelled (it's kept
+  // for audit, never deleted), but the Rooms list, the totals, and the "which rooms can I add"
+  // dropdown were all still built from the raw `bookings` prop, so a cancelled room kept showing up
+  // as a live row with its own due amount. Everything the guest actually sees/owes now excludes
+  // it; `paymentTimeline` deliberately still reads the raw `bookings` below — a payment someone
+  // already collected against a room that later got cancelled is a real transaction and shouldn't
+  // vanish from Payment History just because the room did.
+  const activeBookings = bookings.filter((b) => b.status !== 'cancelled');
+  const first = activeBookings[0] ?? bookings[0];
+  const status = groupStatus(activeBookings.length > 0 ? activeBookings : bookings);
   const today = istDateKey(new Date().toISOString());
 
-  const grandTotal = bookings.reduce((sum, b) => {
+  const grandTotal = activeBookings.reduce((sum, b) => {
     const totals = computeInvoiceTotals({
       totalAmount: Number(b.totalAmount),
       lineItems: b.lineItems ?? [],
@@ -335,7 +338,7 @@ export function ReservationDetailModal({
     });
     return sum + totals.grandTotal;
   }, 0);
-  const paid = bookings.reduce((sum, b) => sum + Number(b.paidAmount ?? 0), 0);
+  const paid = activeBookings.reduce((sum, b) => sum + Number(b.paidAmount ?? 0), 0);
   const due = Math.max(0, grandTotal - paid);
   const paymentStatusLabel = due <= 0 ? 'Paid' : paid > 0 ? 'Partially Paid' : 'Unpaid';
   const paymentStatusTone = due <= 0 ? 'text-emerald-600 dark:text-emerald-400' : paid > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400';
@@ -361,8 +364,8 @@ export function ReservationDetailModal({
   const bookerName = first.bookedByName ?? first.guestName;
   const bookerPhone = first.bookedByPhone ?? first.guestPhone;
   const bookingIdShort = first.id.slice(-6).toUpperCase();
-  const totalGuests = bookings.reduce((sum, b) => sum + 1 + (b.guests?.length ?? 0), 0);
-  const addRoomCandidates = rooms.filter((r) => r.status === 'available' && !bookings.some((b) => b.assignedRoomId === r.id));
+  const totalGuests = activeBookings.reduce((sum, b) => sum + 1 + (b.guests?.length ?? 0), 0);
+  const addRoomCandidates = rooms.filter((r) => r.status === 'available' && !activeBookings.some((b) => b.assignedRoomId === r.id));
   const newRoomCategoryId = rooms.find((r) => r.id === newRoomId)?.roomCategoryId;
   const ratePlansForNewRoom = ratePlans.filter((rp) => rp.roomCategoryId === newRoomCategoryId);
 
@@ -428,16 +431,12 @@ export function ReservationDetailModal({
           mutate('bookings.addLineItem', { bookingId: created.id, description: li.description, quantity: li.quantity, unitPrice: li.amount / li.quantity }, token ?? undefined),
         ),
       );
-      if (newPaymentAmount !== '' && newPaymentAmount > 0) {
-        await mutate('bookings.addPayment', { bookingId: created.id, amount: newPaymentAmount, method: newPaymentMethod, type: 'advance' }, token ?? undefined);
-      }
       setAddingRoom(false);
       setNewRoomId('');
       setNewRatePlanId('');
       setNewAmount(0);
       setNewCheckIn('');
       setNewCheckOut('');
-      setNewPaymentAmount('');
       setNewRoomLineItems([]);
       onChanged();
     } catch (err) {
@@ -526,7 +525,7 @@ export function ReservationDetailModal({
               </div>
               <div>
                 <p className="text-xs text-slate-400 dark:text-slate-500">🛏 Rooms</p>
-                <p className="text-sm font-bold text-slate-900 dark:text-white">{bookings.length} Room{bookings.length > 1 ? 's' : ''}</p>
+                <p className="text-sm font-bold text-slate-900 dark:text-white">{activeBookings.length} Room{activeBookings.length > 1 ? 's' : ''}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-400 dark:text-slate-500">👤 Guests</p>
@@ -569,12 +568,12 @@ export function ReservationDetailModal({
                 <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800 sm:p-5">
                   <div className="flex items-center gap-3">
                     <input type="checkbox" checked={allConfirmedSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600" />
-                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">Rooms ({String(bookings.length).padStart(2, '0')})</h2>
+                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">Rooms ({String(activeBookings.length).padStart(2, '0')})</h2>
                   </div>
                   <p className="mb-1 ml-7 text-xs text-slate-400 dark:text-slate-500">Each room can have different guests, rates and status.</p>
 
                   <div className="mt-2">
-                    {bookings.map((b) => (
+                    {activeBookings.map((b) => (
                       <RoomTableRow
                         key={b.id}
                         booking={b}
@@ -758,45 +757,12 @@ export function ReservationDetailModal({
                             </div>
                           )}
 
-                          {/* §user request — "Add Room click karte hi payment daalne ka option
-                              aaye": an optional advance, collected the moment this new room is
-                              added rather than needing a separate Record Payment trip right after. */}
-                          <div className="mt-3 flex flex-wrap items-end gap-2.5 border-t border-slate-100 pt-3 dark:border-slate-700">
-                            <div className="w-32">
-                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment (optional)</p>
-                              <input
-                                type="number"
-                                min={0}
-                                placeholder="Amount"
-                                className={`${inputClass} w-full`}
-                                value={newPaymentAmount}
-                                onChange={(e) => setNewPaymentAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                              />
-                            </div>
-                            <div className="w-36">
-                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Method</p>
-                              <select
-                                className={`${inputClass} w-full`}
-                                value={newPaymentMethod}
-                                onChange={(e) => setNewPaymentMethod(e.target.value as PaymentMethod)}
-                                disabled={newPaymentAmount === ''}
-                              >
-                                {PAYMENT_METHODS.map((m) => (
-                                  <option key={m.value} value={m.value}>
-                                    {m.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-
                           <div className="mt-3 flex items-center justify-end gap-2">
                             <button
                               onClick={() => {
                                 setAddingRoom(false);
                                 setAddRoomError(null);
                                 setNewRoomLineItems([]);
-                                setNewPaymentAmount('');
                               }}
                               className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                             >
@@ -910,7 +876,7 @@ export function ReservationDetailModal({
 
                 <div className="mt-5 space-y-1.5 border-t border-slate-100 pt-4 text-sm dark:border-slate-700">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Per-room charges</p>
-                  {bookings.map((b) => {
+                  {activeBookings.map((b) => {
                     const totals = computeInvoiceTotals({
                       totalAmount: Number(b.totalAmount),
                       lineItems: b.lineItems ?? [],
