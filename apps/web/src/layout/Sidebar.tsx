@@ -63,6 +63,10 @@ interface LeafItem {
   id: Tab;
   label: string;
   icon: IconFn;
+  /** §bugfix — nested leaves normally render icon-less (see NavNode's `!topLevel` branch); the
+   * Customers item asked for a visible icon even though it's nested two levels deep inside
+   * Reports, so it opts in here instead of changing every other nested leaf's look. */
+  showIcon?: boolean;
 }
 
 // §user request — "Hotel Team" (Housekeeping + Important Contacts) nests inside Settings, so a
@@ -205,7 +209,7 @@ const NAV: NavEntry[] = [
       // rather than another sub-group.
       // §user request, with a reference screenshot's own two-person icon as the target — same
       // "group of people" icon this sidebar's own Staff entry already uses, not a single person.
-      { id: 'reports_customers', label: 'Customers', icon: Icon('M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m5-3.13a4 4 0 100-8 4 4 0 000 8zm6 2a4 4 0 100-8') },
+      { id: 'reports_customers', label: 'Customers', icon: Icon('M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m5-3.13a4 4 0 100-8 4 4 0 000 8zm6 2a4 4 0 100-8'), showIcon: true },
     ],
   },
   { id: 'cm_reports', label: 'Business Reports', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
@@ -314,7 +318,8 @@ function NavNode({
   if (!visibleTabs.includes(entry.id)) return null;
   const active = tab === entry.id;
   if (!topLevel) {
-    // Original inner-group leaf style — plain text, no icon, lighter weight.
+    // Original inner-group leaf style — plain text, no icon, lighter weight (unless this leaf
+    // opted into showIcon).
     return (
       <button
         onClick={() => selectTab(entry.id)}
@@ -322,6 +327,7 @@ function NavNode({
           active ? 'bg-white/15 text-white ring-1 ring-inset ring-white/20' : 'text-blue-100 hover:bg-white/10 hover:text-white'
         }`}
       >
+        {entry.showIcon && <entry.icon className="h-4 w-4 text-white" />}
         {entry.label}
       </button>
     );

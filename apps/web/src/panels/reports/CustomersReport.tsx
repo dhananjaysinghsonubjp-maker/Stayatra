@@ -38,7 +38,17 @@ interface CustomersData {
   ageOnFilePercent: number;
 }
 
-function monthLabel(key: string) {
+type GrowthRange = 'year' | 'quarter' | '3months';
+
+// §user request — "agar November mein hai toh single November ka bar hoga, top par 3 buttons
+// yearly/quarterly/3 months": a quarter bucket's key is "YYYY-Q#" and a year bucket's is just
+// "YYYY" — neither parses as a calendar-month date, so each granularity needs its own label.
+function monthLabel(key: string, range: GrowthRange) {
+  if (range === 'year') return key;
+  if (range === 'quarter') {
+    const [y, q] = key.split('-Q');
+    return `Q${q} ${y}`;
+  }
   const [y, m] = key.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-IN', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
@@ -60,20 +70,23 @@ export function CustomersReport({ hotelId }: { hotelId: string }) {
   // §user request — "Top 10 vala Customers section mujhe nahi chahiye, iska pura report banao":
   // replaced by a full, filterable Customer List (its own tab) instead of a small dashboard card.
   const [view, setView] = useState<'dashboard' | 'list'>('dashboard');
+  // §user request — "top par 3 buttons yearly/quarterly/3 months, by default 3 months mein rahega
+  // humesha": the growth chart's own time window, always starting on 3 Months.
+  const [growthRange, setGrowthRange] = useState<GrowthRange>('3months');
 
-  async function run() {
+  async function run(range: GrowthRange) {
     setError(null);
     try {
-      setData(await query<CustomersData>('reports.customers', { hotelId }, token ?? undefined));
+      setData(await query<CustomersData>('reports.customers', { hotelId, growthRange: range }, token ?? undefined));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load customers');
     }
   }
 
   useEffect(() => {
-    void run();
+    void run(growthRange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hotelId]);
+  }, [hotelId, growthRange]);
 
   if (selectedGuestId) {
     return <CustomerProfile hotelId={hotelId} guestId={selectedGuestId} onBack={() => setSelectedGuestId(null)} />;
@@ -134,8 +147,25 @@ export function CustomersReport({ hotelId }: { hotelId: string }) {
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardBody>
-            <p className="text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">New vs Repeat Guests</p>
-            <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">New and returning guests, by the month they booked</p>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">New vs Repeat Guests</p>
+              <div className="flex gap-1 rounded-lg bg-slate-100 p-0.5 text-[11px] dark:bg-slate-700">
+                {([
+                  ['3months', '3 Months'],
+                  ['quarter', 'Quarterly'],
+                  ['year', 'Yearly'],
+                ] as const).map(([r, label]) => (
+                  <button
+                    key={r}
+                    onClick={() => setGrowthRange(r)}
+                    className={`rounded-md px-2 py-1 font-medium transition-colors ${growthRange === r ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">New and returning guests, by the {growthRange === 'year' ? 'year' : growthRange === 'quarter' ? 'quarter' : 'month'} they booked</p>
             {data.monthlyGrowth.length === 0 ? (
               <EmptyState title="No bookings yet" />
             ) : (
@@ -146,7 +176,7 @@ export function CustomersReport({ hotelId }: { hotelId: string }) {
                       {m.repeat > 0 && <div className="w-full bg-brand-300 dark:bg-brand-400/60" style={{ height: `${(m.repeat / maxMonthly) * 100}%` }} title={`Repeat: ${m.repeat}`} />}
                       {m.new > 0 && <div className="w-full bg-brand-600" style={{ height: `${(m.new / maxMonthly) * 100}%` }} title={`New: ${m.new}`} />}
                     </div>
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500">{monthLabel(m.month)}</span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500">{monthLabel(m.month, growthRange)}</span>
                   </div>
                 ))}
               </div>
@@ -436,12 +466,7 @@ function CustomerListView({ customers, hotelId, onOpenGuest }: { customers: Cust
 
       {printing && (
         <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-900/50 p-4">
-          <div className="no-print mb-3 flex justify-end">
-            <Button variant="secondary" onClick={() => setPrinting(false)}>
-              Close
-            </Button>
-          </div>
-          <ReportPrintShell hotelId={hotelId} title="Customer List">
+          <ReportPrintShell hotelId={hotelId} title="Customer List" minimal onClose={() => setPrinting(false)}>
             <h2 className="mb-1 text-lg font-bold text-slate-900">Customer List</h2>
             <p className="mb-4 text-xs text-slate-500">{filtered.length} customers</p>
             <table className="w-full border-collapse text-xs">

@@ -112,7 +112,9 @@ export function createReportsRouter(reports: ReportsService) {
       .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date(), source: z.string().optional() }))
       .query(({ input }) => reports.getOtaRevenueReport(input)),
 
-    customers: ownerOrManager.input(z.object({ hotelId: z.string() })).query(({ input }) => reports.getCustomersReport(input.hotelId)),
+    customers: ownerOrManager
+      .input(z.object({ hotelId: z.string(), growthRange: z.enum(['year', 'quarter', '3months']).optional() }))
+      .query(({ input }) => reports.getCustomersReport(input.hotelId, input.growthRange)),
 
     customerProfile: ownerOrManager
       .input(z.object({ hotelId: z.string(), guestId: z.string() }))

@@ -21,7 +21,23 @@ import type { Hotel } from '../../types';
  * browser's own page scroll covers a tall report, and the print output always gets the full,
  * unscaled, un-clipped content regardless of whatever zoom level was last picked on screen.
  */
-export function ReportPrintShell({ hotelId, title, children }: { hotelId: string; title: string; children: React.ReactNode }) {
+export function ReportPrintShell({
+  hotelId,
+  title,
+  children,
+  minimal,
+  onClose,
+}: {
+  hotelId: string;
+  title: string;
+  children: React.ReactNode;
+  /** §user request — "Customer List ka PDF directly dikhao ki bas print ka option ho": drops the
+   * Fit page/Fit width/zoom/Download controls, leaving just Print (plus Close, if onClose is
+   * given) — for a case that just needs "print this", not the full zoomable-preview toolbar every
+   * other report in this app already uses. */
+  minimal?: boolean;
+  onClose?: () => void;
+}) {
   const { token } = useAuth();
   const [hotel, setHotel] = useState<Hotel | null>(null);
   const [zoom, setZoom] = useState(100);
@@ -38,27 +54,41 @@ export function ReportPrintShell({ hotelId, title, children }: { hotelId: string
       <div className="no-print flex flex-wrap items-center justify-between gap-2 bg-slate-800 px-4 py-2.5 text-sm text-white">
         <span className="font-semibold">{title}</span>
         <div className="flex items-center gap-1.5">
-          <button onClick={() => setZoom(100)} className="rounded-md px-2 py-1 text-xs text-slate-300 hover:bg-white/10">
-            Fit page
-          </button>
-          <button onClick={() => setZoom(125)} className="rounded-md px-2 py-1 text-xs text-slate-300 hover:bg-white/10">
-            Fit width
-          </button>
-          <span className="mx-1 h-4 w-px bg-white/20" />
-          <button onClick={() => setZoom((z) => Math.max(50, z - 10))} className="rounded-md px-2 py-1 text-xs hover:bg-white/10">
-            −
-          </button>
-          <span className="w-10 text-center text-xs font-semibold">{zoom}%</span>
-          <button onClick={() => setZoom((z) => Math.min(200, z + 10))} className="rounded-md px-2 py-1 text-xs hover:bg-white/10">
-            +
-          </button>
-          <span className="mx-1 h-4 w-px bg-white/20" />
+          {!minimal && (
+            <>
+              <button onClick={() => setZoom(100)} className="rounded-md px-2 py-1 text-xs text-slate-300 hover:bg-white/10">
+                Fit page
+              </button>
+              <button onClick={() => setZoom(125)} className="rounded-md px-2 py-1 text-xs text-slate-300 hover:bg-white/10">
+                Fit width
+              </button>
+              <span className="mx-1 h-4 w-px bg-white/20" />
+              <button onClick={() => setZoom((z) => Math.max(50, z - 10))} className="rounded-md px-2 py-1 text-xs hover:bg-white/10">
+                −
+              </button>
+              <span className="w-10 text-center text-xs font-semibold">{zoom}%</span>
+              <button onClick={() => setZoom((z) => Math.min(200, z + 10))} className="rounded-md px-2 py-1 text-xs hover:bg-white/10">
+                +
+              </button>
+              <span className="mx-1 h-4 w-px bg-white/20" />
+            </>
+          )}
           <button onClick={() => window.print()} className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium hover:bg-white/10">
             🖨 Print
           </button>
-          <button onClick={() => window.print()} className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium hover:bg-white/10">
-            ⬇ Download
-          </button>
+          {!minimal && (
+            <button onClick={() => window.print()} className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium hover:bg-white/10">
+              ⬇ Download
+            </button>
+          )}
+          {onClose && (
+            <>
+              <span className="mx-1 h-4 w-px bg-white/20" />
+              <button onClick={onClose} className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium hover:bg-white/10">
+                ✕ Close
+              </button>
+            </>
+          )}
         </div>
       </div>
       <div className="bg-slate-100 p-6 print:bg-white print:p-0">

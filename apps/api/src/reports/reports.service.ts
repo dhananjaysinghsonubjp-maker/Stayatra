@@ -1112,7 +1112,7 @@ export class ReportsService {
    * yet (§user request: that's deliberately future work, not built here), so this just reuses the
    * one guest-return signal this app already has.
    */
-  async getCustomersReport(hotelId: string) {
+  async getCustomersReport(hotelId: string, growthRange: 'year' | 'quarter' | '3months' = '3months') {
     const guests = await this.prisma.guest.findMany({
       where: { hotelId },
       include: { bookings: { include: { lineItems: true }, orderBy: { createdAt: 'asc' } } },
@@ -1124,8 +1124,34 @@ export class ReportsService {
     let directBookings = 0;
     let otaBookings = 0;
     const monthly = new Map<string, { new: number; repeat: number }>();
-    const monthKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-    const bump = (key: string, field: 'new' | 'repeat') => {
+    // §user request — "poore saal ka alag alag bars, agar November mein hai toh single November ka
+    // bar hoga, top par 3 buttons yearly/quarterly/3 months, by default 3 months": the growth chart
+    // used to only ever get a bucket for a month that actually had an event, so one busy month
+    // rendered as a single bar stretched across the whole chart. `bucketKey` buckets by the chosen
+    // granularity (calendar month / quarter / year) and `growthWindow` below always generates every
+    // bucket in the selected window up front — including zero-activity ones — so the chart always
+    // renders a fixed, predictable number of bars (3, 4, or 5) instead of however many happened to
+    // have a booking.
+    const bucketKey = (d: Date): string => {
+      if (growthRange === 'year') return String(d.getUTCFullYear());
+      if (growthRange === 'quarter') return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    };
+    const bucketCount = growthRange === 'year' ? 5 : growthRange === 'quarter' ? 4 : 3;
+    const stepMonths = growthRange === 'year' ? 12 : growthRange === 'quarter' ? 3 : 1;
+    const now = new Date();
+    let anchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    if (growthRange === 'quarter') anchor = new Date(Date.UTC(anchor.getUTCFullYear(), Math.floor(anchor.getUTCMonth() / 3) * 3, 1));
+    if (growthRange === 'year') anchor = new Date(Date.UTC(anchor.getUTCFullYear(), 0, 1));
+    const growthBucketPoints: Date[] = [];
+    for (let i = bucketCount - 1; i >= 0; i--) {
+      growthBucketPoints.push(new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() - i * stepMonths, 1)));
+    }
+    const growthWindowStart = growthBucketPoints[0];
+    const growthBucketKeys = growthBucketPoints.map(bucketKey);
+    const bump = (d: Date, field: 'new' | 'repeat') => {
+      if (d < growthWindowStart) return;
+      const key = bucketKey(d);
       const row = monthly.get(key) ?? { new: 0, repeat: 0 };
       row[field] += 1;
       monthly.set(key, row);
@@ -1171,8 +1197,8 @@ export class ReportsService {
         repeatAges.set('Unknown', (repeatAges.get('Unknown') ?? 0) + 1);
       }
 
-      if (g.bookings.length > 0) bump(monthKey(g.bookings[0].createdAt), 'new');
-      if (isRepeat) bump(monthKey(g.bookings[1].createdAt), 'repeat');
+      if (g.bookings.length > 0) bump(g.bookings[0].createdAt, 'new');
+      if (isRepeat) bump(g.bookings[1].createdAt, 'repeat');
 
       let totalSpend = 0;
       let hasRealStay = false;
@@ -1228,7 +1254,7 @@ export class ReportsService {
         ota: otaBookings,
         percent: totalBookingsForShare > 0 ? (directBookings / totalBookingsForShare) * 100 : 0,
       },
-      monthlyGrowth: [...monthly.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, v]) => ({ month, new: v.new, repeat: v.repeat })),
+      monthlyGrowth: growthBucketKeys.map((month) => ({ month, new: monthly.get(month)?.new ?? 0, repeat: monthly.get(month)?.repeat ?? 0 })),
       guestLocations: { state: toRankedList(byState, guestsWithState), country: toRankedList(byCountry, guestsWithState), city: toRankedList(byCity, guestsWithState) },
       guestsWithState,
       ageGroups: toRankedList(allAges, guestsWithAge),
