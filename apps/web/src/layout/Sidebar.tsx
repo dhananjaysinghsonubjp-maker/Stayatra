@@ -203,7 +203,9 @@ const NAV: NavEntry[] = [
       // §user request — "Reports section mein poora ek Customer ka option hoga": guest growth,
       // demographics, top spenders and VIP tiering, one cohesive page, so a plain leaf here
       // rather than another sub-group.
-      { id: 'reports_customers', label: 'Customers', icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z') },
+      // §user request, with a reference screenshot's own two-person icon as the target — same
+      // "group of people" icon this sidebar's own Staff entry already uses, not a single person.
+      { id: 'reports_customers', label: 'Customers', icon: Icon('M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m5-3.13a4 4 0 100-8 4 4 0 000 8zm6 2a4 4 0 100-8') },
     ],
   },
   { id: 'cm_reports', label: 'Business Reports', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },
