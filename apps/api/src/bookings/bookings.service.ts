@@ -410,8 +410,20 @@ export class BookingsService {
   }) {
     if (input.rooms.length === 0) throw new BadRequestException('Select at least one room');
 
+    // §bugfix — "guest info edit karte waqt Reservation not found aa raha hai": reservationGroupId
+    // is only ever set by createMultiRoomReservation; a single-room booking (walk-in, direct
+    // check-in, an OTA import) has it null, and the edit modal then falls back to sending the
+    // booking's own id as reservationGroupId (CreateReservationModal.tsx: `?? editGroup![0].id`).
+    // Matching strictly on `reservationGroupId: input.reservationGroupId` never finds that row —
+    // the column is null, not equal to the booking's own id — so `existing` came back empty and
+    // this threw "Reservation not found" for every single-room reservation. The OR here also
+    // matches "this row's own id, if it was never grouped", same fallback the lookup already
+    // assumes.
     const existing = await this.prisma.booking.findMany({
-      where: { reservationGroupId: input.reservationGroupId, hotelId: input.hotelId },
+      where: {
+        hotelId: input.hotelId,
+        OR: [{ reservationGroupId: input.reservationGroupId }, { id: input.reservationGroupId, reservationGroupId: null }],
+      },
       include: { payments: true, assignedRoom: true },
     });
     if (existing.length === 0) throw new NotFoundException('Reservation not found');
@@ -496,6 +508,10 @@ export class BookingsService {
           billToCompanyState: input.companyName ? input.companyState : undefined,
           billToCompanyCity: input.companyName ? input.companyCity : undefined,
           billToCompanyPincode: input.companyName ? input.companyPincode : undefined,
+          // §bugfix, same cause as the lookup above — a previously-ungrouped booking backfills its
+          // real reservationGroupId here so it stays findable as a group if another room is ever
+          // added to it later, instead of silently staying null forever.
+          reservationGroupId: input.reservationGroupId,
         };
         let booking;
         if (prior) {
@@ -508,7 +524,7 @@ export class BookingsService {
         } else {
           availabilityDeltas.push({ roomCategoryId: room.roomCategoryId!, checkIn: r.checkIn, checkOut: r.checkOut, delta: -1 });
           booking = await tx.booking.create({
-            data: { ...shared, hotelId: input.hotelId, reservationGroupId: input.reservationGroupId, roomCategoryId: room.roomCategoryId!, assignedRoomId: room.id, status: BookingStatus.confirmed },
+            data: { ...shared, hotelId: input.hotelId, roomCategoryId: room.roomCategoryId!, assignedRoomId: room.id, status: BookingStatus.confirmed },
           });
         }
         if (r.lineItems?.length) {
