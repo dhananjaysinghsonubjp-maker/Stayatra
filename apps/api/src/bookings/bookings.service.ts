@@ -427,9 +427,6 @@ export class BookingsService {
       include: { payments: true, assignedRoom: true },
     });
     if (existing.length === 0) throw new NotFoundException('Reservation not found');
-    if (existing.some((b) => b.status !== BookingStatus.confirmed)) {
-      throw new ConflictException('Only an upcoming reservation (not yet checked in) can be edited this way');
-    }
 
     const defaultNights = Math.round((input.checkOut.getTime() - input.checkIn.getTime()) / 86400000);
     if (defaultNights < 1) throw new BadRequestException('Check-out must be after check-in');
@@ -454,6 +451,22 @@ export class BookingsService {
       throw new ConflictException(
         `Room ${blockedRemoval.assignedRoom?.roomNumber} has a payment recorded against it — remove the payment first, or keep this room in the reservation`,
       );
+    }
+
+    // §user request — "FMO ke paas free hand ho edit karne ka": this used to block the whole
+    // screen for any already-checked-in booking, so even fixing a misspelt guest name needed a
+    // front-desk workaround. Room/date changes still need Modify Stay or Room Transfer's own
+    // availability rechecking once a guest is actually in-house, so those stay confirmed-only —
+    // but editing guest details (name/phone/email/billing) or the agreed amount on an unchanged
+    // room/date no longer needs the reservation to still be upcoming.
+    const hasStructuralChange = toRemove.length > 0 || roomStays.some((r) => {
+      const prior = existingByRoomId.get(r.roomId);
+      if (!prior) return true;
+      const room = rooms.find((room) => room.id === r.roomId)!;
+      return prior.checkIn.getTime() !== r.checkIn.getTime() || prior.checkOut.getTime() !== r.checkOut.getTime() || prior.roomCategoryId !== room.roomCategoryId;
+    });
+    if (hasStructuralChange && existing.some((b) => b.status !== BookingStatus.confirmed)) {
+      throw new ConflictException('Changing rooms or dates on a reservation that has already checked in needs Modify Stay or Room Transfer instead');
     }
 
     // Excludes this same reservation's own current rows — re-saving the same room/dates
