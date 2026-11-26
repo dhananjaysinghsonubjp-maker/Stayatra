@@ -281,8 +281,16 @@ export function MoreActionsPanel({
         {
           bookingId: modifyTarget.id,
           guestName: modifyGuestName.trim() || undefined,
-          checkIn: new Date(`${modifyCheckIn}T00:00:00`).toISOString(),
-          checkOut: new Date(`${modifyCheckOut}T00:00:00`).toISOString(),
+          // §bugfix — "dates change nahi ho rahi hai": `new Date('2026-11-27T00:00:00')` parses as
+          // LOCAL midnight (IST, UTC+5:30) — `.toISOString()` then rolls it back to
+          // "2026-11-26T18:30:00.000Z", which `.slice(0, 10)` everywhere else in the app reads
+          // straight back as "2026-11-26". Picking the 27th silently saved the 26th right back —
+          // it looked like the date never changed because, after the round trip, it hadn't. A
+          // plain "YYYY-MM-DD" string is what every other date-sending call in this app already
+          // uses (CreateReservationModal, EditBookingModal) — the backend's z.coerce.date() parses
+          // a date-only string as UTC midnight directly, with no timezone shift.
+          checkIn: modifyCheckIn,
+          checkOut: modifyCheckOut,
           adults: modifyAdults === '' ? null : modifyAdults,
           children: modifyChildren === '' ? null : modifyChildren,
           ratePerNight: modifyRate,
@@ -496,6 +504,45 @@ export function MoreActionsPanel({
                   </select>
                 </Field>
               )}
+
+              {/* §user request — "upar is guest ka summary dikhni chahiye ki inhone is rate aur is
+                  dates pe check-in kiya, aur jo hum changes kar rahe hain wo niche kar sakte hain":
+                  what's actually on file right now, read straight off modifyTarget (never the
+                  draft fields below), so there's no ambiguity about what's being changed from. */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Current Stay</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Guest</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{modifyTarget.guestName}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Room</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{roomsById.get(modifyTarget.assignedRoomId ?? '')?.roomNumber ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Check-in</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{formatDateShort(modifyTarget.checkIn)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Check-out</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{formatDateShort(modifyTarget.checkOut)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Rate / night</p>
+                    <p className="font-medium text-slate-900 dark:text-white">
+                      ₹{(modifyTarget.nights > 0 ? Number(modifyTarget.totalAmount) / modifyTarget.nights : Number(modifyTarget.totalAmount)).toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Total</p>
+                    <p className="font-medium text-slate-900 dark:text-white">₹{Number(modifyTarget.totalAmount).toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Update Stay</p>
+
               <Field label="Room No.">
                 <div className={`${inputClass} bg-slate-100 text-slate-500 dark:bg-slate-700/60 dark:text-slate-400`}>
                   {roomsById.get(modifyTarget.assignedRoomId ?? '')?.roomNumber ?? '—'}

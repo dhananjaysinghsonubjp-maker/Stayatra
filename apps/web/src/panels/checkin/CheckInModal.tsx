@@ -503,8 +503,11 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
             bookingId: selectedReservation.id,
             roomId,
             ...guestDetails,
-            checkIn: new Date(`${stayCheckIn}T00:00:00`).toISOString(),
-            checkOut: new Date(`${stayCheckOut}T00:00:00`).toISOString(),
+            // §bugfix — same timezone bug as Modify Stay: 'YYYY-MM-DDT00:00:00' parses as LOCAL
+            // midnight, and .toISOString() then rolled it back a calendar day in IST. A plain
+            // date-only string lets the backend's z.coerce.date() read it as UTC midnight directly.
+            checkIn: stayCheckIn,
+            checkOut: stayCheckOut,
             nights: existingNights,
             totalAmount: draft.adjustedTotalAmount ?? totalAmount,
             ...invoiceExtras,
