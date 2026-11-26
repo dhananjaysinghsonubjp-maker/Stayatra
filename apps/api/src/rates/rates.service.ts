@@ -1,4 +1,4 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma, RateSource, type InventoryRate, type AuditEventType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { computeGstSlab } from '../common/gst.js';
@@ -319,33 +319,54 @@ export class RatesService {
    */
   async bulkEditCells(input: {
     hotelId: string;
-    roomCategoryIds: string[];
+    entries: { roomCategoryId: string; price: number; availability: number }[];
     startDate: Date;
     endDate: Date;
     daysOfWeek?: number[];
-    price: number;
-    availability: number;
     actorId: string;
   }) {
-    const [connections, ratePlans] = await Promise.all([
+    const roomCategoryIds = input.entries.map((e) => e.roomCategoryId);
+    const [connections, ratePlans, rooms] = await Promise.all([
       this.prisma.otaConnection.findMany({ where: { hotelId: input.hotelId }, select: { id: true } }),
-      this.prisma.ratePlan.findMany({ where: { roomCategoryId: { in: input.roomCategoryIds } }, select: { id: true, roomCategoryId: true } }),
+      this.prisma.ratePlan.findMany({ where: { roomCategoryId: { in: roomCategoryIds } }, select: { id: true, roomCategoryId: true } }),
+      this.prisma.room.findMany({ where: { roomCategoryId: { in: roomCategoryIds }, active: true }, select: { roomCategoryId: true } }),
     ]);
+
+    // §user request — "Infinity Room sirf 8 hai aur Premium Infinity 4, bulk select karke jo
+    // availability daalte hain vo exceed ho ja raha hai, yahan limitation lagni chahiye": the
+    // frontend already caps each category's input at its own room count, but this is the
+    // authoritative check — never let an availability above what the hotel physically has reach
+    // the OTA pool, no matter where the request came from.
+    const roomCountByCategory = new Map<string, number>();
+    for (const r of rooms) {
+      if (!r.roomCategoryId) continue;
+      roomCountByCategory.set(r.roomCategoryId, (roomCountByCategory.get(r.roomCategoryId) ?? 0) + 1);
+    }
+    for (const entry of input.entries) {
+      const cap = roomCountByCategory.get(entry.roomCategoryId) ?? 0;
+      if (entry.availability > cap) {
+        throw new BadRequestException(`Cannot set availability above ${cap} room(s) for this room type`);
+      }
+    }
+
     // One primary rate plan per selected category — mirrors Calendar's own primaryPlanByCategory (every room in a category shares one price).
     const primaryByCategory = new Map<string, string>();
     for (const rp of ratePlans) if (!primaryByCategory.has(rp.roomCategoryId)) primaryByCategory.set(rp.roomCategoryId, rp.id);
-    const ratePlanIds = [...primaryByCategory.values()];
     const [firstConn, ...restConns] = connections;
 
-    for (const ratePlanId of ratePlanIds) {
-      if (!firstConn) continue;
+    // §user request — "dono category select karte hain toh dono ke different rates and different
+    // room availability honi chahiye": each category now carries its own price/availability pair
+    // instead of one shared pair applied to every selected category.
+    for (const entry of input.entries) {
+      const ratePlanId = primaryByCategory.get(entry.roomCategoryId);
+      if (!ratePlanId || !firstConn) continue;
       await this.bulkUpdate({
         ratePlanId,
         otaConnectionId: firstConn.id,
         startDate: input.startDate,
         endDate: input.endDate,
         daysOfWeek: input.daysOfWeek,
-        explicitTiers: [{ occupancyTier: 1, price: input.price, availability: input.availability }],
+        explicitTiers: [{ occupancyTier: 1, price: entry.price, availability: entry.availability }],
         overrideValueOverrides: true,
         changedBy: input.actorId,
       });
@@ -356,13 +377,13 @@ export class RatesService {
           startDate: input.startDate,
           endDate: input.endDate,
           daysOfWeek: input.daysOfWeek,
-          explicitTiers: [{ occupancyTier: 1, price: input.price }],
+          explicitTiers: [{ occupancyTier: 1, price: entry.price }],
           overrideValueOverrides: true,
           changedBy: input.actorId,
         });
       }
     }
-    return { connectionIds: connections.map((c) => c.id), ratePlanIds };
+    return { connectionIds: connections.map((c) => c.id), ratePlanIds: [...primaryByCategory.values()] };
   }
 
   /**

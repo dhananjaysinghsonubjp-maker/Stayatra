@@ -147,8 +147,10 @@ export function Calendar({
   } | null>(null);
   const [bulkDaysFilter, setBulkDaysFilter] = useState<'all' | 'weekdays' | 'weekends'>('all');
   const [bulkApplyTo, setBulkApplyTo] = useState<string[]>([]);
-  const [bulkPrice, setBulkPrice] = useState('');
-  const [bulkAvailability, setBulkAvailability] = useState(1);
+  // §user request — "agar hum dono category select karte hain toh dono ke different rates and
+  // different room availability honi chahiye": one shared price+availability used to apply to
+  // every checked category at once; each checked category now keeps its own entry here.
+  const [bulkEntries, setBulkEntries] = useState<Record<string, { price: string; availability: number }>>({});
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
@@ -278,6 +280,20 @@ export function Calendar({
   const dues = activeBookings.filter((b) => Number(b.paidAmount ?? 0) < Number(b.totalAmount));
 
   const categoriesInOrder = [...new Map(ratePlans.map((rp) => [rp.roomCategoryId, rp.roomCategoryName])).entries()];
+
+  // §user request — "Infinity Room sirf 8 hai aur Premium Infinity 4, bulk select karke jo
+  // availability daalte hain vo exceed ho ja raha hai, yahan limitation lagni chahiye": each
+  // category's actual physical room count, from the same `rooms` list already loaded here, to cap
+  // Bulk Edit's "Rooms available" input per category instead of letting it go above what the hotel
+  // physically has.
+  const roomCountByCategory = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of rooms) {
+      if (!r.roomCategoryId) continue;
+      map.set(r.roomCategoryId, (map.get(r.roomCategoryId) ?? 0) + 1);
+    }
+    return map;
+  }, [rooms]);
 
   // Derived live (not a snapshot), same reasoning as Bookings.tsx's own viewingGroup — reflects a
   // concurrent change immediately instead of showing stale data until reopened.
@@ -427,8 +443,7 @@ export function Calendar({
         });
         setBulkDaysFilter('all');
         setBulkApplyTo([sel.roomCategoryId]);
-        setBulkPrice('');
-        setBulkAvailability(1);
+        setBulkEntries({ [sel.roomCategoryId]: { price: '', availability: roomCountByCategory.get(sel.roomCategoryId) ?? 0 } });
         setBulkError(null);
         setBulkResult(null);
         return null;
@@ -440,7 +455,11 @@ export function Calendar({
   }, [dates, ratesByPlan, restrictionsByPlan, categoriesInOrder]);
 
   async function saveBulkEdit() {
-    if (!bulkEdit || !bulkPrice || bulkApplyTo.length === 0) return;
+    if (!bulkEdit || bulkApplyTo.length === 0) return;
+    if (bulkApplyTo.some((id) => !bulkEntries[id]?.price)) {
+      setBulkError('Enter a rate for every selected room type');
+      return;
+    }
     setBulkSaving(true);
     setBulkError(null);
     try {
@@ -449,12 +468,13 @@ export function Calendar({
         'rates.bulkEditCells',
         {
           hotelId,
-          roomCategoryIds: bulkApplyTo,
+          // §user request — "dono category select karte hain toh dono ke different rates and
+          // different room availability honi chahiye": one entry per selected category, each
+          // carrying its own price/availability instead of one shared pair for all of them.
+          entries: bulkApplyTo.map((id) => ({ roomCategoryId: id, price: Number(bulkEntries[id].price), availability: bulkEntries[id].availability })),
           startDate: bulkEdit.startDate,
           endDate: bulkEdit.endDate,
           daysOfWeek,
-          price: Number(bulkPrice),
-          availability: bulkAvailability,
         },
         token ?? undefined,
       );
@@ -1197,8 +1217,7 @@ export function Calendar({
             setBulkEdit({ rowLabel: '', roomCategoryId: '', startDate: pickedDates[0], endDate: pickedDates[pickedDates.length - 1] });
             setBulkDaysFilter('all');
             setBulkApplyTo([]);
-            setBulkPrice('');
-            setBulkAvailability(1);
+            setBulkEntries({});
             setBulkError(null);
             setBulkResult(null);
           }}
@@ -1248,56 +1267,66 @@ export function Calendar({
               </div>
 
               <div>
-                <p className="mb-1.5 text-xs font-medium text-slate-600">Rate per night</p>
-                <input autoFocus className={`${inputClass} w-full`} type="number" min={0} value={bulkPrice} onChange={(e) => setBulkPrice(e.target.value)} />
-              </div>
-
-              <div>
-                <p className="mb-1.5 text-xs font-medium text-slate-600">Rooms available</p>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setBulkAvailability((v) => Math.max(0, v - 1))}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50"
-                  >
-                    −
-                  </button>
-                  <input
-                    className={`${inputClass} w-20 text-center`}
-                    type="number"
-                    min={0}
-                    value={bulkAvailability}
-                    onChange={(e) => setBulkAvailability(Math.max(0, Number(e.target.value)))}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setBulkAvailability((v) => v + 1)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-300 text-lg text-slate-600 hover:bg-slate-50"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div>
                 <p className="mb-2 text-xs font-medium text-slate-600">Apply to</p>
-                <div className="space-y-2 rounded-lg border border-slate-200 p-2">
-                  {categoriesInOrder.map(([categoryId, categoryName]) => (
-                    <label key={categoryId} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm hover:bg-slate-50">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                        checked={bulkApplyTo.includes(categoryId)}
-                        onChange={(e) =>
-                          setBulkApplyTo((prev) => (e.target.checked ? [...prev, categoryId] : prev.filter((id) => id !== categoryId)))
-                        }
-                      />
-                      <span className={categoryId === bulkEdit.roomCategoryId ? 'font-medium text-slate-900' : 'text-slate-700'}>
-                        {categoryName}
-                        {categoryId === bulkEdit.roomCategoryId && <span className="ml-1 text-xs text-slate-400">(this row)</span>}
-                      </span>
-                    </label>
-                  ))}
+                {/* §user request — "dono category select karte hain toh dono ke different rates and
+                    different room availability honi chahiye": checking a room type expands its own
+                    Rate/Availability pair right here instead of one shared pair above applying to
+                    every checked type at once. */}
+                <div className="space-y-2">
+                  {categoriesInOrder.map(([categoryId, categoryName]) => {
+                    const checked = bulkApplyTo.includes(categoryId);
+                    const cap = roomCountByCategory.get(categoryId) ?? 0;
+                    const entry = bulkEntries[categoryId] ?? { price: '', availability: cap };
+                    return (
+                      <div key={categoryId} className={`rounded-lg border p-2.5 ${checked ? 'border-brand-300 bg-brand-50/40' : 'border-slate-200'}`}>
+                        <label className="flex items-center gap-2.5 text-sm">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            checked={checked}
+                            onChange={(e) => {
+                              const next = e.target.checked;
+                              setBulkApplyTo((prev) => (next ? [...prev, categoryId] : prev.filter((id) => id !== categoryId)));
+                              if (next) {
+                                setBulkEntries((prev) => (prev[categoryId] ? prev : { ...prev, [categoryId]: { price: '', availability: cap } }));
+                              }
+                            }}
+                          />
+                          <span className={categoryId === bulkEdit.roomCategoryId ? 'font-medium text-slate-900' : 'text-slate-700'}>
+                            {categoryName}
+                            {categoryId === bulkEdit.roomCategoryId && <span className="ml-1 text-xs text-slate-400">(this row)</span>}
+                          </span>
+                        </label>
+                        {checked && (
+                          <div className="mt-2.5 grid grid-cols-2 gap-2.5 pl-6">
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Rate / night</p>
+                              <input
+                                className={`${inputClass} w-full`}
+                                type="number"
+                                min={0}
+                                value={entry.price}
+                                onChange={(e) => setBulkEntries((prev) => ({ ...prev, [categoryId]: { ...entry, price: e.target.value } }))}
+                              />
+                            </div>
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Available (max {cap})</p>
+                              <input
+                                className={`${inputClass} w-full`}
+                                type="number"
+                                min={0}
+                                max={cap}
+                                value={entry.availability}
+                                onChange={(e) =>
+                                  setBulkEntries((prev) => ({ ...prev, [categoryId]: { ...entry, availability: Math.min(cap, Math.max(0, Number(e.target.value))) } }))
+                                }
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1313,7 +1342,11 @@ export function Calendar({
               <button type="button" onClick={() => setBulkEdit(null)} disabled={bulkSaving} className="text-sm font-medium text-slate-500 hover:underline">
                 Cancel
               </button>
-              <Button type="button" onClick={() => void saveBulkEdit()} disabled={bulkSaving || !bulkPrice || bulkApplyTo.length === 0}>
+              <Button
+                type="button"
+                onClick={() => void saveBulkEdit()}
+                disabled={bulkSaving || bulkApplyTo.length === 0 || bulkApplyTo.some((id) => !bulkEntries[id]?.price)}
+              >
                 {bulkSaving ? 'Applying…' : 'Apply'}
               </Button>
             </div>

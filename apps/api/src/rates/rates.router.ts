@@ -281,12 +281,12 @@ export function createRatesRouter(rates: RatesService, sync: OtaSyncService) {
       .input(
         z.object({
           hotelId: z.string(),
-          roomCategoryIds: z.array(z.string()).min(1),
+          entries: z
+            .array(z.object({ roomCategoryId: z.string(), price: z.number().nonnegative(), availability: z.number().int().nonnegative() }))
+            .min(1),
           startDate: z.coerce.date(),
           endDate: z.coerce.date(),
           daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
-          price: z.number().nonnegative(),
-          availability: z.number().int().nonnegative(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
