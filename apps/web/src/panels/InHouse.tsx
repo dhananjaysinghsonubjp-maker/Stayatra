@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
-import { Badge, Card, EmptyState, PageHeader } from '../components/ui';
+import { Button, Card, EmptyState, PageHeader } from '../components/ui';
 import { computeInvoiceTotals } from '../invoice';
 import { formatDateShort } from '../dateFormat';
 import { ReservationDetailModal } from './ReservationDetailModal';
@@ -99,16 +99,19 @@ export function InHouse({ hotelId }: { hotelId: string }) {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/* §user request, with Room View's own table as the exact target — same header/row
+                sizing, uppercase status pill, a Payment-style due/paid pill instead of plain
+                coloured text, and real buttons for Manage/Check-out instead of text links. */}
+            <table className="w-full text-sm [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
               <thead>
                 <tr className="bg-brand-600 text-left text-xs font-semibold text-white">
                   <th className="px-5 py-3">Room</th>
+                  <th className="px-5 py-3">Status</th>
                   <th className="px-5 py-3">Guest</th>
                   <th className="px-5 py-3">Check In</th>
                   <th className="px-5 py-3">Check Out</th>
                   <th className="px-5 py-3">Balance</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3"></th>
+                  <th className="px-5 py-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -119,50 +122,64 @@ export function InHouse({ hotelId }: { hotelId: string }) {
                     discountAmount: r.booking.discountAmount ? Number(r.booking.discountAmount) : null,
                     gstExempt: r.booking.gstExempt,
                   });
-                  const due = totals.grandTotal - Number(r.booking.paidAmount ?? 0);
-                  const rowBg = r.delayed ? 'bg-red-50/60 dark:bg-red-900/20' : i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-800/60';
+                  const due = Math.max(0, totals.grandTotal - Number(r.booking.paidAmount ?? 0));
+                  const rowBg = i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-800/60';
+                  const stripStyle = r.delayed ? 'border-l-red-500' : 'border-l-transparent';
                   return (
                     <tr
                       key={r.booking.id}
-                      className={`border-b border-slate-100 last:border-0 dark:border-slate-700 ${rowBg} hover:bg-brand-50/40 dark:hover:bg-brand-500/10`}
+                      className={`${rowBg} border-b border-l-4 border-slate-100 last:border-0 dark:border-slate-700 ${stripStyle}`}
                     >
-                      <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{r.room.roomNumber}</td>
-                      <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{r.booking.guestName}</td>
-                      <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{formatDateShort(r.booking.checkIn)}</td>
-                      <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{formatDateShort(r.booking.checkOut)}</td>
-                      <td className="px-5 py-3">
-                        {due > 0 ? <span className="text-amber-600">₹{due} due</span> : <span className="text-emerald-600">paid in full</span>}
-                      </td>
-                      <td className="px-5 py-3">
+                      <td className="px-5 py-3.5 font-bold text-slate-900 dark:text-white">{r.room.roomNumber}</td>
+                      <td className="px-5 py-3.5">
                         {r.delayed ? (
-                          <Badge tone="flagged">delayed — past checkout</Badge>
+                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700 dark:bg-red-900/50 dark:text-red-300">
+                            Delayed
+                          </span>
                         ) : (
-                          <Badge tone="occupied">in-house</Badge>
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                            In-House
+                          </span>
                         )}
                       </td>
-                      <td className="px-5 py-3 text-right">
-                        <div className="flex justify-end gap-3">
-                          {canManage && (
-                            <button
-                              onClick={() => setViewingGroupKey(r.booking.reservationGroupId ?? r.booking.id)}
-                              className="text-xs font-medium text-brand-600 hover:underline"
-                            >
-                              Manage
-                            </button>
+                      <td className="px-5 py-3.5 font-medium text-slate-900 dark:text-white">{r.booking.guestName}</td>
+                      <td className="px-5 py-3.5 text-slate-600 dark:text-slate-300">{formatDateShort(r.booking.checkIn)}</td>
+                      <td className="px-5 py-3.5 text-slate-600 dark:text-slate-300">{formatDateShort(r.booking.checkOut)}</td>
+                      <td className="px-5 py-3.5">
+                        {due > 0 ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                              ₹{due % 1 === 0 ? due : due.toFixed(2)} due
+                            </span>
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500">₹{Number(r.booking.paidAmount ?? 0).toFixed(2)} paid</span>
+                          </div>
+                        ) : (
+                          <span className="w-fit rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                            ₹{Number(r.booking.paidAmount ?? 0).toFixed(2)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        <div className="flex justify-end gap-2">
+                          {r.delayed && canResolve && (
+                            <Button variant="secondary" className="text-xs" onClick={() => resolveDelay(r.booking.id)}>
+                              Resolve
+                            </Button>
                           )}
                           {canManage && (
-                            <button
-                              onClick={() => checkOutGuest(r.booking.id, r.booking.guestName, r.room.roomNumber)}
+                            <Button variant="secondary" className="text-xs" onClick={() => setViewingGroupKey(r.booking.reservationGroupId ?? r.booking.id)}>
+                              Manage
+                            </Button>
+                          )}
+                          {canManage && (
+                            <Button
+                              variant="secondary"
+                              className="text-xs"
                               disabled={checkingOutId === r.booking.id}
-                              className="text-xs font-medium text-amber-600 hover:underline disabled:opacity-50"
+                              onClick={() => checkOutGuest(r.booking.id, r.booking.guestName, r.room.roomNumber)}
                             >
                               {checkingOutId === r.booking.id ? 'Checking out…' : 'Check-out Guest'}
-                            </button>
-                          )}
-                          {r.delayed && canResolve && (
-                            <button onClick={() => resolveDelay(r.booking.id)} className="text-xs font-medium text-brand-600 hover:underline">
-                              Resolve
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </td>
