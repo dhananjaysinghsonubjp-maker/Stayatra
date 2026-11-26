@@ -324,6 +324,7 @@ model Hotel {
   photos          HotelPhoto[]
   reviews         Review[]
   contacts        HotelContact[]
+  rateChangeRequests RateChangeRequest[]
 
   @@map("hotels")
 }
@@ -639,6 +640,47 @@ model Restriction {
   @@unique([ratePlanId, otaConnectionId, date])
   @@index([ratePlanId, date])
   @@map("restrictions")
+}
+
+enum RateChangeStatus {
+  pending
+  approved
+  rejected
+}
+
+enum RateModificationRule {
+  set
+  increase
+  decrease
+}
+
+// §user request, with a reference app's own "Bulk Update" + "Approval Request" screens as the
+// target — a manager's bulk rate change (Increase/Decrease is relative to whatever each date's
+// own current rate already is, preserving weekday/weekend differences instead of flattening every
+// date to one number) sits here as `pending` until an owner approves it; an owner's own request is
+// applied immediately (auto-approved) since there's no one above them to review it.
+model RateChangeRequest {
+  id                String               @id @default(cuid())
+  hotelId           String               @map("hotel_id")
+  roomCategoryIds   String[]             @map("room_category_ids")
+  startDate         DateTime             @map("start_date") @db.Date
+  endDate           DateTime             @map("end_date") @db.Date
+  daysOfWeek        Int[]                @map("days_of_week")
+  modificationRule  RateModificationRule @map("modification_rule")
+  value             Decimal              @db.Decimal(10, 2)
+  discountPercent   Decimal?             @map("discount_percent") @db.Decimal(5, 2)
+  remarks           String?
+  status            RateChangeStatus     @default(pending)
+  requestedByUserId String               @map("requested_by_user_id")
+  decidedByUserId   String?              @map("decided_by_user_id")
+  decidedAt         DateTime?            @map("decided_at")
+  rejectionReason   String?              @map("rejection_reason")
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, status])
+  @@map("rate_change_requests")
 }
 
 // ── §5.2 Bookings & payments (shared by CM and PMS) ─────────────────────────

@@ -465,6 +465,28 @@ export interface InventoryRate {
   gst: { rate: number; itcEligible: boolean; label: string };
 }
 
+export interface RateChangeRequest {
+  id: string;
+  hotelId: string;
+  roomCategoryIds: string[];
+  roomCategoryNames: string[];
+  startDate: string;
+  endDate: string;
+  daysOfWeek: number[];
+  modificationRule: 'set' | 'increase' | 'decrease';
+  value: string;
+  discountPercent: string | null;
+  remarks: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedByUserId: string;
+  requestedByName: string;
+  decidedByUserId: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  rejectionReason: string | null;
+  createdAt: string;
+}
+
 export interface Restriction {
   id: string;
   date: string;

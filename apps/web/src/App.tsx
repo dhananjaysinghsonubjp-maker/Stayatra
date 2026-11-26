@@ -43,6 +43,7 @@ import { Calendar } from './panels/channel-manager/Calendar';
 import { GuestMessaging } from './panels/channel-manager/GuestMessaging';
 import { OtaReviews } from './panels/channel-manager/OtaReviews';
 import { RateInventoryUpdate } from './panels/channel-manager/RateInventoryUpdate';
+import { ApprovalRequests } from './panels/channel-manager/ApprovalRequests';
 import { AdvanceBulkUpdate } from './panels/channel-manager/AdvanceBulkUpdate';
 import { Inventory } from './panels/channel-manager/Inventory';
 import { ConnectedChannels } from './panels/channel-manager/ConnectedChannels';
@@ -214,6 +215,7 @@ function Shell() {
   const cmTabs: Tab[] = [
     'cm_rate_inventory_update',
     'cm_advance_bulk_update',
+    'cm_approval_requests',
     'cm_guest_messaging',
     'cm_reviews',
     'cm_reports',
@@ -441,8 +443,9 @@ function Shell() {
                   }}
                 />
               )}
-              {activeTab === 'cm_rate_inventory_update' && <RateInventoryUpdate hotelId={hotel.id} />}
+              {activeTab === 'cm_rate_inventory_update' && <RateInventoryUpdate hotelId={hotel.id} onNavigate={setTab} />}
               {activeTab === 'cm_advance_bulk_update' && <AdvanceBulkUpdate hotelId={hotel.id} />}
+              {activeTab === 'cm_approval_requests' && <ApprovalRequests hotelId={hotel.id} />}
               {activeTab === 'cm_inventory' && <Inventory hotelId={hotel.id} />}
               {activeTab === 'cm_channels' && <ConnectedChannels hotelId={hotel.id} />}
               {activeTab === 'cm_reports' && <BusinessReports hotelId={hotel.id} />}

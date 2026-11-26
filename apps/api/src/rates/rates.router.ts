@@ -300,5 +300,64 @@ export function createRatesRouter(rates: RatesService, sync: OtaSyncService) {
         );
         return result;
       }),
+
+    // §user request, with a reference app's own "Bulk Update"/"Approval Request" screens as the
+    // target — a manager's request needs an owner's sign-off; an owner's own request applies right
+    // away (see rates.service.ts's own comment on createRateChangeRequest).
+    createRateChangeRequest: ownerOrManager
+      .input(
+        z.object({
+          hotelId: z.string(),
+          roomCategoryIds: z.array(z.string()).min(1),
+          startDate: z.coerce.date(),
+          endDate: z.coerce.date(),
+          daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
+          modificationRule: z.enum(['set', 'increase', 'decrease']),
+          value: z.number().nonnegative(),
+          discountPercent: z.number().min(0).max(100).optional(),
+          remarks: z.string().optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { request, applied } = await rates.createRateChangeRequest({
+          ...input,
+          requestedByUserId: ctx.user.userId,
+          requesterIsOwner: ctx.user.roles.channel_manager === 'owner',
+        });
+        if (applied) {
+          await Promise.all(
+            applied.ratePlanIds.flatMap((ratePlanId) =>
+              applied.connectionIds.map((otaConnectionId) =>
+                sync.enqueueRatePush({ otaConnectionId, ratePlanId, startDate: applied.startDate, endDate: applied.endDate }),
+              ),
+            ),
+          );
+        }
+        return request;
+      }),
+
+    listRateChangeRequests: ownerOrManager
+      .input(z.object({ hotelId: z.string(), status: z.enum(['pending', 'approved', 'rejected']).optional() }))
+      .query(({ input }) => rates.listRateChangeRequests(input)),
+
+    approveRateChangeRequest: requireRole('channel_manager', ['owner'])
+      .input(z.object({ requestId: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        const { applied } = await rates.approveRateChangeRequest({ requestId: input.requestId, actorId: ctx.user.userId });
+        if (applied) {
+          await Promise.all(
+            applied.ratePlanIds.flatMap((ratePlanId) =>
+              applied.connectionIds.map((otaConnectionId) =>
+                sync.enqueueRatePush({ otaConnectionId, ratePlanId, startDate: applied.startDate, endDate: applied.endDate }),
+              ),
+            ),
+          );
+        }
+        return { ok: true };
+      }),
+
+    rejectRateChangeRequest: requireRole('channel_manager', ['owner'])
+      .input(z.object({ requestId: z.string(), reason: z.string().optional() }))
+      .mutation(({ ctx, input }) => rates.rejectRateChangeRequest({ requestId: input.requestId, actorId: ctx.user.userId, reason: input.reason })),
   });
 }

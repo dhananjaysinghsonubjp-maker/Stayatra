@@ -387,6 +387,156 @@ export class RatesService {
   }
 
   /**
+   * §user request, with a reference app's own "Bulk Update" + "Approval Request" screens as the
+   * target — a manager's request sits `pending` until an owner decides it; an owner's own request
+   * has no one above them to review it, so it applies immediately (auto-approved, logged the same
+   * way for a visible history). "Increase"/"Decrease" are relative to whatever each date's own
+   * current rate already is (reusing bulkUpdate's existing `adjust` mode) rather than flattening a
+   * whole range to one number — a weekday/weekend rate difference survives a blanket "+500 for the
+   * holiday season" the same way it would if done one date at a time.
+   */
+  async createRateChangeRequest(input: {
+    hotelId: string;
+    roomCategoryIds: string[];
+    startDate: Date;
+    endDate: Date;
+    daysOfWeek?: number[];
+    modificationRule: 'set' | 'increase' | 'decrease';
+    value: number;
+    discountPercent?: number;
+    remarks?: string;
+    requestedByUserId: string;
+    requesterIsOwner: boolean;
+  }) {
+    if (input.roomCategoryIds.length === 0) throw new BadRequestException('Select at least one room type');
+    if (input.value < 0) throw new BadRequestException('Value cannot be negative');
+    if (input.discountPercent !== undefined && (input.discountPercent < 0 || input.discountPercent > 100)) {
+      throw new BadRequestException('Discount must be between 0 and 100');
+    }
+
+    const autoApprove = input.requesterIsOwner;
+    const request = await this.prisma.rateChangeRequest.create({
+      data: {
+        hotelId: input.hotelId,
+        roomCategoryIds: input.roomCategoryIds,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        daysOfWeek: input.daysOfWeek ?? [],
+        modificationRule: input.modificationRule,
+        value: input.value,
+        discountPercent: input.discountPercent,
+        remarks: input.remarks,
+        requestedByUserId: input.requestedByUserId,
+        status: autoApprove ? 'approved' : 'pending',
+        decidedByUserId: autoApprove ? input.requestedByUserId : null,
+        decidedAt: autoApprove ? new Date() : null,
+      },
+    });
+    const applied = autoApprove ? await this.applyRateChangeRequest(request.id, input.requestedByUserId) : null;
+    return { request, applied };
+  }
+
+  async listRateChangeRequests(input: { hotelId: string; status?: 'pending' | 'approved' | 'rejected' }) {
+    const rows = await this.prisma.rateChangeRequest.findMany({
+      where: { hotelId: input.hotelId, status: input.status },
+      orderBy: { createdAt: 'desc' },
+    });
+    const userIds = [...new Set(rows.flatMap((r) => [r.requestedByUserId, r.decidedByUserId].filter((x): x is string => !!x)))];
+    const categoryIds = [...new Set(rows.flatMap((r) => r.roomCategoryIds))];
+    const [users, categories] = await Promise.all([
+      this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
+      this.prisma.roomCategory.findMany({ where: { id: { in: categoryIds } }, select: { id: true, name: true } }),
+    ]);
+    const nameById = new Map(users.map((u) => [u.id, u.name]));
+    const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+    return rows.map((r) => ({
+      ...r,
+      requestedByName: nameById.get(r.requestedByUserId) ?? '—',
+      decidedByName: r.decidedByUserId ? (nameById.get(r.decidedByUserId) ?? '—') : null,
+      roomCategoryNames: r.roomCategoryIds.map((id) => categoryNameById.get(id) ?? '—'),
+    }));
+  }
+
+  async approveRateChangeRequest(input: { requestId: string; actorId: string }) {
+    const request = await this.prisma.rateChangeRequest.findUniqueOrThrow({ where: { id: input.requestId } });
+    if (request.status !== 'pending') throw new ConflictException('This request has already been decided');
+    await this.prisma.rateChangeRequest.update({
+      where: { id: input.requestId },
+      data: { status: 'approved', decidedByUserId: input.actorId, decidedAt: new Date() },
+    });
+    const applied = await this.applyRateChangeRequest(request.id, input.actorId);
+    return { ok: true, applied };
+  }
+
+  async rejectRateChangeRequest(input: { requestId: string; actorId: string; reason?: string }) {
+    const request = await this.prisma.rateChangeRequest.findUniqueOrThrow({ where: { id: input.requestId } });
+    if (request.status !== 'pending') throw new ConflictException('This request has already been decided');
+    await this.prisma.rateChangeRequest.update({
+      where: { id: input.requestId },
+      data: { status: 'rejected', decidedByUserId: input.actorId, decidedAt: new Date(), rejectionReason: input.reason },
+    });
+    return { ok: true };
+  }
+
+  /** Resolves an approved request into real InventoryRate writes — reuses bulkUpdate's own
+   * explicitTiers (for "set") / adjust (for "increase"/"decrease", and for the optional discount
+   * applied as a second percent-decrease pass) so this stays a thin orchestration over logic that
+   * already handles value-override protection, OTA fan-out and audit logging. */
+  private async applyRateChangeRequest(requestId: string, actorId: string) {
+    const request = await this.prisma.rateChangeRequest.findUniqueOrThrow({ where: { id: requestId } });
+    const [connections, ratePlans] = await Promise.all([
+      this.prisma.otaConnection.findMany({ where: { hotelId: request.hotelId }, select: { id: true } }),
+      this.prisma.ratePlan.findMany({ where: { roomCategoryId: { in: request.roomCategoryIds } }, select: { id: true, roomCategoryId: true } }),
+    ]);
+    const primaryByCategory = new Map<string, string>();
+    for (const rp of ratePlans) if (!primaryByCategory.has(rp.roomCategoryId)) primaryByCategory.set(rp.roomCategoryId, rp.id);
+    const daysOfWeek = request.daysOfWeek.length > 0 ? request.daysOfWeek : undefined;
+    const value = Number(request.value);
+    const discountPercent = request.discountPercent ? Number(request.discountPercent) : 0;
+
+    for (const ratePlanId of primaryByCategory.values()) {
+      for (const conn of connections) {
+        if (request.modificationRule === 'set') {
+          await this.bulkUpdate({
+            ratePlanId,
+            otaConnectionId: conn.id,
+            startDate: request.startDate,
+            endDate: request.endDate,
+            daysOfWeek,
+            explicitTiers: [{ occupancyTier: 1, price: value }],
+            overrideValueOverrides: true,
+            changedBy: actorId,
+          });
+        } else {
+          await this.bulkUpdate({
+            ratePlanId,
+            otaConnectionId: conn.id,
+            startDate: request.startDate,
+            endDate: request.endDate,
+            daysOfWeek,
+            adjust: { mode: 'fixed', direction: request.modificationRule, value },
+            overrideValueOverrides: true,
+            changedBy: actorId,
+          });
+        }
+        if (discountPercent > 0) {
+          await this.bulkUpdate({
+            ratePlanId,
+            otaConnectionId: conn.id,
+            startDate: request.startDate,
+            endDate: request.endDate,
+            daysOfWeek,
+            adjust: { mode: 'percent', direction: 'decrease', value: discountPercent },
+            overrideValueOverrides: true,
+            changedBy: actorId,
+          });
+        }
+      }
+    }
+    return { ratePlanIds: [...primaryByCategory.values()], connectionIds: connections.map((c) => c.id), startDate: request.startDate, endDate: request.endDate };
+  }
+
+  /**
    * The Calendar cell editor's single "Save & push" action — pooled inventory (same
    * non-negotiable as `adjustAvailabilityForStay`) means one edit to a room-night applies
    * to every connected channel at once, not just whichever channel happened to be selected

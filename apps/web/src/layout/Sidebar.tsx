@@ -45,6 +45,7 @@ export type Tab =
   | 'cm_reviews'
   | 'cm_rate_inventory_update'
   | 'cm_advance_bulk_update'
+  | 'cm_approval_requests'
   | 'cm_inventory'
   | 'cm_channels'
   | 'cm_reports'
@@ -147,6 +148,14 @@ const NAV: NavEntry[] = [
         id: 'cm_advance_bulk_update',
         label: 'Advance Update',
         icon: Icon('M12 15a3 3 0 100-6 3 3 0 000 6z M3 12h2m14 0h2M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M5.6 18.4l1.4-1.4m10-10l1.4-1.4'),
+      },
+      // §user request, with a reference app's own "Approval Request" screen as the target — a
+      // manager's bulk rate change request (Rate & Invt. Update's own "Bulk Update") sits here
+      // until an owner approves or rejects it.
+      {
+        id: 'cm_approval_requests',
+        label: 'Approval Requests',
+        icon: Icon('M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'),
       },
     ],
   },
