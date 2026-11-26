@@ -1150,10 +1150,11 @@ export class ReportsService {
     const repeatAges = new Map<string, number>();
     let guestsWithAge = 0;
 
-    const customers: { id: string; name: string; phone: string; bookings: number; totalSpend: number }[] = [];
+    const customers: { id: string; name: string; phone: string; location: string; bookings: number; totalSpend: number; lastBooking: string | null; status: 'active' | 'inactive' }[] = [];
 
     for (const g of guests) {
       const isRepeat = g.bookings.length > 1;
+      const location = [g.city, g.state, g.country].filter(Boolean).join(', ');
       if (g.state) {
         guestsWithState += 1;
         byState.set(g.state, (byState.get(g.state) ?? 0) + 1);
@@ -1189,15 +1190,15 @@ export class ReportsService {
         if (b.status !== 'cancelled' && b.status !== 'no_show' && b.checkIn >= ninetyDaysAgo) hasRealStay = true;
       }
       if (hasRealStay) activeGuests += 1;
-      customers.push({ id: g.id, name: g.name, phone: g.phone, bookings: g.bookings.length, totalSpend });
+      const lastBooking = g.bookings.length > 0 ? g.bookings[g.bookings.length - 1].checkIn.toISOString() : null;
+      customers.push({ id: g.id, name: g.name, phone: g.phone, location, bookings: g.bookings.length, totalSpend, lastBooking, status: hasRealStay ? 'active' : 'inactive' });
     }
 
     const repeatGuestCount = guests.filter((g) => g.bookings.length > 1).length;
     const newGuestCount = totalGuests - repeatGuestCount;
     const totalBookingsForShare = directBookings + otaBookings;
 
-    const topTen = [...customers].sort((a, b) => b.totalSpend - a.totalSpend).slice(0, 10);
-    const combinedSpend = topTen.reduce((s, c) => s + c.totalSpend, 0);
+    customers.sort((a, b) => b.totalSpend - a.totalSpend);
 
     const vipTiers: { tier: string; min: number; max: number; threshold: string }[] = [
       { tier: 'VVVIP', min: 11, max: Infinity, threshold: 'More than 10 bookings' },
@@ -1233,8 +1234,7 @@ export class ReportsService {
       ageGroups: toRankedList(allAges, guestsWithAge),
       guestsWithAge,
       repeatAgeGroups: toRankedList(repeatAges, repeatGuestCount),
-      topCustomers: topTen,
-      combinedSpend,
+      customers,
       vipCount,
       vipBreakdown,
       addressOnFilePercent: totalGuests > 0 ? (guestsWithState / totalGuests) * 100 : 0,
