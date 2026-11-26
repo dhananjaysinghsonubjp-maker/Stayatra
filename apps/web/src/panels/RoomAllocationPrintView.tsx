@@ -44,13 +44,25 @@ export function RoomAllocationReport({
   due: number;
   onRecordPayment: () => void;
 }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [hotel, setHotel] = useState<Hotel | null>(null);
+  // §user request — "Reception Desk ke niche staff ka naam jo ID chala raha hai": the logged-in
+  // user's own name isn't on ActingUser (just userId/roles), so it's looked up the same way
+  // Modify Stay's own "Reported By" staff list already does.
+  const [staffName, setStaffName] = useState<string | null>(null);
 
   useEffect(() => {
     query<Hotel>('hotels.get', { hotelId }, token ?? undefined).then(setHotel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotelId]);
+
+  useEffect(() => {
+    if (!user) return;
+    query<{ id: string; name: string }[]>('hotels.listStaffNames', { hotelId }, token ?? undefined)
+      .then((staff) => setStaffName(staff.find((s) => s.id === user.userId)?.name ?? null))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hotelId, user]);
 
   const first = bookings[0];
   const bookerName = first.bookedByName ?? first.guestName;
@@ -71,6 +83,11 @@ export function RoomAllocationReport({
 
   if (!hotel) return <p className="py-20 text-center text-sm text-slate-400">Loading…</p>;
 
+  // §user request — "top par SkyMax Hotel mein poora address aur GST details sab kuch aayega jaise
+  // hum ek bill mein daalte hain": same letterhead fields InvoicePrintView already pulls from
+  // Hotel Details/Invoice Settings, just centered to match this notice's own style.
+  const addressParts = [hotel.addressLine, hotel.city, hotel.state, hotel.pincode].filter(Boolean);
+
   return (
     <div className="room-allocation-print-root mt-4 rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 print:rounded-none print:border-0 print:p-0">
       <div className="relative">
@@ -83,8 +100,16 @@ export function RoomAllocationReport({
         </button>
         <div className="text-center">
           <p className="text-2xl font-bold uppercase tracking-wide text-slate-900">{hotel.name}</p>
-          <p className="mt-1 text-base font-bold uppercase tracking-wide text-slate-700">Guest Room Allocation Notice</p>
-          <p className="mt-2 text-sm text-slate-500">
+          {addressParts.length > 0 && <p className="mt-1 text-xs text-slate-500">{addressParts.join(', ')}</p>}
+          {(hotel.contactMobile || hotel.gstRegistration || hotel.licenseNumber) && (
+            <p className="mt-0.5 text-xs text-slate-500">
+              {[hotel.contactMobile ? `☎ ${hotel.contactMobile}` : null, hotel.gstRegistration ? `GSTIN: ${hotel.gstRegistration}` : null, hotel.licenseNumber ? `Licence No.: ${hotel.licenseNumber}` : null]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          )}
+          <p className="mt-2 text-base font-bold uppercase tracking-wide text-slate-700">Guest Room Allocation Notice</p>
+          <p className="mt-1 text-sm text-slate-500">
             <span className="font-semibold text-slate-700">Date:</span> {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
@@ -111,7 +136,16 @@ export function RoomAllocationReport({
           {floors.map(([floor, roomRows]) => (
             <div key={floor} className="mb-5 last:mb-0">
               <p className="mb-2 text-sm font-bold uppercase tracking-wide text-brand-700">{floor}</p>
-              <table className="w-full border-collapse text-sm">
+              {/* §bugfix — "partition mein difference dikh raha hai": each floor's table used to
+                  auto-size its own columns off its own content, so the Room No./Phone No. column
+                  boundaries drifted between one floor's table and the next. `table-fixed` plus the
+                  same explicit widths on every floor's table keeps every column lined up. */}
+              <table className="w-full table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-20" />
+                  <col />
+                  <col className="w-36" />
+                </colgroup>
                 <thead>
                   <tr className="bg-brand-700 text-left text-white">
                     <th className="border border-brand-800 px-3 py-2">Room No.</th>
@@ -124,9 +158,9 @@ export function RoomAllocationReport({
                     .sort((a, b) => Number(a.roomNumber) - Number(b.roomNumber))
                     .map((r) => (
                       <tr key={r.roomNumber} className="even:bg-slate-50">
-                        <td className="border border-slate-200 px-3 py-2 text-center">{r.roomNumber}</td>
-                        <td className="border border-slate-200 px-3 py-2">{r.guestName}</td>
-                        <td className="border border-slate-200 px-3 py-2">{r.phone ?? '—'}</td>
+                        <td className="truncate border border-slate-200 px-3 py-2 text-center">{r.roomNumber}</td>
+                        <td className="truncate border border-slate-200 px-3 py-2">{r.guestName}</td>
+                        <td className="truncate border border-slate-200 px-3 py-2">{r.phone ?? '—'}</td>
                       </tr>
                     ))}
                 </tbody>
@@ -165,6 +199,8 @@ export function RoomAllocationReport({
       <div className="mt-8 text-sm text-slate-700">
         <p className="font-semibold">Reception Desk</p>
         <p>{hotel.name}</p>
+        {staffName && <p className="text-xs text-slate-500">{staffName}</p>}
+        {hotel.contactMobile && <p className="text-xs text-slate-500">{hotel.contactMobile}</p>}
       </div>
     </div>
   );
