@@ -267,7 +267,14 @@ export function MoreActionsPanel({
   }, [view]);
 
   async function submitModifyStay() {
-    if (!reportedByUserId) return;
+    // §bugfix — "dates change nahi ho rahi hai": the Confirm button was just silently `disabled`
+    // whenever "Reported By" was left on "— select employee —" (its default), with no message —
+    // clicking it did nothing at all, which reads exactly like "the date never saved" even though
+    // nothing was ever actually submitted.
+    if (!reportedByUserId) {
+      setError('Select who reported this change (Reported By) before confirming');
+      return;
+    }
     await run(() =>
       mutate(
         'bookings.modifyStay',
@@ -475,10 +482,10 @@ export function MoreActionsPanel({
               correction window updateBooking covers. */}
           {view === 'modifystay' && (
             <div className="min-w-0 space-y-4 p-5">
-              {group.length > 1 && (
+              {activeGroup.length > 1 && (
                 <Field label="Room">
                   <select className={inputClass} value={modifyTargetId} onChange={(e) => pickModifyTarget(e.target.value)}>
-                    {group.map((b) => {
+                    {activeGroup.map((b) => {
                       const room = roomsById.get(b.assignedRoomId ?? '');
                       return (
                         <option key={b.id} value={b.id}>
@@ -533,7 +540,7 @@ export function MoreActionsPanel({
                 <Button type="button" variant="secondary" className="flex-1" onClick={() => setView('menu')}>
                   Cancel
                 </Button>
-                <Button type="button" className="flex-1" disabled={busy || !reportedByUserId} onClick={submitModifyStay}>
+                <Button type="button" className="flex-1" disabled={busy} onClick={submitModifyStay}>
                   {busy ? 'Saving…' : 'Confirm'}
                 </Button>
               </div>

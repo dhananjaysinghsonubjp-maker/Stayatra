@@ -9,7 +9,7 @@ import { CameraCapture } from '../../components/CameraCapture';
 import { ClockTimePicker } from './ClockTimePicker';
 import { InvoiceStep, type InvoiceDraft } from './InvoiceStep';
 import { BOOKING_SOURCE_OPTIONS } from '../../bookingSource';
-import type { Booking, BookingSource, Gender, Guest, IdType, RatePlan, Room } from '../../types';
+import type { Booking, BookingSource, Gender, Guest, Hotel, IdType, RatePlan, Room } from '../../types';
 
 const ID_TYPES: { value: IdType; label: string }[] = [
   { value: 'aadhaar', label: 'Aadhaar' },
@@ -151,6 +151,21 @@ export function CheckInModal({ hotelId, room, reservation, assignedRoomNumber, o
   const [departureTime, setDepartureTime] = useState('11:00');
   const [stayPickerOpen, setStayPickerOpen] = useState(false);
   const checkOutDateNew = addDaysISO(todayISO(), nights);
+
+  // §bugfix/§user request — "hotel starting mein register kar raha hota hai toh check-in/check-out
+  // time maangta hai, hotel uske according hi check-in/check-out karega make sure": the hotel's own
+  // configured checkout time (Settings → Hotel Details, same checkOutTime set during onboarding)
+  // was never actually read here — every check-in's checkout time defaulted to a hardcoded 11:00
+  // regardless of what the hotel registered. Arrival stays "now" (an actual, real-time check-in
+  // moment), but checkout now defaults to the hotel's own policy time.
+  useEffect(() => {
+    query<Hotel>('hotels.get', { hotelId }, token ?? undefined)
+      .then((h) => {
+        if (h.checkOutTime) setDepartureTime(h.checkOutTime);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hotelId]);
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

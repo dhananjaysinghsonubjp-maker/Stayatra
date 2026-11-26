@@ -9,6 +9,11 @@ import { MoreActionsPanel, type MoreActionsView } from './MoreActionsPanel';
 import { CreateReservationModal } from './checkin/CreateReservationModal';
 import type { Booking, InHouseRow, RatePlan, Room, RoomCategory } from '../types';
 
+/** Same calendar day, compared in the browser's local time — matches RoomBoard's own isToday. */
+function isToday(isoDate: string): boolean {
+  return isoDate.slice(0, 10) === new Date().toLocaleDateString('en-CA');
+}
+
 export function InHouse({ hotelId }: { hotelId: string }) {
   const { token, role } = useAuth();
   const [rows, setRows] = useState<InHouseRow[]>([]);
@@ -164,6 +169,23 @@ export function InHouse({ hotelId }: { hotelId: string }) {
                           {r.delayed && canResolve && (
                             <Button variant="secondary" className="text-xs" onClick={() => resolveDelay(r.booking.id)}>
                               Resolve
+                            </Button>
+                          )}
+                          {/* §user request — "unka departing aa raha hai, agar unko stay extend
+                              karna ho toh Manage ke aage Extend Stay aa jana chahiye": opens the
+                              same Modify Stay panel More Actions already has — its checkout date
+                              and rate-per-night already default from this booking's own current
+                              stay, so extending by a night keeps the same agreed rate. */}
+                          {canManage && isToday(r.booking.checkOut) && (
+                            <Button
+                              variant="secondary"
+                              className="text-xs"
+                              onClick={() => {
+                                setActionsGroupKey(r.booking.reservationGroupId ?? r.booking.id);
+                                setActionsInitialView('modifystay');
+                              }}
+                            >
+                              Extend Stay
                             </Button>
                           )}
                           {canManage && (
