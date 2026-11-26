@@ -8,9 +8,9 @@ import { istDateKey } from '../components/DateRangePicker';
 import { ChannelIcon } from './channel-manager/ChannelBadge';
 import { SOURCE_LABEL } from './channel-manager/ota-labels';
 import { CheckInModal } from './checkin/CheckInModal';
-import { PaymentHistory, type PaymentHistoryEntry } from './PaymentHistory';
+import type { PaymentHistoryEntry } from './PaymentHistory';
 import { InvoicePrintView } from './InvoicePrintView';
-import { RoomAllocationPrintView } from './RoomAllocationPrintView';
+import { RoomAllocationReport } from './RoomAllocationPrintView';
 import { RoomTransferPanel } from './RoomTransferPanel';
 import type { MoreActionsView } from './MoreActionsPanel';
 import type { Booking, Room, RatePlan } from '../types';
@@ -291,10 +291,6 @@ export function ReservationDetailModal({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [checkInQueue, setCheckInQueue] = useState<Booking[]>([]);
   const [printingBooking, setPrintingBooking] = useState<Booking | null>(null);
-  // §user request — "Room Allocation PDF in Master Folio": who's actually in which room (per-room
-  // guest name, since a multi-room reservation can have a different one per room) plus the payment
-  // report underneath it in the same printable document.
-  const [printingAllocation, setPrintingAllocation] = useState(false);
   const [transferringBooking, setTransferringBooking] = useState<Booking | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addingRoom, setAddingRoom] = useState(false);
@@ -863,67 +859,20 @@ export function ReservationDetailModal({
                 </div>
               </div>
             ) : (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="grid flex-1 grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
-                    <div>
-                      <p className="text-xs text-slate-400 dark:text-slate-500">Booking ID</p>
-                      <p className="font-medium text-slate-900 dark:text-white">{bookingIdShort}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-400 dark:text-slate-500">Total Guests</p>
-                      <p className="font-medium text-slate-900 dark:text-white">{totalGuests}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-400 dark:text-slate-500">Booking Date</p>
-                      <p className="font-medium text-slate-900 dark:text-white">{formatDateTimeShort(first.createdAt)}</p>
-                    </div>
-                  </div>
-                  <Button type="button" variant="secondary" className="shrink-0 text-xs" onClick={() => setPrintingAllocation(true)}>
-                    🛏 Room Allocation PDF
-                  </Button>
-                </div>
-
-                <div className="mt-5 space-y-1.5 border-t border-slate-100 pt-4 text-sm dark:border-slate-700">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Per-room charges</p>
-                  {activeBookings.map((b) => {
-                    const totals = computeInvoiceTotals({
-                      totalAmount: Number(b.totalAmount),
-                      lineItems: b.lineItems ?? [],
-                      discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
-                      gstExempt: b.gstExempt,
-                    });
-                    return (
-                      <div key={b.id} className="flex justify-between text-slate-500 dark:text-slate-400">
-                        <span>Room {roomFor(b)?.roomNumber ?? '—'}</span>
-                        <span className="text-slate-900 dark:text-white">₹{totals.grandTotal.toFixed(2)}</span>
-                      </div>
-                    );
-                  })}
-                  <div className="flex justify-between border-t border-slate-100 pt-1.5 font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                    <span>Booking Amount</span>
-                    <span className="text-slate-900 dark:text-white">₹{grandTotal.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                    <span>Paid</span>
-                    <span className="text-slate-900 dark:text-white">₹{paid.toFixed(2)}</span>
-                  </div>
-                  <div className={`flex items-center justify-between font-medium ${due > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                    <span>Due</span>
-                    <span>{due > 0 ? `₹${due.toFixed(2)}` : 'Paid in full'}</span>
-                  </div>
-                  {due > 0 && (
-                    <Button type="button" className="mt-1 w-full justify-center" onClick={() => onMoreActions('payment')}>
-                      Record Payment
-                    </Button>
-                  )}
-                </div>
-
-                <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-700">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment History</p>
-                  <PaymentHistory entries={paymentTimeline} />
-                </div>
-              </div>
+              // §user request — "ye poora ek report kind of niklega as a PDF format mein direct
+              // seedha, top right mein print karne ka option rahega": Master Folio no longer shows
+              // a plain on-screen summary plus a separate "Room Allocation PDF" button that opened
+              // a popup — the tab itself now just is that printable Guest Room Allocation Notice.
+              <RoomAllocationReport
+                hotelId={hotelId}
+                bookings={activeBookings}
+                rooms={rooms}
+                paymentTimeline={paymentTimeline}
+                grandTotal={grandTotal}
+                paid={paid}
+                due={due}
+                onRecordPayment={() => onMoreActions('payment')}
+              />
             )}
           </div>
         </div>
@@ -958,18 +907,6 @@ export function ReservationDetailModal({
       )}
       {printingBooking && (
         <InvoicePrintView booking={printingBooking} roomType={roomFor(printingBooking)?.roomCategory?.name ?? '—'} onClose={() => setPrintingBooking(null)} />
-      )}
-      {printingAllocation && (
-        <RoomAllocationPrintView
-          hotelId={hotelId}
-          bookings={activeBookings}
-          rooms={rooms}
-          paymentTimeline={paymentTimeline}
-          grandTotal={grandTotal}
-          paid={paid}
-          due={due}
-          onClose={() => setPrintingAllocation(false)}
-        />
       )}
       {transferringBooking && (
         <RoomTransferPanel
