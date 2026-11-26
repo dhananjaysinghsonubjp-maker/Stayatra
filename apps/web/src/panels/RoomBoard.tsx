@@ -463,18 +463,19 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
                           {STATUS_LABEL[status]}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 font-medium text-slate-900 dark:text-white">
+                      <td className="px-5 py-3.5">
                         {/* §user request — "403 - Boi (Maharaj ji), unke primary booker ka naam ho
-                            taaki pata rahega": a multi-room reservation can have a different guest
-                            per room, so the room's own name alone doesn't say which booking it
-                            belongs to — the primary booker's name (bookedByName, only ever set when
-                            a reservation actually has more than one room) now tags along in
-                            brackets whenever it differs from this room's own guest. */}
+                            taaki pata rahega", then "isko Infinity Room ki tarah rakho taaki space
+                            kam lage": the primary booker's name (bookedByName, only ever set when a
+                            reservation actually has more than one room) now sits on its own small
+                            line underneath, the same two-line pattern the Room column already uses
+                            for room number + category, instead of inline in brackets widening the
+                            row. */}
                         {r.currentStay ? (
                           <>
-                            {r.currentStay.guestName}
+                            <div className="font-medium text-slate-900 dark:text-white">{r.currentStay.guestName}</div>
                             {r.currentStay.bookedByName && r.currentStay.bookedByName !== r.currentStay.guestName && (
-                              <span className="font-normal text-slate-400 dark:text-slate-500"> ({r.currentStay.bookedByName})</span>
+                              <div className="text-xs font-normal text-slate-400 dark:text-slate-500">{r.currentStay.bookedByName}</div>
                             )}
                           </>
                         ) : (

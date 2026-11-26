@@ -55,19 +55,22 @@ export function RoomAllocationPrintView({
   const bookerName = first.bookedByName ?? first.guestName;
   const bookerPhone = first.bookedByPhone ?? first.guestPhone;
 
-  const byFloor = new Map<string, { roomNumber: string; guestName: string }[]>();
+  const byFloor = new Map<string, { roomNumber: string; guestName: string; phone: string | null }[]>();
   for (const b of bookings) {
     const roomNumber = rooms.find((r) => r.id === b.assignedRoomId)?.roomNumber ?? '—';
     const floor = floorLabel(roomNumber);
     const list = byFloor.get(floor) ?? [];
-    list.push({ roomNumber, guestName: b.guestName });
+    // §user request — "room no, Guest Name & Phone No": a room's own guest can have their own
+    // phone on the booking row too, falling back to the group's shared number when that room never
+    // got one of its own set.
+    list.push({ roomNumber, guestName: b.guestName, phone: b.guestPhone ?? bookerPhone });
     byFloor.set(floor, list);
   }
   const floors = [...byFloor.entries()].sort(([, a], [, b]) => Number(a[0]?.roomNumber) - Number(b[0]?.roomNumber));
 
   return (
     <div className="room-allocation-print-root fixed inset-0 z-[60] overflow-y-auto bg-slate-900/40 print:overflow-visible print:bg-white">
-      <div className="mx-auto my-8 max-w-2xl rounded-xl bg-white p-8 shadow-xl print:my-0 print:max-w-none print:rounded-none print:p-0 print:shadow-none">
+      <div className="mx-auto my-8 max-w-5xl rounded-xl bg-white p-8 shadow-xl print:my-0 print:max-w-none print:rounded-none print:p-0 print:shadow-none">
         {!hotel ? (
           <p className="py-20 text-center text-sm text-slate-400">Loading…</p>
         ) : (
@@ -92,51 +95,59 @@ export function RoomAllocationPrintView({
               </div>
             </div>
 
-            {floors.map(([floor, roomRows]) => (
-              <div key={floor} className="mt-6">
-                <p className="mb-2 text-sm font-bold uppercase tracking-wide text-brand-700">{floor}</p>
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-brand-700 text-left text-white">
-                      <th className="border border-brand-800 px-3 py-2">Room No.</th>
-                      <th className="border border-brand-800 px-3 py-2">Guest Name</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roomRows
-                      .sort((a, b) => Number(a.roomNumber) - Number(b.roomNumber))
-                      .map((r) => (
-                        <tr key={r.roomNumber} className="even:bg-slate-50">
-                          <td className="border border-slate-200 px-3 py-2 text-center">{r.roomNumber}</td>
-                          <td className="border border-slate-200 px-3 py-2">{r.guestName}</td>
+            {/* §user request — "Room allocation left side and payment hisab right side, properly
+                alag alag box": two clearly separate boxes side by side instead of one long stacked
+                page, so the room list and the money owed don't read as one undifferentiated block. */}
+            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2 print:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 p-4">
+                <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Room Allocation</p>
+                {floors.map(([floor, roomRows]) => (
+                  <div key={floor} className="mb-5 last:mb-0">
+                    <p className="mb-2 text-sm font-bold uppercase tracking-wide text-brand-700">{floor}</p>
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr className="bg-brand-700 text-left text-white">
+                          <th className="border border-brand-800 px-3 py-2">Room No.</th>
+                          <th className="border border-brand-800 px-3 py-2">Guest Name</th>
+                          <th className="border border-brand-800 px-3 py-2">Phone No.</th>
                         </tr>
-                      ))}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        {roomRows
+                          .sort((a, b) => Number(a.roomNumber) - Number(b.roomNumber))
+                          .map((r) => (
+                            <tr key={r.roomNumber} className="even:bg-slate-50">
+                              <td className="border border-slate-200 px-3 py-2 text-center">{r.roomNumber}</td>
+                              <td className="border border-slate-200 px-3 py-2">{r.guestName}</td>
+                              <td className="border border-slate-200 px-3 py-2">{r.phone ?? '—'}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
               </div>
-            ))}
 
-            <div className="mt-8 border-t border-slate-200 pt-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Payment Summary</p>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between text-slate-600">
-                  <span>Total Charges</span>
-                  <span className="font-medium text-slate-900">₹{grandTotal.toFixed(2)}</span>
+              <div className="rounded-xl border border-slate-200 p-4">
+                <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Payment Summary</p>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Total Charges</span>
+                    <span className="font-medium text-slate-900">₹{grandTotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Paid</span>
+                    <span className="font-medium text-slate-900">₹{paid.toFixed(2)}</span>
+                  </div>
+                  <div className={`flex justify-between font-semibold ${due > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                    <span>Due</span>
+                    <span>{due > 0 ? `₹${due.toFixed(2)}` : 'Paid in full'}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>Paid</span>
-                  <span className="font-medium text-slate-900">₹{paid.toFixed(2)}</span>
-                </div>
-                <div className={`flex justify-between font-semibold ${due > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                  <span>Due</span>
-                  <span>{due > 0 ? `₹${due.toFixed(2)}` : 'Paid in full'}</span>
-                </div>
+
+                <p className="mb-2 mt-5 text-xs font-bold uppercase tracking-wide text-slate-500">Payment History</p>
+                <PaymentHistory entries={paymentTimeline} />
               </div>
-            </div>
-
-            <div className="mt-5">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Payment History</p>
-              <PaymentHistory entries={paymentTimeline} />
             </div>
 
             <div className="mt-8 text-sm text-slate-700">
