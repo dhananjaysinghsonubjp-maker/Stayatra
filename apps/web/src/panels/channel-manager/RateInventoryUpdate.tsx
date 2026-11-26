@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { mutate, query, ApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button, Card, CardBody, CardHeader, Field, PageHeader, inputClass } from '../../components/ui';
+import { MultiDatePicker } from '../../components/DateRangePicker';
 import type { Tab } from '../../layout/Sidebar';
 import type { InventoryRate, OtaConnection, RatePlan, RoomCategory, RoomCategoryDetail } from '../../types';
 
@@ -86,6 +87,11 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
+  // §user request — "date range select karne vala editable hi nahi hai, us par click karke date
+  // range select kar sakoon": the month label used to be a plain, inert div — clicking it did
+  // nothing. It now opens the same date picker the rest of the app already uses, to jump straight
+  // to whichever month a picked date falls in.
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
 
   const days = useMemo(() => {
     const count = daysInMonthCount(monthStart);
@@ -316,7 +322,13 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
           >
             ←
           </button>
-          <div className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-900">{rangeLabel(days)}</div>
+          <button
+            type="button"
+            onClick={() => setMonthPickerOpen(true)}
+            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-900 hover:border-brand-400 hover:bg-brand-50/40"
+          >
+            {rangeLabel(days)}
+          </button>
           <button
             type="button"
             onClick={() => setMonthStart((w) => addMonthsISO(w, 1))}
@@ -420,6 +432,17 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
       <div className="mt-8">
         <WalkInRoomBlock hotelId={hotelId} />
       </div>
+
+      {monthPickerOpen && (
+        <MultiDatePicker
+          selected={[days[0]]}
+          onClose={() => setMonthPickerOpen(false)}
+          onApply={(dates) => {
+            if (dates.length > 0) setMonthStart(firstOfMonth(dates[0]));
+            setMonthPickerOpen(false);
+          }}
+        />
+      )}
 
       {bulkOpen && (
         <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/40" onClick={() => !bulkSaving && setBulkOpen(false)}>
