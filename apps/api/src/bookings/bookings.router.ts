@@ -299,6 +299,11 @@ export function createBookingsRouter(bookings: BookingsService) {
           roomId: z.string(),
           ratePlanId: z.string().optional(),
           totalAmount: z.number().nonnegative(),
+          // §bugfix — "aaj ek room add kar raha hoon toh usme dates 22 (the group's original
+          // check-in) selected aa rahi hain": optional so an older frontend build still works, but
+          // the modal now always sends the dates the FMO actually picked for this new room.
+          checkIn: z.coerce.date().optional(),
+          checkOut: z.coerce.date().optional(),
         }),
       )
       .mutation(({ ctx, input }) => bookings.addRoomToReservation({ ...input, actorId: ctx.user.userId })),

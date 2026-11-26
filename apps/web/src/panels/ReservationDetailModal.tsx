@@ -11,8 +11,9 @@ import { CheckInModal } from './checkin/CheckInModal';
 import { PaymentHistory, type PaymentHistoryEntry } from './PaymentHistory';
 import { InvoicePrintView } from './InvoicePrintView';
 import { RoomTransferPanel } from './RoomTransferPanel';
+import { PAYMENT_METHODS } from '../paymentMethods';
 import type { MoreActionsView } from './MoreActionsPanel';
-import type { Booking, Room, RatePlan } from '../types';
+import type { Booking, Room, RatePlan, PaymentMethod } from '../types';
 
 const STATUS_LABEL: Record<Booking['status'], string> = {
   confirmed: 'Upcoming',
@@ -296,6 +297,17 @@ export function ReservationDetailModal({
   const [newRoomId, setNewRoomId] = useState('');
   const [newRatePlanId, setNewRatePlanId] = useState('');
   const [newAmount, setNewAmount] = useState(0);
+  // §bugfix/§user request — "aaj ek room add kar raha hoon toh usme dates 22 (reservation ki
+  // original date) selected aa rahi hain": this new room's own stay dates are now a real part of
+  // the form (defaulting to today → the group's existing checkout, not silently inherited from
+  // whenever the reservation was first made) instead of always being the group's original dates.
+  const [newCheckIn, setNewCheckIn] = useState('');
+  const [newCheckOut, setNewCheckOut] = useState('');
+  // §user request — "Add Room click karte hi payment daalne ka option aaye": an optional advance
+  // right there, same addPayment call AddPaymentModal already uses — so a walk-in extra room's
+  // bill and its payment both land under the one reservation instead of needing a separate flow.
+  const [newPaymentAmount, setNewPaymentAmount] = useState<number | ''>('');
+  const [newPaymentMethod, setNewPaymentMethod] = useState<PaymentMethod>('cash');
   const [addRoomSaving, setAddRoomSaving] = useState(false);
   const [addRoomError, setAddRoomError] = useState<string | null>(null);
   // §user request — "+ icon jisme extra mattress vagera add karne ka option aaye, same jaise
@@ -395,13 +407,20 @@ export function ReservationDetailModal({
   }
 
   async function addRoom() {
-    if (!newRoomId || !first.reservationGroupId) return;
+    if (!newRoomId || !first.reservationGroupId || !newCheckIn || !newCheckOut) return;
     setAddRoomSaving(true);
     setAddRoomError(null);
     try {
       const created = await mutate<Booking>(
         'bookings.addRoomToReservation',
-        { reservationGroupId: first.reservationGroupId, roomId: newRoomId, ratePlanId: newRatePlanId || undefined, totalAmount: newAmount },
+        {
+          reservationGroupId: first.reservationGroupId,
+          roomId: newRoomId,
+          ratePlanId: newRatePlanId || undefined,
+          totalAmount: newAmount,
+          checkIn: newCheckIn,
+          checkOut: newCheckOut,
+        },
         token ?? undefined,
       );
       await Promise.all(
@@ -409,10 +428,16 @@ export function ReservationDetailModal({
           mutate('bookings.addLineItem', { bookingId: created.id, description: li.description, quantity: li.quantity, unitPrice: li.amount / li.quantity }, token ?? undefined),
         ),
       );
+      if (newPaymentAmount !== '' && newPaymentAmount > 0) {
+        await mutate('bookings.addPayment', { bookingId: created.id, amount: newPaymentAmount, method: newPaymentMethod, type: 'advance' }, token ?? undefined);
+      }
       setAddingRoom(false);
       setNewRoomId('');
       setNewRatePlanId('');
       setNewAmount(0);
+      setNewCheckIn('');
+      setNewCheckOut('');
+      setNewPaymentAmount('');
       setNewRoomLineItems([]);
       onChanged();
     } catch (err) {
@@ -573,7 +598,11 @@ export function ReservationDetailModal({
                     <div className="mt-3">
                       {!addingRoom ? (
                         <button
-                          onClick={() => setAddingRoom(true)}
+                          onClick={() => {
+                            setAddingRoom(true);
+                            setNewCheckIn(today);
+                            setNewCheckOut(first.checkOut.slice(0, 10));
+                          }}
                           className="w-full rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-medium text-slate-500 hover:border-brand-400 hover:text-brand-600 dark:border-slate-600 dark:text-slate-400 dark:hover:border-brand-500 dark:hover:text-brand-400"
                         >
                           + Add Room
@@ -585,6 +614,16 @@ export function ReservationDetailModal({
                         // to it, so adding a room to an already-created reservation looks and works
                         // exactly like picking one while creating it.
                         <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                          <div className="mb-3 flex flex-wrap items-end gap-2.5">
+                            <div className="w-36">
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Check-in</p>
+                              <input type="date" className={`${inputClass} w-full`} value={newCheckIn} onChange={(e) => setNewCheckIn(e.target.value)} />
+                            </div>
+                            <div className="w-36">
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Check-out</p>
+                              <input type="date" className={`${inputClass} w-full`} min={newCheckIn} value={newCheckOut} onChange={(e) => setNewCheckOut(e.target.value)} />
+                            </div>
+                          </div>
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                             <div className="flex min-w-0 flex-1 items-center gap-3">
                               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-base shadow-sm dark:bg-slate-800">🛏️</span>
@@ -719,18 +758,51 @@ export function ReservationDetailModal({
                             </div>
                           )}
 
+                          {/* §user request — "Add Room click karte hi payment daalne ka option
+                              aaye": an optional advance, collected the moment this new room is
+                              added rather than needing a separate Record Payment trip right after. */}
+                          <div className="mt-3 flex flex-wrap items-end gap-2.5 border-t border-slate-100 pt-3 dark:border-slate-700">
+                            <div className="w-32">
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Payment (optional)</p>
+                              <input
+                                type="number"
+                                min={0}
+                                placeholder="Amount"
+                                className={`${inputClass} w-full`}
+                                value={newPaymentAmount}
+                                onChange={(e) => setNewPaymentAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                              />
+                            </div>
+                            <div className="w-36">
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Method</p>
+                              <select
+                                className={`${inputClass} w-full`}
+                                value={newPaymentMethod}
+                                onChange={(e) => setNewPaymentMethod(e.target.value as PaymentMethod)}
+                                disabled={newPaymentAmount === ''}
+                              >
+                                {PAYMENT_METHODS.map((m) => (
+                                  <option key={m.value} value={m.value}>
+                                    {m.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
                           <div className="mt-3 flex items-center justify-end gap-2">
                             <button
                               onClick={() => {
                                 setAddingRoom(false);
                                 setAddRoomError(null);
                                 setNewRoomLineItems([]);
+                                setNewPaymentAmount('');
                               }}
                               className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                             >
                               Cancel
                             </button>
-                            <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!newRoomId || addRoomSaving} onClick={addRoom}>
+                            <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={!newRoomId || !newCheckIn || !newCheckOut || addRoomSaving} onClick={addRoom}>
                               {addRoomSaving ? 'Adding…' : 'Add'}
                             </Button>
                           </div>

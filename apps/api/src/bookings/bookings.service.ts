@@ -1137,6 +1137,8 @@ export class BookingsService {
     roomId: string;
     ratePlanId?: string;
     totalAmount: number;
+    checkIn?: Date;
+    checkOut?: Date;
     actorId: string;
   }) {
     const groupBooking = await this.prisma.booking.findFirstOrThrow({
@@ -1146,13 +1148,23 @@ export class BookingsService {
     const room = await this.prisma.room.findUniqueOrThrow({ where: { id: input.roomId } });
     if (room.hotelId !== groupBooking.hotelId) throw new NotFoundException('Room not found at this hotel');
 
+    // §bugfix — this new room used to always inherit the group's own original check-in/check-out
+    // (the first room's dates, from whenever the reservation was first made) no matter when it was
+    // actually being added — a room added days into an already-checked-in stay still got the stale
+    // original date. The caller now picks this room's own stay dates; falling back to the group's
+    // dates only keeps older callers working.
+    const checkIn = input.checkIn ?? groupBooking.checkIn;
+    const checkOut = input.checkOut ?? groupBooking.checkOut;
+    const nights = Math.round((checkOut.getTime() - checkIn.getTime()) / 86400000);
+    if (nights < 1) throw new BadRequestException('Check-out must be after check-in');
+
     const overlap = await this.prisma.booking.findFirst({
       where: {
         hotelId: groupBooking.hotelId,
         assignedRoomId: input.roomId,
         status: { in: [BookingStatus.confirmed, BookingStatus.checked_in] },
-        checkIn: { lt: groupBooking.checkOut },
-        checkOut: { gt: groupBooking.checkIn },
+        checkIn: { lt: checkOut },
+        checkOut: { gt: checkIn },
       },
     });
     if (overlap) throw new ConflictException(`Room ${room.roomNumber} already has a reservation for these dates`);
@@ -1171,9 +1183,9 @@ export class BookingsService {
         roomCategoryId: room.roomCategoryId!,
         assignedRoomId: room.id,
         ratePlanId: input.ratePlanId,
-        checkIn: groupBooking.checkIn,
-        checkOut: groupBooking.checkOut,
-        nights: groupBooking.nights,
+        checkIn,
+        checkOut,
+        nights,
         totalAmount: input.totalAmount,
         status: BookingStatus.confirmed,
         source: groupBooking.source,
@@ -1182,8 +1194,8 @@ export class BookingsService {
     await this.rates.adjustAvailabilityForStay({
       hotelId: groupBooking.hotelId,
       roomCategoryId: room.roomCategoryId!,
-      checkIn: groupBooking.checkIn,
-      checkOut: groupBooking.checkOut,
+      checkIn,
+      checkOut,
       delta: -1,
     });
     await this.audit.log({
