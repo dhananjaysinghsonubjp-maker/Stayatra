@@ -157,13 +157,20 @@ export function MoreActionsPanel({
   const { token } = useAuth();
   const lead = group[0];
 
+  // §bugfix — "rooms add ho gaye the toh ye error aa raha hai, cannot collect more than ...":
+  // this summed every booking in `group` including a cancelled one, so the on-screen Outstanding
+  // figure (and the amount it prefilled into "Amount to pay") ran ahead of what the backend's own
+  // addGroupPayment actually allows — that only ever counts confirmed/checked_in/checked_out rows,
+  // the exact same set Master Folio's own Due figure is built from.
+  const activeGroup = group.filter((b) => b.status === 'confirmed' || b.status === 'checked_in' || b.status === 'checked_out');
+
   // Per-room + group outstanding, used by the Cancel confirmation's total and the Record
   // Payment view's Outstanding box/scope switch.
   const dues = new Map<string, number>();
   let groupGrandTotal = 0;
   let groupDue = 0;
   let groupPaid = 0;
-  for (const b of group) {
+  for (const b of activeGroup) {
     const totals = computeInvoiceTotals({
       totalAmount: Number(b.totalAmount),
       lineItems: b.lineItems ?? [],
@@ -282,7 +289,7 @@ export function MoreActionsPanel({
 
   const [allocate, setAllocate] = useState<'group' | 'room'>('group');
   const [targetBookingId, setTargetBookingId] = useState(lead.id);
-  const [amount, setAmount] = useState(group.length > 1 ? groupDue : (dues.get(lead.id) ?? 0));
+  const [amount, setAmount] = useState(activeGroup.length > 1 ? groupDue : (dues.get(lead.id) ?? 0));
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [paymentType, setPaymentType] = useState<PaymentType>('advance');
   const [referenceNumber, setReferenceNumber] = useState('');
@@ -294,7 +301,7 @@ export function MoreActionsPanel({
   // automatically, same backend path as endReservationGroup's own checked_in handling.
   const canCancel = group.some((b) => b.status === 'confirmed' || b.status === 'checked_in');
   const canTransfer = group.some((b) => b.status === 'confirmed' || b.status === 'checked_in');
-  const outstandingForScope = allocate === 'group' && group.length > 1 ? groupDue : (dues.get(targetBookingId) ?? 0);
+  const outstandingForScope = allocate === 'group' && activeGroup.length > 1 ? groupDue : (dues.get(targetBookingId) ?? 0);
 
   // §user request — "Room Transfer More Actions mein bhi, Modify Stay ke neeche": a multi-room
   // group needs to say which room first (its own view below); a single-room reservation skips
@@ -372,7 +379,7 @@ export function MoreActionsPanel({
 
   async function recordPayment() {
     await run(() =>
-      allocate === 'group' && group.length > 1 && lead.reservationGroupId
+      allocate === 'group' && activeGroup.length > 1 && lead.reservationGroupId
         ? mutate(
             'bookings.addGroupPayment',
             { reservationGroupId: lead.reservationGroupId, amount, method, type: paymentType, referenceNumber: referenceNumber || undefined },
@@ -782,7 +789,7 @@ export function MoreActionsPanel({
                 </div>
               </div>
 
-              {group.length > 1 && (
+              {activeGroup.length > 1 && (
                 <div>
                   <p className="mb-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">Allocate Payment</p>
                   <div className="flex gap-4">
@@ -814,7 +821,7 @@ export function MoreActionsPanel({
                 </div>
               )}
 
-              {allocate === 'room' && group.length > 1 && (
+              {allocate === 'room' && activeGroup.length > 1 && (
                 <Field label="Room">
                   <select
                     className={inputClass}
@@ -824,7 +831,7 @@ export function MoreActionsPanel({
                       setAmount(dues.get(e.target.value) ?? 0);
                     }}
                   >
-                    {group.map((b) => {
+                    {activeGroup.map((b) => {
                       const room = roomsById.get(b.assignedRoomId ?? '');
                       return (
                         <option key={b.id} value={b.id}>
