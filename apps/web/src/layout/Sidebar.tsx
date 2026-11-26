@@ -39,6 +39,7 @@ export type Tab =
   | 'reports_room_wise_revenue'
   | 'reports_ota_booking'
   | 'reports_ota_revenue'
+  | 'reports_customers'
   | 'cm_calendar'
   | 'cm_guest_messaging'
   | 'cm_reviews'
@@ -199,6 +200,10 @@ const NAV: NavEntry[] = [
           { id: 'reports_ota_revenue', label: 'OTA Revenue Report', icon: Icon('M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18M3 12a9 9 0 0118 0') },
         ],
       },
+      // §user request — "Reports section mein poora ek Customer ka option hoga": guest growth,
+      // demographics, top spenders and VIP tiering, one cohesive page, so a plain leaf here
+      // rather than another sub-group.
+      { id: 'reports_customers', label: 'Customers', icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z') },
     ],
   },
   { id: 'cm_reports', label: 'Business Reports', icon: Icon('M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z') },

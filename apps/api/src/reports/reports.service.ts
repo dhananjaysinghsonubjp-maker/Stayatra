@@ -1103,4 +1103,218 @@ export class ReportsService {
       })),
     };
   }
+
+  /** §user request, with a reference app's own guest-analytics dashboard as the target — guest
+   * growth, demographics, top customers and VIP tiering. A "repeat" guest is one with more than
+   * one Booking row (any status — even a cancelled second visit still means they came back), and
+   * every stat here counts distinct *guests*, not bookings, except where noted. "Loyalty members"
+   * is the same number as repeat guests for now — there's no actual loyalty/membership program
+   * yet (§user request: that's deliberately future work, not built here), so this just reuses the
+   * one guest-return signal this app already has.
+   */
+  async getCustomersReport(hotelId: string) {
+    const guests = await this.prisma.guest.findMany({
+      where: { hotelId },
+      include: { bookings: { include: { lineItems: true }, orderBy: { createdAt: 'asc' } } },
+    });
+
+    const totalGuests = guests.length;
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    let activeGuests = 0;
+    let directBookings = 0;
+    let otaBookings = 0;
+    const monthly = new Map<string, { new: number; repeat: number }>();
+    const monthKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    const bump = (key: string, field: 'new' | 'repeat') => {
+      const row = monthly.get(key) ?? { new: 0, repeat: 0 };
+      row[field] += 1;
+      monthly.set(key, row);
+    };
+
+    const byState = new Map<string, number>();
+    const byCountry = new Map<string, number>();
+    const byCity = new Map<string, number>();
+    let guestsWithState = 0;
+
+    const ageBucket = (dob: Date): string => {
+      const age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+      if (age < 18) return 'Under 18';
+      if (age <= 25) return '18-25';
+      if (age <= 35) return '26-35';
+      if (age <= 45) return '36-45';
+      if (age <= 55) return '46-55';
+      if (age <= 65) return '56-65';
+      return '65+';
+    };
+    const allAges = new Map<string, number>();
+    const repeatAges = new Map<string, number>();
+    let guestsWithAge = 0;
+
+    const customers: { id: string; name: string; phone: string; bookings: number; totalSpend: number }[] = [];
+
+    for (const g of guests) {
+      const isRepeat = g.bookings.length > 1;
+      if (g.state) {
+        guestsWithState += 1;
+        byState.set(g.state, (byState.get(g.state) ?? 0) + 1);
+      }
+      if (g.country) byCountry.set(g.country, (byCountry.get(g.country) ?? 0) + 1);
+      if (g.city) byCity.set(g.city, (byCity.get(g.city) ?? 0) + 1);
+
+      if (g.dateOfBirth) {
+        guestsWithAge += 1;
+        const bucket = ageBucket(g.dateOfBirth);
+        allAges.set(bucket, (allAges.get(bucket) ?? 0) + 1);
+        if (isRepeat) repeatAges.set(bucket, (repeatAges.get(bucket) ?? 0) + 1);
+      } else if (isRepeat) {
+        repeatAges.set('Unknown', (repeatAges.get('Unknown') ?? 0) + 1);
+      }
+
+      if (g.bookings.length > 0) bump(monthKey(g.bookings[0].createdAt), 'new');
+      if (isRepeat) bump(monthKey(g.bookings[1].createdAt), 'repeat');
+
+      let totalSpend = 0;
+      let hasRealStay = false;
+      for (const b of g.bookings) {
+        if (b.status === 'void') continue;
+        if (b.source === 'direct' || b.source === 'walk_in') directBookings += 1;
+        else otaBookings += 1;
+        const totals = computeInvoiceTotals({
+          totalAmount: Number(b.totalAmount),
+          lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+          discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+          gstExempt: b.gstExempt,
+        });
+        totalSpend += totals.grandTotal;
+        if (b.status !== 'cancelled' && b.status !== 'no_show' && b.checkIn >= ninetyDaysAgo) hasRealStay = true;
+      }
+      if (hasRealStay) activeGuests += 1;
+      customers.push({ id: g.id, name: g.name, phone: g.phone, bookings: g.bookings.length, totalSpend });
+    }
+
+    const repeatGuestCount = guests.filter((g) => g.bookings.length > 1).length;
+    const newGuestCount = totalGuests - repeatGuestCount;
+    const totalBookingsForShare = directBookings + otaBookings;
+
+    const topTen = [...customers].sort((a, b) => b.totalSpend - a.totalSpend).slice(0, 10);
+    const combinedSpend = topTen.reduce((s, c) => s + c.totalSpend, 0);
+
+    const vipTiers: { tier: string; min: number; max: number; threshold: string }[] = [
+      { tier: 'VVVIP', min: 11, max: Infinity, threshold: 'More than 10 bookings' },
+      { tier: 'VVIP', min: 7, max: 10, threshold: '7-10 bookings' },
+      { tier: 'Gold VIP', min: 4, max: 6, threshold: '4-6 bookings' },
+      { tier: 'Gold', min: 2, max: 3, threshold: '2-3 bookings' },
+      { tier: 'Regular', min: 1, max: 1, threshold: '1 booking' },
+    ];
+    const vipBreakdown = vipTiers.map((t) => {
+      const count = customers.filter((c) => c.bookings >= t.min && c.bookings <= t.max).length;
+      return { tier: t.tier, threshold: t.threshold, count, percent: totalGuests > 0 ? (count / totalGuests) * 100 : 0 };
+    });
+    const vipCount = customers.filter((c) => c.bookings >= 2).length;
+
+    const toRankedList = (m: Map<string, number>, denom: number) =>
+      [...m.entries()].sort(([, a], [, b]) => b - a).map(([name, count]) => ({ name, count, percent: denom > 0 ? (count / denom) * 100 : 0 }));
+
+    return {
+      totalGuests,
+      newGuests: newGuestCount,
+      repeatGuests: repeatGuestCount,
+      repeatRatePercent: totalGuests > 0 ? (repeatGuestCount / totalGuests) * 100 : 0,
+      loyaltyMembers: repeatGuestCount,
+      activeGuests,
+      directGuestShare: {
+        direct: directBookings,
+        ota: otaBookings,
+        percent: totalBookingsForShare > 0 ? (directBookings / totalBookingsForShare) * 100 : 0,
+      },
+      monthlyGrowth: [...monthly.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, v]) => ({ month, new: v.new, repeat: v.repeat })),
+      guestLocations: { state: toRankedList(byState, guestsWithState), country: toRankedList(byCountry, guestsWithState), city: toRankedList(byCity, guestsWithState) },
+      guestsWithState,
+      ageGroups: toRankedList(allAges, guestsWithAge),
+      guestsWithAge,
+      repeatAgeGroups: toRankedList(repeatAges, repeatGuestCount),
+      topCustomers: topTen,
+      combinedSpend,
+      vipCount,
+      vipBreakdown,
+      addressOnFilePercent: totalGuests > 0 ? (guestsWithState / totalGuests) * 100 : 0,
+      ageOnFilePercent: totalGuests > 0 ? (guestsWithAge / totalGuests) * 100 : 0,
+    };
+  }
+
+  /** The individual guest profile a Top Customer row links to — their own details (including the
+   * ID/Aadhaar captured at an earlier check-in, carried on the Guest profile itself so it's ready
+   * to reuse next time without re-scanning) plus their full booking history and where they rank by
+   * spend among every guest at this hotel. */
+  async getCustomerProfile(input: { hotelId: string; guestId: string }) {
+    const [guest, allGuests] = await Promise.all([
+      this.prisma.guest.findUniqueOrThrow({
+        where: { id: input.guestId },
+        include: { bookings: { include: { lineItems: true, assignedRoom: true }, orderBy: { createdAt: 'desc' } } },
+      }),
+      this.prisma.guest.findMany({ where: { hotelId: input.hotelId }, include: { bookings: { include: { lineItems: true } } } }),
+    ]);
+
+    const spendOf = (
+      bookings: {
+        status: string;
+        totalAmount: unknown;
+        discountAmount: unknown;
+        gstExempt: boolean;
+        lineItems: { unitPrice: unknown; amount: unknown; description: string; quantity: number }[];
+      }[],
+    ) =>
+      bookings.reduce((sum, b) => {
+        if (b.status === 'void') return sum;
+        const totals = computeInvoiceTotals({
+          totalAmount: Number(b.totalAmount),
+          lineItems: b.lineItems.map((li) => ({ ...li, unitPrice: Number(li.unitPrice), amount: Number(li.amount) })),
+          discountAmount: b.discountAmount ? Number(b.discountAmount) : null,
+          gstExempt: b.gstExempt,
+        });
+        return sum + totals.grandTotal;
+      }, 0);
+
+    const totalSpend = spendOf(guest.bookings);
+    const ranked = allGuests.map((g) => ({ id: g.id, spend: spendOf(g.bookings) })).sort((a, b) => b.spend - a.spend);
+    const rank = ranked.findIndex((g) => g.id === guest.id) + 1;
+
+    const bookingCount = guest.bookings.length;
+    const vipTier = bookingCount >= 11 ? 'VVVIP' : bookingCount >= 7 ? 'VVIP' : bookingCount >= 4 ? 'Gold VIP' : bookingCount >= 2 ? 'Gold' : 'Regular';
+
+    return {
+      guest: {
+        id: guest.id,
+        name: guest.name,
+        phone: guest.phone,
+        email: guest.email,
+        gender: guest.gender,
+        dateOfBirth: guest.dateOfBirth ? guest.dateOfBirth.toISOString() : null,
+        address: guest.address,
+        country: guest.country,
+        state: guest.state,
+        city: guest.city,
+        pincode: guest.pincode,
+        idType: guest.idType,
+        idNumber: guest.idNumber,
+        idPhotoPath: guest.idPhotoPath,
+        idPhotoBackPath: guest.idPhotoBackPath,
+      },
+      totalBookings: bookingCount,
+      totalSpend,
+      rank,
+      totalGuests: allGuests.length,
+      vipTier,
+      bookings: guest.bookings.map((b) => ({
+        id: b.id,
+        bookingCode: `BK-${b.id.slice(-6).toUpperCase()}`,
+        checkIn: b.checkIn.toISOString(),
+        checkOut: b.checkOut.toISOString(),
+        roomNumber: b.assignedRoom?.roomNumber ?? null,
+        status: b.status,
+        source: b.source,
+        amount: Number(b.totalAmount),
+      })),
+    };
+  }
 }

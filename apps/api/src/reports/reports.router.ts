@@ -111,5 +111,11 @@ export function createReportsRouter(reports: ReportsService) {
     otaRevenue: ownerOrManager
       .input(z.object({ hotelId: z.string(), from: z.coerce.date(), to: z.coerce.date(), source: z.string().optional() }))
       .query(({ input }) => reports.getOtaRevenueReport(input)),
+
+    customers: ownerOrManager.input(z.object({ hotelId: z.string() })).query(({ input }) => reports.getCustomersReport(input.hotelId)),
+
+    customerProfile: ownerOrManager
+      .input(z.object({ hotelId: z.string(), guestId: z.string() }))
+      .query(({ input }) => reports.getCustomerProfile(input)),
   });
 }
