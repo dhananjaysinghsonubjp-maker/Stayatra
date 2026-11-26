@@ -10,6 +10,7 @@ import { SOURCE_LABEL } from './channel-manager/ota-labels';
 import { CheckInModal } from './checkin/CheckInModal';
 import { PaymentHistory, type PaymentHistoryEntry } from './PaymentHistory';
 import { InvoicePrintView } from './InvoicePrintView';
+import { RoomAllocationPrintView } from './RoomAllocationPrintView';
 import { RoomTransferPanel } from './RoomTransferPanel';
 import type { MoreActionsView } from './MoreActionsPanel';
 import type { Booking, Room, RatePlan } from '../types';
@@ -290,6 +291,10 @@ export function ReservationDetailModal({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [checkInQueue, setCheckInQueue] = useState<Booking[]>([]);
   const [printingBooking, setPrintingBooking] = useState<Booking | null>(null);
+  // §user request — "Room Allocation PDF in Master Folio": who's actually in which room (per-room
+  // guest name, since a multi-room reservation can have a different one per room) plus the payment
+  // report underneath it in the same printable document.
+  const [printingAllocation, setPrintingAllocation] = useState(false);
   const [transferringBooking, setTransferringBooking] = useState<Booking | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addingRoom, setAddingRoom] = useState(false);
@@ -859,19 +864,24 @@ export function ReservationDetailModal({
               </div>
             ) : (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
-                  <div>
-                    <p className="text-xs text-slate-400 dark:text-slate-500">Booking ID</p>
-                    <p className="font-medium text-slate-900 dark:text-white">{bookingIdShort}</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="grid flex-1 grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
+                    <div>
+                      <p className="text-xs text-slate-400 dark:text-slate-500">Booking ID</p>
+                      <p className="font-medium text-slate-900 dark:text-white">{bookingIdShort}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400 dark:text-slate-500">Total Guests</p>
+                      <p className="font-medium text-slate-900 dark:text-white">{totalGuests}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400 dark:text-slate-500">Booking Date</p>
+                      <p className="font-medium text-slate-900 dark:text-white">{formatDateTimeShort(first.createdAt)}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs text-slate-400 dark:text-slate-500">Total Guests</p>
-                    <p className="font-medium text-slate-900 dark:text-white">{totalGuests}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 dark:text-slate-500">Booking Date</p>
-                    <p className="font-medium text-slate-900 dark:text-white">{formatDateTimeShort(first.createdAt)}</p>
-                  </div>
+                  <Button type="button" variant="secondary" className="shrink-0 text-xs" onClick={() => setPrintingAllocation(true)}>
+                    🛏 Room Allocation PDF
+                  </Button>
                 </div>
 
                 <div className="mt-5 space-y-1.5 border-t border-slate-100 pt-4 text-sm dark:border-slate-700">
@@ -948,6 +958,18 @@ export function ReservationDetailModal({
       )}
       {printingBooking && (
         <InvoicePrintView booking={printingBooking} roomType={roomFor(printingBooking)?.roomCategory?.name ?? '—'} onClose={() => setPrintingBooking(null)} />
+      )}
+      {printingAllocation && (
+        <RoomAllocationPrintView
+          hotelId={hotelId}
+          bookings={activeBookings}
+          rooms={rooms}
+          paymentTimeline={paymentTimeline}
+          grandTotal={grandTotal}
+          paid={paid}
+          due={due}
+          onClose={() => setPrintingAllocation(false)}
+        />
       )}
       {transferringBooking && (
         <RoomTransferPanel

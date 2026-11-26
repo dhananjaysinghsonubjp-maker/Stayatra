@@ -89,7 +89,9 @@ body {
   .staff-id-print-root,
   .staff-id-print-root *,
   .report-print-root,
-  .report-print-root * {
+  .report-print-root *,
+  .room-allocation-print-root,
+  .room-allocation-print-root * {
     visibility: visible;
   }
   .invoice-print-root,
@@ -107,7 +109,11 @@ body {
      invisible-but-still-space-occupying layout doesn't shove this sideways or down) without that
      same one-page ceiling — it paginates across as many printed pages as the content actually
      needs, the way static content would. */
-  .report-print-root {
+  .report-print-root,
+  /* §bugfix — Room Allocation Notice shares the same multi-page risk a long report has (many
+     rooms across several floors, plus the full payment history underneath) — the one-page
+     `position: fixed` treatment above would clip it to a single printed page. */
+  .room-allocation-print-root {
     position: absolute;
     top: 0;
     left: 0;
@@ -123,16 +129,19 @@ body {
   /* Discrepancy row colours and table header backgrounds (Rooms Report's red/green rows, every
      report's brand-coloured header row) are the data, not decoration — browsers strip background
      colours from print by default, which would print those rows as plain white. */
-  .report-print-root * {
+  .report-print-root *,
+  .room-allocation-print-root * {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
   /* A long table's header row repeats on every printed page instead of only the first, and a row
      never gets sliced in half across a page break. */
-  .report-print-root thead {
+  .report-print-root thead,
+  .room-allocation-print-root thead {
     display: table-header-group;
   }
-  .report-print-root tr {
+  .report-print-root tr,
+  .room-allocation-print-root tr {
     break-inside: avoid;
   }
   .no-print {

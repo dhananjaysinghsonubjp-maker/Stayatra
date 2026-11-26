@@ -464,7 +464,22 @@ export function RoomBoard({ hotelId }: { hotelId: string }) {
                         </span>
                       </td>
                       <td className="px-5 py-3.5 font-medium text-slate-900 dark:text-white">
-                        {r.currentStay ? r.currentStay.guestName : <span className="font-normal text-slate-400 dark:text-slate-500">Vacant</span>}
+                        {/* §user request — "403 - Boi (Maharaj ji), unke primary booker ka naam ho
+                            taaki pata rahega": a multi-room reservation can have a different guest
+                            per room, so the room's own name alone doesn't say which booking it
+                            belongs to — the primary booker's name (bookedByName, only ever set when
+                            a reservation actually has more than one room) now tags along in
+                            brackets whenever it differs from this room's own guest. */}
+                        {r.currentStay ? (
+                          <>
+                            {r.currentStay.guestName}
+                            {r.currentStay.bookedByName && r.currentStay.bookedByName !== r.currentStay.guestName && (
+                              <span className="font-normal text-slate-400 dark:text-slate-500"> ({r.currentStay.bookedByName})</span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="font-normal text-slate-400 dark:text-slate-500">Vacant</span>
+                        )}
                       </td>
                       <td className="px-5 py-3.5 text-slate-600 dark:text-slate-300">
                         {r.currentStay ? formatDateShort(r.currentStay.checkIn) : '—'}
