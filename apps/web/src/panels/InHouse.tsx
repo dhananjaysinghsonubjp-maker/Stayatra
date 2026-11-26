@@ -7,14 +7,25 @@ import { formatDateShort } from '../dateFormat';
 import { ReservationDetailModal } from './ReservationDetailModal';
 import { MoreActionsPanel, type MoreActionsView } from './MoreActionsPanel';
 import { CreateReservationModal } from './checkin/CreateReservationModal';
-import type { Booking, InHouseRow, RatePlan, Room, RoomCategory } from '../types';
+import type { Booking, Hotel, InHouseRow, RatePlan, Room, RoomCategory } from '../types';
 
-/** Same calendar day, compared in the browser's local time — matches RoomBoard's own isToday. */
-function isToday(isoDate: string): boolean {
-  return isoDate.slice(0, 10) === new Date().toLocaleDateString('en-CA');
+// §user request — "Extend Stay checkout time jo hotel ka hota hai tab waha par show ho jayega jab
+// guest ka check-out ka time hoga": not just "today" the whole day — only once the clock actually
+// reaches the hotel's own configured checkout time (Hotel Details' checkOutTime), the same "has
+// this room's checkout hour actually passed" idea the existing cleaning-discrepancy delay logic
+// already uses, just driven by the hotel's real setting instead of a hardcoded hour.
+function hasReachedCheckout(checkOutIso: string, checkOutTime: string | null | undefined): boolean {
+  const checkOutDateKey = checkOutIso.slice(0, 10);
+  const todayKey = new Date().toLocaleDateString('en-CA');
+  if (checkOutDateKey > todayKey) return false;
+  if (checkOutDateKey < todayKey) return true;
+  const [h, m] = (checkOutTime ?? '11:00').split(':').map(Number);
+  const threshold = new Date();
+  threshold.setHours(h || 0, m || 0, 0, 0);
+  return new Date() >= threshold;
 }
 
-export function InHouse({ hotelId }: { hotelId: string }) {
+export function InHouse({ hotelId, hotel }: { hotelId: string; hotel: Hotel }) {
   const { token, role } = useAuth();
   const [rows, setRows] = useState<InHouseRow[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -176,7 +187,7 @@ export function InHouse({ hotelId }: { hotelId: string }) {
                               same Modify Stay panel More Actions already has — its checkout date
                               and rate-per-night already default from this booking's own current
                               stay, so extending by a night keeps the same agreed rate. */}
-                          {canManage && isToday(r.booking.checkOut) && (
+                          {canManage && hasReachedCheckout(r.booking.checkOut, hotel.checkOutTime) && (
                             <Button
                               variant="secondary"
                               className="text-xs"

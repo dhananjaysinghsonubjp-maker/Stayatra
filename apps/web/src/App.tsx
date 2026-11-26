@@ -353,7 +353,7 @@ function Shell() {
             />
           )}
           {activeTab === 'rooms' && hasPms && <RoomBoard hotelId={hotel.id} />}
-          {activeTab === 'inhouse' && hasPms && !isHousekeeping && <InHouse hotelId={hotel.id} />}
+          {activeTab === 'inhouse' && hasPms && !isHousekeeping && <InHouse hotelId={hotel.id} hotel={hotel} />}
           {activeTab === 'bookings' && canSeeReservations && (
             <Bookings
               hotelId={hotel.id}
