@@ -308,12 +308,13 @@ export function createRatesRouter(rates: RatesService, sync: OtaSyncService) {
       .input(
         z.object({
           hotelId: z.string(),
-          roomCategoryIds: z.array(z.string()).min(1),
+          entries: z
+            .array(z.object({ roomCategoryId: z.string(), value: z.number().nonnegative(), availability: z.number().int().nonnegative().optional() }))
+            .min(1),
           startDate: z.coerce.date(),
           endDate: z.coerce.date(),
           daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
           modificationRule: z.enum(['set', 'increase', 'decrease']),
-          value: z.number().nonnegative(),
           discountPercent: z.number().min(0).max(100).optional(),
           remarks: z.string().optional(),
         }),

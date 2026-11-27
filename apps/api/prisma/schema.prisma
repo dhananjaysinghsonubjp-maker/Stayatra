@@ -659,15 +659,20 @@ enum RateModificationRule {
 // own current rate already is, preserving weekday/weekend differences instead of flattening every
 // date to one number) sits here as `pending` until an owner approves it; an owner's own request is
 // applied immediately (auto-approved) since there's no one above them to review it.
+// §user request — "bulk update mein inventory update ka option hai hi nahi, calendar mein jaisa
+// hai vaisa hi banao, dono same hona chahiye": each room type a request covers now carries its
+// own rate value AND its own availability (capped at that category's real room count, same as
+// Calendar's own bulk edit) instead of one shared value for every checked category — `entries` is
+// a JSON array of `{ roomCategoryId, value, availability }` rather than a flat id list + one
+// shared value/availability pair.
 model RateChangeRequest {
   id                String               @id @default(cuid())
   hotelId           String               @map("hotel_id")
-  roomCategoryIds   String[]             @map("room_category_ids")
+  entries           Json
   startDate         DateTime             @map("start_date") @db.Date
   endDate           DateTime             @map("end_date") @db.Date
   daysOfWeek        Int[]                @map("days_of_week")
   modificationRule  RateModificationRule @map("modification_rule")
-  value             Decimal              @db.Decimal(10, 2)
   discountPercent   Decimal?             @map("discount_percent") @db.Decimal(5, 2)
   remarks           String?
   status            RateChangeStatus     @default(pending)

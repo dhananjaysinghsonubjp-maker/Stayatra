@@ -61,7 +61,13 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
   const [loadingBase, setLoadingBase] = useState(true);
   const [loadingCells, setLoadingCells] = useState(false);
   const [filterCategoryId, setFilterCategoryId] = useState('all');
-  const [monthStart, setMonthStart] = useState(firstOfMonth(todayISO()));
+  const [monthAnchor, setMonthAnchor] = useState(firstOfMonth(todayISO()));
+  // §bugfix — "15 dates ya 4 dates select kar raha hoon apply kar raha hoon toh vo show up nahi ho
+  // raha hai": the month label's picker used to only read dates[0] and snap to that WHOLE month,
+  // throwing away whatever exact range was actually picked. A picked range (any length, doesn't
+  // need to line up with month boundaries) now shows exactly as picked; Prev/Next month clears it
+  // back to a plain full-month view.
+  const [customDays, setCustomDays] = useState<string[] | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [cells, setCells] = useState<Record<string, DayCell>>({});
   const [dirty, setDirty] = useState<Record<string, true>>({});
@@ -76,12 +82,16 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
   // top, across a date range, for one or more room types at once. Goes through
   // rates.createRateChangeRequest rather than writing cells directly — a manager's submission
   // waits for an owner's approval (Approval Requests), an owner's own applies right away.
+  // §user request — "inventory update ka option hai hi nahi, calendar mein jaisa hai vaisa hi
+  // banao": each checked room type gets its own Rate value AND its own Availability (capped at
+  // that category's own roomCount, same as Calendar's bulk edit), not one shared value for all of
+  // them — `bulkEntries` keyed by categoryId instead of one flat `bulkValue`.
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRoomTypes, setBulkRoomTypes] = useState<string[]>([]);
+  const [bulkEntries, setBulkEntries] = useState<Record<string, { value: string; availability: number }>>({});
   const [bulkStart, setBulkStart] = useState(todayISO());
   const [bulkEnd, setBulkEnd] = useState(addDaysISO(todayISO(), 6));
   const [bulkRule, setBulkRule] = useState<'set' | 'increase' | 'decrease'>('set');
-  const [bulkValue, setBulkValue] = useState('');
   const [bulkDiscount, setBulkDiscount] = useState('');
   const [bulkRemarks, setBulkRemarks] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
@@ -94,9 +104,10 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
 
   const days = useMemo(() => {
-    const count = daysInMonthCount(monthStart);
-    return Array.from({ length: count }, (_, i) => addDaysISO(monthStart, i));
-  }, [monthStart]);
+    if (customDays) return customDays;
+    const count = daysInMonthCount(monthAnchor);
+    return Array.from({ length: count }, (_, i) => addDaysISO(monthAnchor, i));
+  }, [monthAnchor, customDays]);
 
   useEffect(() => {
     async function load() {
@@ -162,7 +173,7 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
     }
     void loadCells();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connections, planForCategory, monthStart, cellsRefreshKey]);
+  }, [connections, planForCategory, days, cellsRefreshKey]);
 
   function cellKey(ratePlanId: string, date: string) {
     return `${ratePlanId}:${date}`;
@@ -227,13 +238,14 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
     }
   }
 
-  function toggleBulkRoomType(categoryId: string) {
+  function toggleBulkRoomType(categoryId: string, cap: number) {
     setBulkRoomTypes((prev) => (prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [...prev, categoryId]));
+    setBulkEntries((prev) => (prev[categoryId] ? prev : { ...prev, [categoryId]: { value: '', availability: cap } }));
   }
 
   async function submitBulkUpdate() {
-    if (bulkRoomTypes.length === 0 || !bulkValue) {
-      setBulkError('Pick at least one room type and a value');
+    if (bulkRoomTypes.length === 0 || bulkRoomTypes.some((id) => !bulkEntries[id]?.value)) {
+      setBulkError('Pick at least one room type and a rate for each');
       return;
     }
     setBulkSaving(true);
@@ -244,11 +256,10 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
         'rates.createRateChangeRequest',
         {
           hotelId,
-          roomCategoryIds: bulkRoomTypes,
+          entries: bulkRoomTypes.map((id) => ({ roomCategoryId: id, value: Number(bulkEntries[id].value), availability: bulkEntries[id].availability })),
           startDate: bulkStart,
           endDate: bulkEnd,
           modificationRule: bulkRule,
-          value: Number(bulkValue),
           discountPercent: bulkDiscount === '' ? undefined : Number(bulkDiscount),
           remarks: bulkRemarks.trim() || undefined,
         },
@@ -260,7 +271,7 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
         setBulkOpen(false);
         setBulkResult(null);
         setBulkRoomTypes([]);
-        setBulkValue('');
+        setBulkEntries({});
         setBulkDiscount('');
         setBulkRemarks('');
       }, 1200);
@@ -316,7 +327,10 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setMonthStart((w) => addMonthsISO(w, -1))}
+            onClick={() => {
+              setCustomDays(null);
+              setMonthAnchor((w) => addMonthsISO(w, -1));
+            }}
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
             aria-label="Previous month"
           >
@@ -331,7 +345,10 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
           </button>
           <button
             type="button"
-            onClick={() => setMonthStart((w) => addMonthsISO(w, 1))}
+            onClick={() => {
+              setCustomDays(null);
+              setMonthAnchor((w) => addMonthsISO(w, 1));
+            }}
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
             aria-label="Next month"
           >
@@ -435,10 +452,13 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
 
       {monthPickerOpen && (
         <MultiDatePicker
-          selected={[days[0]]}
+          selected={days}
           onClose={() => setMonthPickerOpen(false)}
           onApply={(dates) => {
-            if (dates.length > 0) setMonthStart(firstOfMonth(dates[0]));
+            if (dates.length > 0) {
+              setCustomDays(dates);
+              setMonthAnchor(firstOfMonth(dates[0]));
+            }
             setMonthPickerOpen(false);
           }}
         />
@@ -458,23 +478,6 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
             </div>
 
             <div className="space-y-5 px-6 py-5">
-              <div>
-                <p className="mb-2 text-xs font-medium text-slate-600">Select Room Types</p>
-                <div className="space-y-2 rounded-lg border border-slate-200 p-2">
-                  {categories.map((c) => (
-                    <label key={c.id} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm hover:bg-slate-50">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                        checked={bulkRoomTypes.includes(c.id)}
-                        onChange={() => toggleBulkRoomType(c.id)}
-                      />
-                      <span className="text-slate-700">{c.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <Field label="From">
                   <input className={inputClass} type="date" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} />
@@ -492,9 +495,61 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
                 </select>
               </Field>
 
-              <Field label={bulkRule === 'set' ? 'Rate (₹)' : 'Value (₹)'}>
-                <input className={inputClass} type="number" min={0} autoFocus value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} />
-              </Field>
+              <div>
+                <p className="mb-2 text-xs font-medium text-slate-600">Select Room Types</p>
+                {/* §user request — "inventory update ka option hai hi nahi, calendar mein jaisa
+                    hai vaisa hi banao, dono same hona chahiye": checking a room type expands its
+                    own Rate + Availability (capped at that category's real room count) right
+                    here, matching Calendar's own bulk edit panel exactly. */}
+                <div className="space-y-2">
+                  {categories.map((c) => {
+                    const checked = bulkRoomTypes.includes(c.id);
+                    const entry = bulkEntries[c.id] ?? { value: '', availability: c.roomCount };
+                    return (
+                      <div key={c.id} className={`rounded-lg border p-2.5 ${checked ? 'border-brand-300 bg-brand-50/40' : 'border-slate-200'}`}>
+                        <label className="flex items-center gap-2.5 text-sm">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            checked={checked}
+                            onChange={() => toggleBulkRoomType(c.id, c.roomCount)}
+                          />
+                          <span className="text-slate-700">{c.name}</span>
+                        </label>
+                        {checked && (
+                          <div className="mt-2.5 grid grid-cols-2 gap-2.5 pl-6">
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                {bulkRule === 'set' ? 'Rate (₹)' : 'Value (₹)'}
+                              </p>
+                              <input
+                                className={`${inputClass} w-full`}
+                                type="number"
+                                min={0}
+                                value={entry.value}
+                                onChange={(e) => setBulkEntries((prev) => ({ ...prev, [c.id]: { ...entry, value: e.target.value } }))}
+                              />
+                            </div>
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Available (max {c.roomCount})</p>
+                              <input
+                                className={`${inputClass} w-full`}
+                                type="number"
+                                min={0}
+                                max={c.roomCount}
+                                value={entry.availability}
+                                onChange={(e) =>
+                                  setBulkEntries((prev) => ({ ...prev, [c.id]: { ...entry, availability: Math.min(c.roomCount, Math.max(0, Number(e.target.value))) } }))
+                                }
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
               <Field label="Discount (%) — optional, applied on top">
                 <input className={inputClass} type="number" min={0} max={100} value={bulkDiscount} onChange={(e) => setBulkDiscount(e.target.value)} />
@@ -521,7 +576,11 @@ export function RateInventoryUpdate({ hotelId, onNavigate }: { hotelId: string; 
               <button type="button" onClick={() => setBulkOpen(false)} disabled={bulkSaving} className="text-sm font-medium text-slate-500 hover:underline">
                 Cancel
               </button>
-              <Button type="button" onClick={() => void submitBulkUpdate()} disabled={bulkSaving || bulkRoomTypes.length === 0 || !bulkValue}>
+              <Button
+                type="button"
+                onClick={() => void submitBulkUpdate()}
+                disabled={bulkSaving || bulkRoomTypes.length === 0 || bulkRoomTypes.some((id) => !bulkEntries[id]?.value)}
+              >
                 {bulkSaving ? 'Applying…' : 'Apply Bulk Update'}
               </Button>
             </div>

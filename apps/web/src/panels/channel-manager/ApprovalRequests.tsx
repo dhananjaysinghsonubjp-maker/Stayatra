@@ -111,16 +111,21 @@ export function ApprovalRequests({ hotelId }: { hotelId: string }) {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="mb-1 flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-slate-900 dark:text-white">{req.roomCategoryNames.join(', ')}</span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">{req.entries.map((e) => e.roomCategoryName).join(', ')}</span>
                     <Badge tone={req.status === 'approved' ? 'available' : req.status === 'rejected' ? 'flagged' : 'slate'}>{req.status}</Badge>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {formatDateShort(req.startDate)} → {formatDateShort(req.endDate)} · {describeDays(req)}
                   </p>
-                  <p className="mt-1.5 text-sm text-slate-700 dark:text-slate-200">
-                    <span className="font-medium">{RULE_LABEL[req.modificationRule]}</span> ₹{Number(req.value).toFixed(2)}
-                    {req.discountPercent && Number(req.discountPercent) > 0 && <span> · {Number(req.discountPercent)}% discount on top</span>}
-                  </p>
+                  <div className="mt-1.5 space-y-1 text-sm text-slate-700 dark:text-slate-200">
+                    {req.entries.map((e) => (
+                      <p key={e.roomCategoryId}>
+                        <span className="font-medium">{e.roomCategoryName}:</span> {RULE_LABEL[req.modificationRule]} ₹{e.value.toFixed(2)}
+                        {e.availability !== null && <span> · {e.availability} available</span>}
+                      </p>
+                    ))}
+                    {req.discountPercent && Number(req.discountPercent) > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{Number(req.discountPercent)}% discount on top</p>}
+                  </div>
                   {req.remarks && <p className="mt-1 text-xs italic text-slate-500 dark:text-slate-400">"{req.remarks}"</p>}
                   <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
                     Requested by {req.requestedByName} · {formatDateTimeShort(req.createdAt)}

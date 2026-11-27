@@ -394,36 +394,54 @@ export class RatesService {
    * current rate already is (reusing bulkUpdate's existing `adjust` mode) rather than flattening a
    * whole range to one number — a weekday/weekend rate difference survives a blanket "+500 for the
    * holiday season" the same way it would if done one date at a time.
+   *
+   * §user request — "inventory update ka option hai hi nahi, calendar mein jaisa hai vaisa hi
+   * banao, dono same hona chahiye": each room type gets its own rate value AND its own
+   * availability (capped at that category's real room count, exactly like Calendar's own bulk
+   * edit) rather than one shared value applied to every checked category.
    */
   async createRateChangeRequest(input: {
     hotelId: string;
-    roomCategoryIds: string[];
+    entries: { roomCategoryId: string; value: number; availability?: number }[];
     startDate: Date;
     endDate: Date;
     daysOfWeek?: number[];
     modificationRule: 'set' | 'increase' | 'decrease';
-    value: number;
     discountPercent?: number;
     remarks?: string;
     requestedByUserId: string;
     requesterIsOwner: boolean;
   }) {
-    if (input.roomCategoryIds.length === 0) throw new BadRequestException('Select at least one room type');
-    if (input.value < 0) throw new BadRequestException('Value cannot be negative');
+    if (input.entries.length === 0) throw new BadRequestException('Select at least one room type');
+    if (input.entries.some((e) => e.value < 0)) throw new BadRequestException('Value cannot be negative');
     if (input.discountPercent !== undefined && (input.discountPercent < 0 || input.discountPercent > 100)) {
       throw new BadRequestException('Discount must be between 0 and 100');
+    }
+
+    // Same authoritative cap bulkEditCells already enforces — never let a requested availability
+    // above what the hotel physically has reach the OTA pool, whether applied now or on approval.
+    const roomCategoryIds = input.entries.map((e) => e.roomCategoryId);
+    const rooms = await this.prisma.room.findMany({ where: { roomCategoryId: { in: roomCategoryIds }, active: true }, select: { roomCategoryId: true } });
+    const roomCountByCategory = new Map<string, number>();
+    for (const r of rooms) {
+      if (!r.roomCategoryId) continue;
+      roomCountByCategory.set(r.roomCategoryId, (roomCountByCategory.get(r.roomCategoryId) ?? 0) + 1);
+    }
+    for (const entry of input.entries) {
+      if (entry.availability === undefined) continue;
+      const cap = roomCountByCategory.get(entry.roomCategoryId) ?? 0;
+      if (entry.availability > cap) throw new BadRequestException(`Cannot set availability above ${cap} room(s) for this room type`);
     }
 
     const autoApprove = input.requesterIsOwner;
     const request = await this.prisma.rateChangeRequest.create({
       data: {
         hotelId: input.hotelId,
-        roomCategoryIds: input.roomCategoryIds,
+        entries: input.entries,
         startDate: input.startDate,
         endDate: input.endDate,
         daysOfWeek: input.daysOfWeek ?? [],
         modificationRule: input.modificationRule,
-        value: input.value,
         discountPercent: input.discountPercent,
         remarks: input.remarks,
         requestedByUserId: input.requestedByUserId,
@@ -442,7 +460,7 @@ export class RatesService {
       orderBy: { createdAt: 'desc' },
     });
     const userIds = [...new Set(rows.flatMap((r) => [r.requestedByUserId, r.decidedByUserId].filter((x): x is string => !!x)))];
-    const categoryIds = [...new Set(rows.flatMap((r) => r.roomCategoryIds))];
+    const categoryIds = [...new Set(rows.flatMap((r) => (r.entries as { roomCategoryId: string }[]).map((e) => e.roomCategoryId)))];
     const [users, categories] = await Promise.all([
       this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
       this.prisma.roomCategory.findMany({ where: { id: { in: categoryIds } }, select: { id: true, name: true } }),
@@ -453,7 +471,10 @@ export class RatesService {
       ...r,
       requestedByName: nameById.get(r.requestedByUserId) ?? '—',
       decidedByName: r.decidedByUserId ? (nameById.get(r.decidedByUserId) ?? '—') : null,
-      roomCategoryNames: r.roomCategoryIds.map((id) => categoryNameById.get(id) ?? '—'),
+      entries: (r.entries as { roomCategoryId: string; value: number; availability: number | null }[]).map((e) => ({
+        ...e,
+        roomCategoryName: categoryNameById.get(e.roomCategoryId) ?? '—',
+      })),
     }));
   }
 
@@ -479,22 +500,26 @@ export class RatesService {
   }
 
   /** Resolves an approved request into real InventoryRate writes — reuses bulkUpdate's own
-   * explicitTiers (for "set") / adjust (for "increase"/"decrease", and for the optional discount
-   * applied as a second percent-decrease pass) so this stays a thin orchestration over logic that
-   * already handles value-override protection, OTA fan-out and audit logging. */
+   * explicitTiers (for "set", and for availability whenever an entry has one) / adjust (for
+   * "increase"/"decrease", and for the optional discount applied as a second percent-decrease
+   * pass) so this stays a thin orchestration over logic that already handles value-override
+   * protection, OTA fan-out and audit logging. */
   private async applyRateChangeRequest(requestId: string, actorId: string) {
     const request = await this.prisma.rateChangeRequest.findUniqueOrThrow({ where: { id: requestId } });
+    const entries = request.entries as { roomCategoryId: string; value: number; availability: number | null }[];
+    const roomCategoryIds = entries.map((e) => e.roomCategoryId);
     const [connections, ratePlans] = await Promise.all([
       this.prisma.otaConnection.findMany({ where: { hotelId: request.hotelId }, select: { id: true } }),
-      this.prisma.ratePlan.findMany({ where: { roomCategoryId: { in: request.roomCategoryIds } }, select: { id: true, roomCategoryId: true } }),
+      this.prisma.ratePlan.findMany({ where: { roomCategoryId: { in: roomCategoryIds } }, select: { id: true, roomCategoryId: true } }),
     ]);
     const primaryByCategory = new Map<string, string>();
     for (const rp of ratePlans) if (!primaryByCategory.has(rp.roomCategoryId)) primaryByCategory.set(rp.roomCategoryId, rp.id);
     const daysOfWeek = request.daysOfWeek.length > 0 ? request.daysOfWeek : undefined;
-    const value = Number(request.value);
     const discountPercent = request.discountPercent ? Number(request.discountPercent) : 0;
 
-    for (const ratePlanId of primaryByCategory.values()) {
+    for (const entry of entries) {
+      const ratePlanId = primaryByCategory.get(entry.roomCategoryId);
+      if (!ratePlanId) continue;
       for (const conn of connections) {
         if (request.modificationRule === 'set') {
           await this.bulkUpdate({
@@ -503,7 +528,7 @@ export class RatesService {
             startDate: request.startDate,
             endDate: request.endDate,
             daysOfWeek,
-            explicitTiers: [{ occupancyTier: 1, price: value }],
+            explicitTiers: [{ occupancyTier: 1, price: entry.value, availability: entry.availability ?? undefined }],
             overrideValueOverrides: true,
             changedBy: actorId,
           });
@@ -514,10 +539,22 @@ export class RatesService {
             startDate: request.startDate,
             endDate: request.endDate,
             daysOfWeek,
-            adjust: { mode: 'fixed', direction: request.modificationRule, value },
+            adjust: { mode: 'fixed', direction: request.modificationRule, value: entry.value },
             overrideValueOverrides: true,
             changedBy: actorId,
           });
+          if (entry.availability !== null && entry.availability !== undefined) {
+            await this.bulkUpdate({
+              ratePlanId,
+              otaConnectionId: conn.id,
+              startDate: request.startDate,
+              endDate: request.endDate,
+              daysOfWeek,
+              explicitTiers: [{ occupancyTier: 1, availability: entry.availability }],
+              overrideValueOverrides: true,
+              changedBy: actorId,
+            });
+          }
         }
         if (discountPercent > 0) {
           await this.bulkUpdate({
