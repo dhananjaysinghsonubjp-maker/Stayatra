@@ -853,7 +853,12 @@ export function Calendar({
                   const dt = new Date(d + 'T00:00:00Z');
                   const isToday = d === today;
                   return (
-                    <div key={d} className={`border-l border-slate-100 px-1.5 py-2 text-center ${isToday ? 'bg-brand-100' : ''}`}>
+                    // §bugfix — "date mein jo UX UI colour hai isko fix karo": the header's own
+                    // "today" tint (bg-brand-100) was a noticeably different, more saturated shade
+                    // than the exact same today column's tint everywhere below it (bg-brand-50/70),
+                    // so the highlighted column visibly changed colour right at the header seam
+                    // instead of reading as one continuous stripe top to bottom.
+                    <div key={d} className={`border-l border-slate-100 px-1.5 py-2 text-center ${isToday ? 'bg-brand-50/70' : ''}`}>
                       <p className={`text-[10px] font-medium uppercase ${isToday ? 'text-brand-600' : 'text-slate-400'}`}>
                         {dt.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'UTC' })}
                       </p>
