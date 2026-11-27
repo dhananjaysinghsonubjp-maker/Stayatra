@@ -56,7 +56,13 @@ export type Tab =
   | 'settings_ledger'
   | 'settings_credentials'
   | 'settings_billing'
-  | 'audit_log';
+  | 'audit_log'
+  // §user request, with a reference app's own "Master Data" section as the target.
+  | 'master_user_management'
+  | 'master_role_management'
+  | 'master_departments'
+  | 'master_employee_types'
+  | 'master_daily_issues';
 
 type IconFn = (props: { className?: string }) => React.ReactElement;
 
@@ -107,6 +113,70 @@ const CHEVRON = Icon('M9 5l7 7-7 7');
 // rect with one line near the left forming a thin spine strip), not the cloud-upload shape this
 // used to be.
 const ROOM_MANAGEMENT_ICON = Icon('M7 2h10a1 1 0 011 1v18a1 1 0 01-1 1H7a1 1 0 01-1-1V3a1 1 0 011-1zM10 2v20');
+
+// §user request, with a reference app's own "Role Management" (granular permissions) as the
+// target — which permission-catalog key (apps/web/src/permissionCatalog.ts, kept in sync with the
+// backend's own copy) gates each Tab's visibility for a user who has a CustomRole assigned. A user
+// with none (every existing user, today) skips this filter entirely — see App.tsx's visibleTabs.
+export const TAB_PERMISSION: Partial<Record<Tab, string>> = {
+  dashboard: 'dashboard',
+  rooms: 'stay_view',
+  inhouse: 'stay_view',
+  bookings: 'reservations',
+  dues: 'reports',
+  ledger: 'ledger',
+  contacts: 'settings',
+  housekeeping: 'settings',
+  reports_master: 'reports',
+  reports_completed: 'reports',
+  reports_cancelled: 'reports',
+  reports_noshow: 'reports',
+  reports_arrivals: 'reports',
+  reports_departures: 'reports',
+  reports_police: 'reports',
+  reports_daywise: 'reports',
+  reports_checkinout: 'reports',
+  reports_rooms: 'reports',
+  reports_sale: 'reports',
+  reports_expenses: 'reports',
+  reports_account_book: 'reports',
+  reports_advance_adjustment: 'reports',
+  reports_invoice_bills: 'reports',
+  reports_payment_receipts: 'reports',
+  reports_payment_report: 'reports',
+  reports_profit_loss: 'reports',
+  reports_advance_received: 'reports',
+  reports_room_sale: 'reports',
+  reports_gst_bill: 'reports',
+  reports_credit_debit: 'reports',
+  reports_day_book: 'reports',
+  reports_room_wise_revenue: 'reports',
+  reports_ota_booking: 'reports',
+  reports_ota_revenue: 'reports',
+  reports_customers: 'customers',
+  cm_calendar: 'calendar_view',
+  cm_guest_messaging: 'guest_messaging',
+  cm_reviews: 'ota_reviews',
+  cm_rate_inventory_update: 'room_management',
+  cm_advance_bulk_update: 'room_management',
+  cm_approval_requests: 'room_management',
+  cm_inventory: 'linked_inventory',
+  cm_channels: 'connected_channels',
+  cm_reports: 'business_reports',
+  settings_details: 'settings',
+  settings_brand: 'settings',
+  settings_rooms: 'settings',
+  settings_invoice: 'settings',
+  settings_ledger: 'settings',
+  settings_credentials: 'settings',
+  settings_billing: 'settings',
+  audit_log: 'settings',
+  master_user_management: 'master_data',
+  master_role_management: 'master_data',
+  master_departments: 'master_data',
+  master_employee_types: 'master_data',
+  master_daily_issues: 'master_data',
+};
 
 const NAV: NavEntry[] = [
   { id: 'dashboard', label: 'Dashboard', icon: Icon('M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1h3a1 1 0 001-1V10M9 21h6') },
@@ -255,6 +325,47 @@ const NAV: NavEntry[] = [
       { id: 'settings_billing', label: 'Billing', icon: Icon('M3 10h18M7 15h2m4 0h4M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z') },
       // §user request — "Audit Log ko Settings ke under daalo": moved in from the top level.
       { id: 'audit_log', label: 'Audit Log', icon: Icon('M3 3v5h5M3.05 13a9 9 0 102.13-7.65M12 7v5l3 3') },
+    ],
+  },
+  // §user request, with a reference app's own "Master Data" section as the target. Organisation/
+  // Employees/Property & Service Configuration/Expense Category deliberately reuse existing
+  // Settings/Staff/Ledger-Categories tabs (same Tab id, shown here too) rather than duplicating
+  // them — Role Management and User Management (the one genuinely new capability, assigning a
+  // granular-permission CustomRole to a user) and the three small standalone lists are the only
+  // actually-new pages.
+  {
+    label: 'Master Data',
+    icon: Icon('M4 7a2 2 0 012-2h12a2 2 0 012 2M4 7v10a2 2 0 002 2h12a2 2 0 002-2V7M4 7h16M8 11h8M8 15h5'),
+    children: [
+      {
+        label: 'User & Access',
+        icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z'),
+        children: [
+          { id: 'master_user_management', label: 'User Management', icon: Icon('M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z') },
+          { id: 'master_role_management', label: 'Role Management', icon: Icon('M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v2') },
+        ],
+      },
+      {
+        label: 'Organisational Setup',
+        icon: Icon('M4 21V5a2 2 0 012-2h12a2 2 0 012 2v16M4 21h16M4 21h2m14 0h-2M9 7h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1'),
+        children: [
+          { id: 'settings_details', label: 'Organisation', icon: Icon('M12 21c-4.5-4.03-7-7.42-7-10.5A7 7 0 0119 10.5c0 3.08-2.5 6.47-7 10.5zM12 12a2 2 0 100-4 2 2 0 000 4z') },
+          { id: 'master_departments', label: 'Departments', icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z') },
+          { id: 'housekeeping', label: 'Employees', icon: Icon('M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m5-3.13a4 4 0 100-8 4 4 0 000 8zm6 2a4 4 0 100-8') },
+          { id: 'master_employee_types', label: 'Employee Type', icon: Icon('M20.59 13.41L13.42 20.58a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z M7 7h.01') },
+        ],
+      },
+      {
+        label: 'Property & Service Configuration',
+        icon: Icon('M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z'),
+        children: [
+          { id: 'settings_rooms', label: 'Room Setup', icon: Icon('M3 7v13m0-13l9-4 9 4m-18 0v13m18-13v13M3 20h18M9 10h.01M9 14h.01M15 10h.01M15 14h.01') },
+          { id: 'settings_brand', label: 'Hotel Brand', icon: Icon('M7 21h10M9 3h6l1 7a4 4 0 01-8 0l1-7zM12 14v7') },
+          { id: 'settings_invoice', label: 'Invoice Settings', icon: Icon('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z') },
+        ],
+      },
+      { id: 'settings_ledger', label: 'Expense Category', icon: Icon('M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z') },
+      { id: 'master_daily_issues', label: 'Daily Issues Log', icon: Icon('M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z') },
     ],
   },
 ];

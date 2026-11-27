@@ -3,6 +3,62 @@ export interface ActingUser {
   organizationId: string;
   hotelId: string | null;
   roles: Record<string, string>;
+  customRole: { id: string; name: string; permissions: string[] } | null;
+}
+
+export interface CustomRole {
+  id: string;
+  hotelId: string;
+  name: string;
+  description: string | null;
+  baseRole: 'owner' | 'manager' | 'front_desk' | 'housekeeping';
+  permissions: string[];
+  active: boolean;
+  userCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MasterDataUser {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  active: boolean;
+  pmsRole: string | null;
+  customRoleId: string | null;
+  customRoleName: string | null;
+}
+
+export interface Department {
+  id: string;
+  hotelId: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface EmployeeType {
+  id: string;
+  hotelId: string;
+  name: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface DailyIssue {
+  id: string;
+  hotelId: string;
+  title: string;
+  description: string | null;
+  status: 'open' | 'resolved';
+  reportedByUserId: string;
+  reportedByName: string;
+  resolvedByUserId: string | null;
+  resolvedByName: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
 }
 
 export interface Hotel {

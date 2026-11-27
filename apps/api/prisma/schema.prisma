@@ -201,9 +201,15 @@ model User {
   // still reference them by id) rather than a hard delete. Clears pinHash too, so login is
   // revoked immediately and the PIN becomes reusable by someone else at the same hotel.
   active             Boolean             @default(true) @map("is_active")
+  // §user request, with a reference app's own "Role Management" (granular permissions) as the
+  // target — an owner-authored CustomRole narrows which sidebar sections this user actually sees,
+  // layered on top of (not replacing) their real UserModuleRole access below. Optional: a user
+  // with none keeps working exactly as every existing user already does today.
+  customRoleId       String?             @map("custom_role_id")
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   hotel        Hotel?            @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  customRole   CustomRole?       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   moduleRoles  UserModuleRole[]
   sessions     Session[]
 
@@ -225,6 +231,90 @@ model UserModuleRole {
 
   @@id([userId, module])
   @@map("user_module_roles")
+}
+
+/**
+ * §user request, with a reference app's own "Master Data" section as the target — "poora custom
+ * permission builder" (not just a cosmetic label): an owner creates a role, picks which sidebar
+ * sections (`permissions`, a fixed catalog of section keys — see master-data.service.ts) a user in
+ * it can see, and which of the app's own existing fixed roles (`baseRole`: owner/manager/
+ * front_desk/housekeeping) they inherit REAL backend access from — assigning this role to a user
+ * also sets their pms UserModuleRole to baseRole, so what they can actually call through the API
+ * always matches a role this app already knows how to authorize, while `permissions` purely
+ * narrows the navigation they're shown. Nothing here replaces or weakens the existing per-module
+ * role checks (`requireRole`) every router already enforces.
+ */
+model CustomRole {
+  id          String   @id @default(cuid())
+  hotelId     String   @map("hotel_id")
+  name        String
+  description String?
+  baseRole    String   @map("base_role")
+  permissions String[] @default([])
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  hotel Hotel  @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  users User[]
+
+  @@index([hotelId])
+  @@map("custom_roles")
+}
+
+/** A lightweight organisational tag (Front Office / House Keeping / Management, etc.) — not wired
+ * into staff records elsewhere yet, just a Master Data list for now. */
+model Department {
+  id          String   @id @default(cuid())
+  hotelId     String   @map("hotel_id")
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId])
+  @@map("departments")
+}
+
+/** A lightweight employment-type tag (Permanent / Contract / Part-time, etc.) — same standalone
+ * Master Data list role as Department above. */
+model EmployeeType {
+  id        String   @id @default(cuid())
+  hotelId   String   @map("hotel_id")
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId])
+  @@map("employee_types")
+}
+
+enum DailyIssueStatus {
+  open
+  resolved
+}
+
+/** A simple day-to-day operational issue log (AC not working in 203, etc.) — deliberately plain:
+ * title/description/status, who reported it and who resolved it. */
+model DailyIssue {
+  id               String           @id @default(cuid())
+  hotelId          String           @map("hotel_id")
+  title            String
+  description      String?
+  status           DailyIssueStatus @default(open)
+  reportedByUserId String           @map("reported_by_user_id")
+  resolvedByUserId String?          @map("resolved_by_user_id")
+  resolvedAt       DateTime?        @map("resolved_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, status])
+  @@map("daily_issues")
 }
 
 // ── §5.1 Core grid (Channel Manager) ────────────────────────────────────────
@@ -325,6 +415,10 @@ model Hotel {
   reviews         Review[]
   contacts        HotelContact[]
   rateChangeRequests RateChangeRequest[]
+  customRoles        CustomRole[]
+  departments        Department[]
+  employeeTypes      EmployeeType[]
+  dailyIssues        DailyIssue[]
 
   @@map("hotels")
 }
@@ -1172,6 +1266,7 @@ enum AuditEventType {
   STAFF_REMOVED
   CHECK_OUT // §user request — FMO/GM explicit "Check-out Guest" step, distinct from housekeeping's cleaning submission
   RESERVATION_CREATED // §user request — a multi-room reservation created with specific rooms picked upfront
+  CUSTOM_ROLE_UPDATED // §user request — Master Data's Role Management: a custom role created/edited/deleted, or assigned to a user
 }
 
 model AuditLog {

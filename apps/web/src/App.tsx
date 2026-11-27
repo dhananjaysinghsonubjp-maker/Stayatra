@@ -44,12 +44,17 @@ import { GuestMessaging } from './panels/channel-manager/GuestMessaging';
 import { OtaReviews } from './panels/channel-manager/OtaReviews';
 import { RateInventoryUpdate } from './panels/channel-manager/RateInventoryUpdate';
 import { ApprovalRequests } from './panels/channel-manager/ApprovalRequests';
+import { RoleManagement } from './panels/master-data/RoleManagement';
+import { UserManagementMaster } from './panels/master-data/UserManagementMaster';
+import { DepartmentsPage } from './panels/master-data/DepartmentsPage';
+import { EmployeeTypesPage } from './panels/master-data/EmployeeTypesPage';
+import { DailyIssuesLog } from './panels/master-data/DailyIssuesLog';
 import { AdvanceBulkUpdate } from './panels/channel-manager/AdvanceBulkUpdate';
 import { Inventory } from './panels/channel-manager/Inventory';
 import { ConnectedChannels } from './panels/channel-manager/ConnectedChannels';
 import { BusinessReports } from './panels/channel-manager/BusinessReports';
 import { AuditLog } from './panels/AuditLog';
-import { Sidebar, type Tab } from './layout/Sidebar';
+import { Sidebar, TAB_PERMISSION, type Tab } from './layout/Sidebar';
 import { NotificationBell } from './components/NotificationBell';
 import { SubscriptionBanner } from './components/SubscriptionBanner';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -287,7 +292,21 @@ function Shell() {
     ...(canManage && hasChannelManager ? (['settings_credentials'] as Tab[]) : []),
     ...(canManage && isOwner ? (['settings_billing'] as Tab[]) : []),
     ...(canManage ? (['audit_log'] as Tab[]) : []),
-  ];
+    // §user request, with a reference app's own "Master Data" section as the target — Master
+    // Data's endpoints are pms-role-gated server-side (master-data.router.ts), same reasoning as
+    // Reports above — a Channel-Manager-only owner (pmsRole unset) would just hit FORBIDDEN, so
+    // this checks pmsRole directly rather than the broader isOwner/canManage.
+    ...(pmsRole === 'owner' ? (['master_user_management', 'master_role_management'] as Tab[]) : []),
+    ...(canManagePms ? (['master_departments', 'master_employee_types', 'master_daily_issues'] as Tab[]) : []),
+  ].filter((t) => {
+    // §user request — Role Management's own "granular permissions": a user an owner assigned a
+    // CustomRole to only sees the sidebar sections that role actually grants; everyone else (every
+    // existing user, and any owner/manager without one) is completely unaffected by this filter.
+    const permissions = user?.customRole?.permissions;
+    if (!permissions) return true;
+    const section = TAB_PERMISSION[t];
+    return !section || permissions.includes(section);
+  });
 
   const roleLabel = (pmsRole ?? cmRole)?.replace('_', ' ') ?? 'no role';
   const bannerTone: 'light' | 'dark' = isColorDark(hotel.brandColor) ? 'light' : 'dark';
@@ -446,6 +465,11 @@ function Shell() {
               {activeTab === 'cm_rate_inventory_update' && <RateInventoryUpdate hotelId={hotel.id} onNavigate={setTab} />}
               {activeTab === 'cm_advance_bulk_update' && <AdvanceBulkUpdate hotelId={hotel.id} />}
               {activeTab === 'cm_approval_requests' && <ApprovalRequests hotelId={hotel.id} />}
+              {activeTab === 'master_user_management' && <UserManagementMaster hotelId={hotel.id} />}
+              {activeTab === 'master_role_management' && <RoleManagement hotelId={hotel.id} />}
+              {activeTab === 'master_departments' && <DepartmentsPage hotelId={hotel.id} />}
+              {activeTab === 'master_employee_types' && <EmployeeTypesPage hotelId={hotel.id} />}
+              {activeTab === 'master_daily_issues' && <DailyIssuesLog hotelId={hotel.id} />}
               {activeTab === 'cm_inventory' && <Inventory hotelId={hotel.id} />}
               {activeTab === 'cm_channels' && <ConnectedChannels hotelId={hotel.id} />}
               {activeTab === 'cm_reports' && <BusinessReports hotelId={hotel.id} />}

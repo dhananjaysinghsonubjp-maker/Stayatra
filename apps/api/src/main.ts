@@ -25,6 +25,7 @@ import { ErrorLogService } from './common/error-log.service.js';
 import { LedgerService } from './ledger/ledger.service.js';
 import { StaffService } from './staff/staff.service.js';
 import { ContactsService } from './contacts/contacts.service.js';
+import { MasterDataService } from './master-data/master-data.service.js';
 import { createAppRouter } from './trpc/app.router.js';
 import { createContextFactory } from './trpc/context.js';
 
@@ -66,6 +67,7 @@ async function bootstrap() {
     ledger: app.get(LedgerService),
     staff: app.get(StaffService),
     contacts: app.get(ContactsService),
+    masterData: app.get(MasterDataService),
     errorLog,
   });
 

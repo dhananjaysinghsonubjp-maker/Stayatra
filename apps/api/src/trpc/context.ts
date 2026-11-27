@@ -12,6 +12,9 @@ export interface ActingUser {
   roles: Record<string, string>; // module -> role, e.g. { pms: 'front_desk' }
   /** §5.4's trial/grace/lock gate — computed fresh per request, see subscription-status.ts. */
   subscriptionAccess: AccessResult;
+  /** Master Data's Role Management — null unless an owner assigned this user a CustomRole; see
+   * auth.service.ts's resolveSession for what this does and doesn't change. */
+  customRole: { id: string; name: string; permissions: string[] } | null;
 }
 
 export interface ActingPlatformAdmin {

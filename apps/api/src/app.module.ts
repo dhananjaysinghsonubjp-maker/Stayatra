@@ -23,6 +23,7 @@ import { NotificationsModule } from './notifications/notifications.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
 import { StaffModule } from './staff/staff.module.js';
 import { ContactsModule } from './contacts/contacts.module.js';
+import { MasterDataModule } from './master-data/master-data.module.js';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { ContactsModule } from './contacts/contacts.module.js';
     LedgerModule,
     StaffModule,
     ContactsModule,
+    MasterDataModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService],

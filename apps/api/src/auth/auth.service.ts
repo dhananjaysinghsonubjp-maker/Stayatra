@@ -231,7 +231,7 @@ export class AuthService {
   async resolveSession(token: string) {
     const session = await this.prisma.session.findUnique({
       where: { token },
-      include: { user: { include: { moduleRoles: true, organization: { include: { subscription: true } } } } },
+      include: { user: { include: { moduleRoles: true, customRole: true, organization: { include: { subscription: true } } } } },
     });
     if (!session || !session.user || session.expiresAt < new Date()) return null;
     if (session.user.organization.suspended) return null; // suspended mid-session — signed out on the next request, not just the next login
@@ -250,6 +250,13 @@ export class AuthService {
       hotelId: session.user.hotelId,
       roles: Object.fromEntries(session.user.moduleRoles.map((r) => [r.module, r.role])) as Record<string, string>,
       subscriptionAccess,
+      // §user request — Master Data's Role Management: present only for a user an owner has
+      // actually assigned a CustomRole to; absent (undefined), every existing user behaves exactly
+      // as before — this purely narrows the frontend sidebar, never backend access (still governed
+      // by `roles` above, which assigning a CustomRole keeps in sync with its own baseRole).
+      customRole: session.user.customRole && session.user.customRole.active
+        ? { id: session.user.customRole.id, name: session.user.customRole.name, permissions: session.user.customRole.permissions }
+        : null,
     };
   }
 }

@@ -18,6 +18,7 @@ import { createAuditRouter } from '../common/audit.router.js';
 import { createLedgerRouter } from '../ledger/ledger.router.js';
 import { createStaffRouter } from '../staff/staff.router.js';
 import { createContactsRouter } from '../contacts/contacts.router.js';
+import { createMasterDataRouter } from '../master-data/master-data.router.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { HotelsService } from '../hotels/hotels.service.js';
 import type { RatesService } from '../rates/rates.service.js';
@@ -37,6 +38,7 @@ import type { AuditService } from '../common/audit.service.js';
 import type { LedgerService } from '../ledger/ledger.service.js';
 import type { StaffService } from '../staff/staff.service.js';
 import type { ContactsService } from '../contacts/contacts.service.js';
+import type { MasterDataService } from '../master-data/master-data.service.js';
 import type { ErrorLogService } from '../common/error-log.service.js';
 
 export function createAppRouter(services: {
@@ -60,6 +62,7 @@ export function createAppRouter(services: {
   staff: StaffService;
   contacts: ContactsService;
   errorLog: ErrorLogService;
+  masterData: MasterDataService;
 }) {
   return router({
     health: router({
@@ -87,6 +90,7 @@ export function createAppRouter(services: {
     ledger: createLedgerRouter(services.ledger),
     staff: createStaffRouter(services.staff),
     contacts: createContactsRouter(services.contacts),
+    masterData: createMasterDataRouter(services.masterData),
   });
 }
 
