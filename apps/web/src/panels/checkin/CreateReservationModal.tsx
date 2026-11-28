@@ -97,7 +97,10 @@ export function CreateReservationModal({
 }) {
   const { token } = useAuth();
   const isEditMode = Boolean(editGroup && editGroup.length > 0);
-  const [source, setSource] = useState('direct');
+  // §user request — "Direct aur Walk-in dono same baat hai, Direct hata do": 'direct' is no longer
+  // a selectable option (bookingSource.ts), so the default has to be a value that's actually in
+  // the list now.
+  const [source, setSource] = useState('walk_in');
   const [checkIn, setCheckIn] = useState(todayPlus(0));
   const [checkOut, setCheckOut] = useState(todayPlus(1));
   const [guestName, setGuestName] = useState('');

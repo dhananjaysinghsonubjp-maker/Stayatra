@@ -801,12 +801,18 @@ export function Calendar({
           )}
         </div>
         <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
-          {Object.keys(CHANNEL_META).map((code) => (
-            <span key={code} className="flex items-center gap-1.5">
-              <ChannelIcon source={code} className="h-4 w-4" />
-              {OTA_LABEL[code] ?? (code === 'direct' ? 'Direct' : code === 'walk_in' ? 'Walk-in' : code)}
-            </span>
-          ))}
+          {/* §user request — "Direct aur Walk-in dono same baat hai, Direct hata do": dropped from
+              this legend specifically — CHANNEL_META itself still keeps a 'direct' entry so any
+              booking already tagged that way before this change still gets its own badge/colour
+              wherever one's shown, it just isn't offered as its own legend item any more. */}
+          {Object.keys(CHANNEL_META)
+            .filter((code) => code !== 'direct')
+            .map((code) => (
+              <span key={code} className="flex items-center gap-1.5">
+                <ChannelIcon source={code} className="h-4 w-4" />
+                {OTA_LABEL[code] ?? (code === 'walk_in' ? 'Walk-in' : code)}
+              </span>
+            ))}
         </div>
       </Card>
 
