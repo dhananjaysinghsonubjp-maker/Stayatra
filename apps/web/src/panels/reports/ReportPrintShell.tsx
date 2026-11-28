@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { query } from '../../api';
 import { useAuth } from '../../AuthContext';
+import { exportTablesToCsv } from '../../csvExport';
 import type { Hotel } from '../../types';
 
 /**
@@ -41,6 +42,10 @@ export function ReportPrintShell({
   const { token } = useAuth();
   const [hotel, setHotel] = useState<Hotel | null>(null);
   const [zoom, setZoom] = useState(100);
+  // §user request — "jahan jahan PDF/print ka option hai, har jagah CSV ka bhi option aana
+  // chahiye": reads whatever table(s) this report already rendered as children, no per-report
+  // wiring needed.
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     query<Hotel>('hotels.get', { hotelId }, token ?? undefined).then(setHotel);
@@ -81,6 +86,17 @@ export function ReportPrintShell({
               ⬇ Download
             </button>
           )}
+          <button
+            onClick={() => contentRef.current && exportTablesToCsv(contentRef.current, title)}
+            title="Download this report as a CSV spreadsheet"
+            className="flex items-center gap-1.5 rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/25 hover:text-emerald-200"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+              <path d="M4 4h10l6 6v10a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+              <path d="M9 13h6M9 16.5h6M9 9.5h2" />
+            </svg>
+            CSV
+          </button>
           {onClose && (
             <>
               <span className="mx-1 h-4 w-px bg-white/20" />
@@ -93,6 +109,7 @@ export function ReportPrintShell({
       </div>
       <div className="bg-slate-100 p-6 print:bg-white print:p-0">
         <div
+          ref={contentRef}
           className="report-zoom-box mx-auto max-w-[900px] origin-top bg-white p-8 shadow print:max-w-none print:p-0 print:shadow-none"
           style={{ transform: `scale(${zoom / 100})` }}
         >

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { query } from '../api';
 import { useAuth } from '../AuthContext';
 import { Button } from '../components/ui';
+import { exportTablesToCsv } from '../csvExport';
 import { PaymentHistory, type PaymentHistoryEntry } from './PaymentHistory';
 import type { Booking, Hotel, Room } from '../types';
 
@@ -46,6 +47,9 @@ export function RoomAllocationReport({
 }) {
   const { token, user } = useAuth();
   const [hotel, setHotel] = useState<Hotel | null>(null);
+  // §user request — "jahan jahan PDF/print ka option hai, har jagah CSV ka bhi option aana
+  // chahiye": reads the floor-wise room tables already rendered below.
+  const contentRef = useRef<HTMLDivElement>(null);
   // §user request — "Reception Desk ke niche staff ka naam jo ID chala raha hai": the logged-in
   // user's own name isn't on ActingUser (just userId/roles), so it's looked up the same way
   // Modify Stay's own "Reported By" staff list already does.
@@ -89,15 +93,29 @@ export function RoomAllocationReport({
   const addressParts = [hotel.addressLine, hotel.city, hotel.state, hotel.pincode].filter(Boolean);
 
   return (
-    <div className="room-allocation-print-root mt-4 rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 print:rounded-none print:border-0 print:p-0">
+    <div ref={contentRef} className="room-allocation-print-root mt-4 rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 print:rounded-none print:border-0 print:p-0">
       <div className="relative">
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="no-print absolute right-0 top-0 flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand-400 hover:text-brand-600 dark:border-slate-600 dark:text-slate-300"
-        >
-          🖨 Print
-        </button>
+        <div className="no-print absolute right-0 top-0 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => contentRef.current && exportTablesToCsv(contentRef.current, 'Room Allocation')}
+            title="Download this notice's room allocation as a CSV spreadsheet"
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:border-emerald-400 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+              <path d="M4 4h10l6 6v10a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+              <path d="M9 13h6M9 16.5h6M9 9.5h2" />
+            </svg>
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand-400 hover:text-brand-600 dark:border-slate-600 dark:text-slate-300"
+          >
+            🖨 Print
+          </button>
+        </div>
         <div className="text-center">
           <p className="text-2xl font-bold uppercase tracking-wide text-slate-900">{hotel.name}</p>
           {addressParts.length > 0 && <p className="mt-1 text-xs text-slate-500">{addressParts.join(', ')}</p>}

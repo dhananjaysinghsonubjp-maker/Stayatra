@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { assetUrl, mutate, query, ApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { Button, Field, inputClass } from '../components/ui';
 import { computeInvoiceTotals } from '../invoice';
+import { exportTablesToCsv } from '../csvExport';
 import { paymentMethodLabel } from '../paymentMethods';
 import { formatDateShort } from '../dateFormat';
 import type { Booking, Hotel, PaymentMethod } from '../types';
@@ -32,6 +33,9 @@ export function InvoicePrintView({ booking: initialBooking, roomType, onClose }:
   const [companyAddress, setCompanyAddress] = useState(booking.billToCompanyAddress ?? '');
   const [savingCompany, setSavingCompany] = useState(false);
   const [companyError, setCompanyError] = useState<string | null>(null);
+  // §user request — "jahan jahan PDF/print ka option hai, har jagah CSV ka bhi option aana
+  // chahiye": reads the line-items table already rendered below.
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     query<Hotel>('hotels.get', { hotelId: booking.hotelId }, token ?? undefined).then(setHotel);
@@ -89,7 +93,7 @@ export function InvoicePrintView({ booking: initialBooking, roomType, onClose }:
 
   return (
     <div className="invoice-print-root fixed inset-0 z-[60] overflow-y-auto bg-slate-900/40 print:bg-white">
-      <div className="mx-auto my-8 max-w-2xl rounded-xl bg-white p-8 shadow-xl print:my-0 print:max-w-none print:rounded-none print:p-0 print:shadow-none">
+      <div ref={contentRef} className="mx-auto my-8 max-w-2xl rounded-xl bg-white p-8 shadow-xl print:my-0 print:max-w-none print:rounded-none print:p-0 print:shadow-none">
         {!hotel ? (
           <p className="py-20 text-center text-sm text-slate-400">Loading…</p>
         ) : (
@@ -263,6 +267,19 @@ export function InvoicePrintView({ booking: initialBooking, roomType, onClose }:
       </div>
 
       <div className="no-print fixed bottom-6 right-6 flex gap-2">
+        <button
+          type="button"
+          onClick={() => contentRef.current && exportTablesToCsv(contentRef.current, 'Invoice')}
+          disabled={!hotel}
+          title="Download this invoice's line items as a CSV spreadsheet"
+          className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 transition-colors hover:border-emerald-400 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+            <path d="M4 4h10l6 6v10a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+            <path d="M9 13h6M9 16.5h6M9 9.5h2" />
+          </svg>
+          CSV
+        </button>
         <Button type="button" onClick={() => window.print()} disabled={!hotel}>
           Print / Save as PDF
         </Button>

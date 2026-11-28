@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { assetUrl, query } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Button } from '../../components/ui';
+import { exportTablesToCsv } from '../../csvExport';
 import { formatDateShort } from '../../dateFormat';
 import { amountInWords } from '../../numberToWords';
 import type { Hotel } from '../../types';
@@ -21,6 +22,7 @@ const ROOM_HSN_SAC = '996311';
 export function BookingVoucherPrintView({ data, onClose }: { data: ReservationSuccessData; onClose: () => void }) {
   const { token } = useAuth();
   const [hotel, setHotel] = useState<Hotel | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     query<Hotel>('hotels.get', { hotelId: data.hotelId }, token ?? undefined).then(setHotel);
@@ -33,7 +35,7 @@ export function BookingVoucherPrintView({ data, onClose }: { data: ReservationSu
 
   return (
     <div className="invoice-print-root fixed inset-0 z-[80] overflow-y-auto bg-slate-900/40 print:bg-white">
-      <div className="mx-auto my-8 max-w-3xl rounded-xl border border-slate-200 bg-white p-8 shadow-xl print:my-0 print:max-w-none print:rounded-none print:border-none print:p-0 print:shadow-none">
+      <div ref={contentRef} className="mx-auto my-8 max-w-3xl rounded-xl border border-slate-200 bg-white p-8 shadow-xl print:my-0 print:max-w-none print:rounded-none print:border-none print:p-0 print:shadow-none">
         {!hotel ? (
           <p className="py-20 text-center text-sm text-slate-400">Loading…</p>
         ) : (
@@ -182,6 +184,19 @@ export function BookingVoucherPrintView({ data, onClose }: { data: ReservationSu
       </div>
 
       <div className="no-print fixed bottom-6 right-6 flex gap-2">
+        <button
+          type="button"
+          onClick={() => contentRef.current && exportTablesToCsv(contentRef.current, 'Booking Voucher')}
+          disabled={!hotel}
+          title="Download this voucher as a CSV spreadsheet"
+          className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 transition-colors hover:border-emerald-400 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+            <path d="M4 4h10l6 6v10a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+            <path d="M9 13h6M9 16.5h6M9 9.5h2" />
+          </svg>
+          CSV
+        </button>
         <Button type="button" onClick={() => window.print()} disabled={!hotel}>
           Print / Save as PDF
         </Button>
