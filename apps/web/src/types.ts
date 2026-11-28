@@ -30,23 +30,6 @@ export interface MasterDataUser {
   customRoleName: string | null;
 }
 
-export interface Department {
-  id: string;
-  hotelId: string;
-  name: string;
-  description: string | null;
-  active: boolean;
-  createdAt: string;
-}
-
-export interface EmployeeType {
-  id: string;
-  hotelId: string;
-  name: string;
-  active: boolean;
-  createdAt: string;
-}
-
 export interface DailyIssue {
   id: string;
   hotelId: string;

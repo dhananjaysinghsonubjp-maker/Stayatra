@@ -46,8 +46,6 @@ import { RateInventoryUpdate } from './panels/channel-manager/RateInventoryUpdat
 import { ApprovalRequests } from './panels/channel-manager/ApprovalRequests';
 import { RoleManagement } from './panels/master-data/RoleManagement';
 import { UserManagementMaster } from './panels/master-data/UserManagementMaster';
-import { DepartmentsPage } from './panels/master-data/DepartmentsPage';
-import { EmployeeTypesPage } from './panels/master-data/EmployeeTypesPage';
 import { DailyIssuesLog } from './panels/master-data/DailyIssuesLog';
 import { AdvanceBulkUpdate } from './panels/channel-manager/AdvanceBulkUpdate';
 import { Inventory } from './panels/channel-manager/Inventory';
@@ -297,7 +295,7 @@ function Shell() {
     // Reports above — a Channel-Manager-only owner (pmsRole unset) would just hit FORBIDDEN, so
     // this checks pmsRole directly rather than the broader isOwner/canManage.
     ...(pmsRole === 'owner' ? (['master_user_management', 'master_role_management'] as Tab[]) : []),
-    ...(canManagePms ? (['master_departments', 'master_employee_types', 'master_daily_issues'] as Tab[]) : []),
+    ...(canManagePms ? (['master_daily_issues'] as Tab[]) : []),
   ].filter((t) => {
     // §user request — Role Management's own "granular permissions": a user an owner assigned a
     // CustomRole to only sees the sidebar sections that role actually grants; everyone else (every
@@ -467,8 +465,6 @@ function Shell() {
               {activeTab === 'cm_approval_requests' && <ApprovalRequests hotelId={hotel.id} />}
               {activeTab === 'master_user_management' && <UserManagementMaster hotelId={hotel.id} />}
               {activeTab === 'master_role_management' && <RoleManagement hotelId={hotel.id} />}
-              {activeTab === 'master_departments' && <DepartmentsPage hotelId={hotel.id} />}
-              {activeTab === 'master_employee_types' && <EmployeeTypesPage hotelId={hotel.id} />}
               {activeTab === 'master_daily_issues' && <DailyIssuesLog hotelId={hotel.id} />}
               {activeTab === 'cm_inventory' && <Inventory hotelId={hotel.id} />}
               {activeTab === 'cm_channels' && <ConnectedChannels hotelId={hotel.id} />}

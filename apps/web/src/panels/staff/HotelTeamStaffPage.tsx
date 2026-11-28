@@ -84,25 +84,45 @@ function MyPinSection({ token }: { token: string | null }) {
  * old view of that page was just a cut-down roster card, which the richer Staff tab now
  * supersedes entirely, so there's no redundant copy to keep around).
  */
+/**
+ * §redesign — human psychology: the roster (who's pending, who's on the team) is the thing an
+ * owner/FMO opens this page FOR; "My PIN" is a one-time personal setup step that used to sit
+ * above it as a full card every single visit. Tucked behind a small toggle instead (progressive
+ * disclosure) so the team always loads first.
+ */
 export function HotelTeamStaffPage({ hotelId, token, isOwner }: { hotelId: string; token: string | null; isOwner: boolean }) {
   const [tab, setTab] = useState<'staff' | 'housekeeping'>('staff');
+  const [showMyPin, setShowMyPin] = useState(false);
 
   return (
     <div>
-      <PageHeader title="Staff" subtitle="Who works here, their PINs, and (owner) housekeeping operations." />
-      {isOwner && (
-        <div className="mb-6 flex gap-2">
-          <Button variant={tab === 'staff' ? 'primary' : 'secondary'} onClick={() => setTab('staff')}>
-            Staff
-          </Button>
-          <Button variant={tab === 'housekeeping' ? 'primary' : 'secondary'} onClick={() => setTab('housekeeping')}>
-            Housekeeping Records
-          </Button>
-        </div>
-      )}
+      <PageHeader title="Staff" subtitle="Who works here, and (owner) housekeeping operations." />
+      <div className="mb-6 flex items-center justify-between gap-2">
+        {isOwner ? (
+          <div className="flex gap-2">
+            <Button variant={tab === 'staff' ? 'primary' : 'secondary'} onClick={() => setTab('staff')}>
+              Staff
+            </Button>
+            <Button variant={tab === 'housekeeping' ? 'primary' : 'secondary'} onClick={() => setTab('housekeeping')}>
+              Housekeeping Records
+            </Button>
+          </div>
+        ) : (
+          <div />
+        )}
+        {tab === 'staff' && (
+          <button
+            type="button"
+            onClick={() => setShowMyPin((v) => !v)}
+            className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
+          >
+            {showMyPin ? 'Hide my PIN' : 'Set my PIN'}
+          </button>
+        )}
+      </div>
       {tab === 'staff' ? (
         <div className="space-y-6">
-          <MyPinSection token={token} />
+          {showMyPin && <MyPinSection token={token} />}
           <StaffManagement hotelId={hotelId} token={token} isOwner={isOwner} />
         </div>
       ) : (

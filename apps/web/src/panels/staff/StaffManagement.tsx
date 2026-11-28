@@ -28,6 +28,32 @@ const STATUS_TONE: Record<StaffProfile['approvalStatus'], 'pending' | 'confirmed
   rejected: 'error',
 };
 
+// §redesign — human psychology: a pending approval is a blocker sitting in the owner's queue, so
+// it gets its own prominent section at the TOP of the page (primacy — the thing that's blocking
+// someone's ability to work shouldn't be buried in an alphabetical/grouped list). One tap opens
+// the full review (StaffDetail) rather than duplicating the approve/reject logic here.
+function PendingApprovalRow({ profile, isOwner, onReview }: { profile: StaffProfile; isOwner: boolean; onReview: () => void }) {
+  return (
+    <button
+      onClick={onReview}
+      className="flex w-full items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-left transition-colors hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-900/20 dark:hover:bg-amber-900/30"
+    >
+      <div className="flex items-center gap-3">
+        <Avatar name={profile.name} photoPath={profile.photoPath} />
+        <div>
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">{profile.name}</p>
+          <p className="text-xs text-amber-700 dark:text-amber-400">{profile.designation ?? ROLE_LABEL[profile.role ?? ''] ?? ''}</p>
+        </div>
+      </div>
+      {isOwner ? (
+        <span className="shrink-0 rounded-full bg-amber-500 px-3 py-1.5 text-xs font-bold text-white">Review</span>
+      ) : (
+        <span className="shrink-0 text-xs font-medium text-amber-600 dark:text-amber-400">Awaiting owner</span>
+      )}
+    </button>
+  );
+}
+
 function Avatar({ name, photoPath }: { name: string; photoPath: string | null }) {
   if (photoPath) {
     return <img src={assetUrl(photoPath)} alt={name} className="h-12 w-12 shrink-0 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-600" />;
@@ -502,12 +528,13 @@ export function StaffManagement({ hotelId, token, isOwner }: { hotelId: string; 
     );
   }
 
-  const pendingCount = staff.filter((s) => s.approvalStatus === 'pending').length;
+  const pending = staff.filter((s) => s.approvalStatus === 'pending');
+  const settled = staff.filter((s) => s.approvalStatus !== 'pending');
 
   const groups = [
-    ...GROUP_ORDER.map((label) => ({ label, members: staff.filter((s) => groupLabel(s) === label) })).filter((g) => g.members.length > 0),
-    ...(staff.some((s) => !GROUP_ORDER.includes(groupLabel(s)))
-      ? [{ label: 'Other', members: staff.filter((s) => !GROUP_ORDER.includes(groupLabel(s))) }]
+    ...GROUP_ORDER.map((label) => ({ label, members: settled.filter((s) => groupLabel(s) === label) })).filter((g) => g.members.length > 0),
+    ...(settled.some((s) => !GROUP_ORDER.includes(groupLabel(s)))
+      ? [{ label: 'Other', members: settled.filter((s) => !GROUP_ORDER.includes(groupLabel(s))) }]
       : []),
   ];
 
@@ -530,14 +557,29 @@ export function StaffManagement({ hotelId, token, isOwner }: { hotelId: string; 
         </div>
       ) : (
         <>
+          {pending.length > 0 && (
+            <Card>
+              <CardHeader
+                title={isOwner ? 'Needs your approval' : 'Awaiting owner’s review'}
+                subtitle={`${pending.length} profile${pending.length === 1 ? '' : 's'} submitted — not live yet.`}
+              />
+              <CardBody>
+                <div className="space-y-2">
+                  {pending.map((s) => (
+                    <PendingApprovalRow key={s.id} profile={s} isOwner={isOwner} onReview={() => setSelectedId(s.id)} />
+                  ))}
+                </div>
+              </CardBody>
+            </Card>
+          )}
+
           <Card>
-            <CardHeader
-              title="Staff"
-              subtitle={pendingCount > 0 ? `${pendingCount} profile${pendingCount === 1 ? '' : 's'} awaiting your approval` : 'Every staff profile at this property.'}
-            />
+            <CardHeader title="Staff" subtitle="Your team at this property." />
             <CardBody>
               {staff.length === 0 ? (
                 <EmptyState title="No staff yet" hint="Add your first staff member below." />
+              ) : settled.length === 0 ? (
+                <p className="py-6 text-center text-sm text-slate-400 dark:text-slate-500">Nothing here yet — approved staff will show up once the profile above is reviewed.</p>
               ) : (
                 <div className="space-y-6">
                   {groups.map((group) => (

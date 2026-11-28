@@ -111,40 +111,6 @@ export class MasterDataService {
     return { ok: true };
   }
 
-  // ── Departments ────────────────────────────────────────────────────────────
-
-  listDepartments(hotelId: string) {
-    return this.prisma.department.findMany({ where: { hotelId }, orderBy: { createdAt: 'asc' } });
-  }
-  createDepartment(input: { hotelId: string; name: string; description?: string }) {
-    return this.prisma.department.create({ data: input });
-  }
-  updateDepartment(input: { id: string; name?: string; description?: string; active?: boolean }) {
-    const { id, ...data } = input;
-    return this.prisma.department.update({ where: { id }, data });
-  }
-  async deleteDepartment(id: string) {
-    await this.prisma.department.delete({ where: { id } });
-    return { ok: true };
-  }
-
-  // ── Employee Types ─────────────────────────────────────────────────────────
-
-  listEmployeeTypes(hotelId: string) {
-    return this.prisma.employeeType.findMany({ where: { hotelId }, orderBy: { createdAt: 'asc' } });
-  }
-  createEmployeeType(input: { hotelId: string; name: string }) {
-    return this.prisma.employeeType.create({ data: input });
-  }
-  updateEmployeeType(input: { id: string; name?: string; active?: boolean }) {
-    const { id, ...data } = input;
-    return this.prisma.employeeType.update({ where: { id }, data });
-  }
-  async deleteEmployeeType(id: string) {
-    await this.prisma.employeeType.delete({ where: { id } });
-    return { ok: true };
-  }
-
   // ── Daily Issues Log ───────────────────────────────────────────────────────
 
   async listDailyIssues(input: { hotelId: string; status?: 'open' | 'resolved' }) {

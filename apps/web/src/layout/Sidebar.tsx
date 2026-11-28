@@ -60,8 +60,6 @@ export type Tab =
   // §user request, with a reference app's own "Master Data" section as the target.
   | 'master_user_management'
   | 'master_role_management'
-  | 'master_departments'
-  | 'master_employee_types'
   | 'master_daily_issues';
 
 type IconFn = (props: { className?: string }) => React.ReactElement;
@@ -173,8 +171,6 @@ export const TAB_PERMISSION: Partial<Record<Tab, string>> = {
   audit_log: 'settings',
   master_user_management: 'master_data',
   master_role_management: 'master_data',
-  master_departments: 'master_data',
-  master_employee_types: 'master_data',
   master_daily_issues: 'master_data',
 };
 
@@ -350,9 +346,7 @@ const NAV: NavEntry[] = [
         icon: Icon('M4 21V5a2 2 0 012-2h12a2 2 0 012 2v16M4 21h16M4 21h2m14 0h-2M9 7h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1'),
         children: [
           { id: 'settings_details', label: 'Organisation', icon: Icon('M12 21c-4.5-4.03-7-7.42-7-10.5A7 7 0 0119 10.5c0 3.08-2.5 6.47-7 10.5zM12 12a2 2 0 100-4 2 2 0 000 4z') },
-          { id: 'master_departments', label: 'Departments', icon: Icon('M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z') },
           { id: 'housekeeping', label: 'Employees', icon: Icon('M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m5-3.13a4 4 0 100-8 4 4 0 000 8zm6 2a4 4 0 100-8') },
-          { id: 'master_employee_types', label: 'Employee Type', icon: Icon('M20.59 13.41L13.42 20.58a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z M7 7h.01') },
         ],
       },
       {

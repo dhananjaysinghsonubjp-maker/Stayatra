@@ -262,37 +262,6 @@ model CustomRole {
   @@map("custom_roles")
 }
 
-/** A lightweight organisational tag (Front Office / House Keeping / Management, etc.) — not wired
- * into staff records elsewhere yet, just a Master Data list for now. */
-model Department {
-  id          String   @id @default(cuid())
-  hotelId     String   @map("hotel_id")
-  name        String
-  description String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
-
-  @@index([hotelId])
-  @@map("departments")
-}
-
-/** A lightweight employment-type tag (Permanent / Contract / Part-time, etc.) — same standalone
- * Master Data list role as Department above. */
-model EmployeeType {
-  id        String   @id @default(cuid())
-  hotelId   String   @map("hotel_id")
-  name      String
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at")
-
-  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
-
-  @@index([hotelId])
-  @@map("employee_types")
-}
-
 enum DailyIssueStatus {
   open
   resolved
@@ -416,8 +385,6 @@ model Hotel {
   contacts        HotelContact[]
   rateChangeRequests RateChangeRequest[]
   customRoles        CustomRole[]
-  departments        Department[]
-  employeeTypes      EmployeeType[]
   dailyIssues        DailyIssue[]
 
   @@map("hotels")

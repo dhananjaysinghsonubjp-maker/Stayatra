@@ -48,23 +48,6 @@ export function createMasterDataRouter(masterData: MasterDataService) {
       .input(z.object({ userId: z.string(), customRoleId: z.string().nullable() }))
       .mutation(({ ctx, input }) => masterData.assignCustomRole({ ...input, actorId: ctx.user.userId })),
 
-    // Departments / Employee Types — plain operational tags, owner or manager.
-    listDepartments: ownerOrManager.input(z.object({ hotelId: z.string() })).query(({ input }) => masterData.listDepartments(input.hotelId)),
-    createDepartment: ownerOrManager
-      .input(z.object({ hotelId: z.string(), name: z.string().min(1), description: z.string().optional() }))
-      .mutation(({ input }) => masterData.createDepartment(input)),
-    updateDepartment: ownerOrManager
-      .input(z.object({ id: z.string(), name: z.string().min(1).optional(), description: z.string().optional(), active: z.boolean().optional() }))
-      .mutation(({ input }) => masterData.updateDepartment(input)),
-    deleteDepartment: ownerOrManager.input(z.object({ id: z.string() })).mutation(({ input }) => masterData.deleteDepartment(input.id)),
-
-    listEmployeeTypes: ownerOrManager.input(z.object({ hotelId: z.string() })).query(({ input }) => masterData.listEmployeeTypes(input.hotelId)),
-    createEmployeeType: ownerOrManager.input(z.object({ hotelId: z.string(), name: z.string().min(1) })).mutation(({ input }) => masterData.createEmployeeType(input)),
-    updateEmployeeType: ownerOrManager
-      .input(z.object({ id: z.string(), name: z.string().min(1).optional(), active: z.boolean().optional() }))
-      .mutation(({ input }) => masterData.updateEmployeeType(input)),
-    deleteEmployeeType: ownerOrManager.input(z.object({ id: z.string() })).mutation(({ input }) => masterData.deleteEmployeeType(input.id)),
-
     // Daily Issues Log — anyone with pms access can report/resolve a day-to-day issue.
     listDailyIssues: ownerOrManager
       .input(z.object({ hotelId: z.string(), status: z.enum(['open', 'resolved']).optional() }))
